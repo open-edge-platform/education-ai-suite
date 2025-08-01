@@ -1,0 +1,7 @@
+# FastAPI & ASGI server
+fastapi
+uvicorn[standard]
+
+# For data validation and model definition
+pydantic
+python-multipart
