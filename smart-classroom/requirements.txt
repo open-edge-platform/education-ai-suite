@@ -5,3 +5,4 @@ uvicorn[standard]
 # For data validation and model definition
 pydantic
 python-multipart
+pydub

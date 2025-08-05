@@ -1,4 +1,4 @@
-from components.pipeline_comoponent import PipelineComponent
+from components.base_component import PipelineComponent
 from components.asr.openvino.whisper import Whisper
 
 class SummarizerComponent(PipelineComponent):
