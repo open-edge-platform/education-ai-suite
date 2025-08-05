@@ -1,5 +1,4 @@
 from components.base_component import PipelineComponent
-from components.asr.openvino.whisper import Whisper
 import os
 from utils.config_loader import config
 

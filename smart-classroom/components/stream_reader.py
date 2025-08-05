@@ -1,7 +1,6 @@
 from .base_component import PipelineComponent
 from components.ffmpeg.audio_preprocessing import chunk_audio_by_silence
-import os, time
-import atexit
+
 
 class AudioStreamReader(PipelineComponent):
     def __init__(self):
