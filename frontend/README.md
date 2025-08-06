@@ -1,4 +1,3 @@
-Copy-paste-ready markdown for `frontend/README.md` (point-wise).
 
 ```markdown
 ## Quick start
