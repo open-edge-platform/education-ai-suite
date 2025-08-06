@@ -1,6 +1,5 @@
-# Frontend – React + Vite + TypeScript
 
-This folder contains the React UI for the Intel EGAI Video-Summary project.
+This folder contains the React UI for the Smart Classroom Application.
 
 ## Quick start
 1. Install **Node 20+**
