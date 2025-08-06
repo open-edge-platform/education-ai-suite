@@ -1,5 +1,7 @@
+# Frontend – React + Vite + TypeScript
 
-```markdown
+This folder contains the React UI for the Intel EGAI Video-Summary project.
+
 ## Quick start
 1. Install **Node 20+**
 2. `cd frontend`
@@ -8,34 +10,29 @@
 5. `npm run build` → static files in `dist/`
 
 ## Core dependencies
-| Package | Purpose |
-|---------|---------|
-| `react` | UI library |
-| `react-dom` | React renderer |
-| `@reduxjs/toolkit` | Redux store + slices |
-| `react-redux` | React bindings for Redux |
-| `@tanstack/react-query` | Data fetching & caching |
-| `axios` | HTTP client |
-| `socket.io-client` | Real-time WebSocket |
 
-## State & Data flow
+| Package               | Purpose                                   |
+|-----------------------|-------------------------------------------|
+| `react`               | UI library                                |
+| `react-dom`           | React renderer                            |
+| `@reduxjs/toolkit`    | Redux store + slices                      |
+| `react-redux`         | React bindings for Redux                  |
+| `@tanstack/react-query` | Data fetching & caching                 |
+| `axios`               | HTTP client                               |
+| `socket.io-client`    | Real-time WebSocket                       |
+
+## State & data flow
+
 1. **Redux Toolkit**  
-   - Slices: `recording`, `file`, `ui`, `project`, `summary`, `transcript`, `resource`.  
-   - Typed hooks: `useAppDispatch()` / `useAppSelector()`.
+   - Slices: `recording`, `file`, `ui`, `project`, `summary`, `transcript`, `resource`  
+   - Typed hooks: `useAppDispatch()` / `useAppSelector()`
 
 2. **React Query (TanStack)**  
-   - REST calls wrapped in `services/api.ts`.  
-   - WebSocket updates push into `queryClient.setQueryData()` inside `services/socket.ts`.
+   - REST calls wrapped in `services/api.ts`  
+   - WebSocket updates push into `queryClient.setQueryData()` inside `services/socket.ts`
 
-## Folder layout
-```
-src/
-├── components/   # React components
-├── redux/        # store + slices + hooks
-├── services/     # axios & socket.io
-├── hooks/        # custom hooks
-├── utils/        # helpers
-├── styles/       # global styles
-└── assets/       # images, fonts
-```
-```
+## 🚢 Build
+
+```bash
+npm run build
+# output: dist/ (static files ready for any web server)
