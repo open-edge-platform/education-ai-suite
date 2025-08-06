@@ -1,5 +1,5 @@
 class BaseSummarizer:
-   def __init__(self, model_name=..., revision=..., device="cpu"):
+    def __init__(self, model_name=..., revision=..., device="cpu"):
        #Abstract method for Summarizer Implementations
        pass
 

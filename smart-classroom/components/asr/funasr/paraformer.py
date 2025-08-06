@@ -1,7 +1,7 @@
 from components.asr.base_asr import BaseASR
 
 class Paraformer(BaseASR):
-   def __init__(self, model_name=..., revision=..., device="cpu"):
+   def __init__(self, model_name=..., device="cpu", revision=...):
        # Load Paraformer model
        pass
 
