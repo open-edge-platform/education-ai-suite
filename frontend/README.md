@@ -5,7 +5,7 @@ This folder contains the React UI for the Smart Classroom Application.
 1. Install **Node 20+**
 2. `cd frontend`
 3. `npm install`
-4. `npm run dev` → http://localhost:5173
+4. `npm run dev` 
 5. `npm run build` → static files in `dist/`
 
 ## Core dependencies
@@ -30,8 +30,3 @@ This folder contains the React UI for the Smart Classroom Application.
    - REST calls wrapped in `services/api.ts`  
    - WebSocket updates push into `queryClient.setQueryData()` inside `services/socket.ts`
 
-## 🚢 Build
-
-```bash
-npm run build
-# output: dist/ (static files ready for any web server)
