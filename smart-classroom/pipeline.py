@@ -11,7 +11,6 @@ ASR_MODEL =  config.models.asr.name # seconds
 class Pipeline:
     def __init__(self):
         logger.info("pipeline initialized")
-        self.config = config
         # Bind models during construction
         self.transcription_pipeline = [
             AudioStreamReader(),
