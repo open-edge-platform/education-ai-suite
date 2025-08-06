@@ -6,7 +6,6 @@ DELETE_CHUNK_AFTER_USE =  config.pipeline.delete_chunks_after_use # seconds
 
 class ASRComponent(PipelineComponent):
     def __init__(self, provider="openvino", model="whisper-small", device="cpu", temperature = 0.0): 
-        print(f"ASR: model={model}, device={device}, temperature={temperature}")
 
         provider = provider.lower()
         model = model.lower()

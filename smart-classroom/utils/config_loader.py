@@ -1,6 +1,9 @@
 import yaml
 from types import SimpleNamespace
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 def _dict_to_namespace(d):
     if isinstance(d, dict):
@@ -14,4 +17,7 @@ def load_config(path="config.yaml"):
 
 # Load once and expose
 config = load_config()
-import yaml; print(yaml.dump(vars(config), sort_keys=False))
+
+logger.info("\n📦 CONFIGURATION START\n" + "-" * 40)
+logger.info(yaml.dump(vars(config), sort_keys=False))
+logger.info("\n" + "-" * 40 + "\n📦 CONFIGURATION END\n")

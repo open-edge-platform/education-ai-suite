@@ -19,7 +19,6 @@ async def transcribe_audio(request: TranscriptionRequest):
     audio_path = request.audio_filename
 
     def stream_transcription():
-        print("Starting transcription stream")
         for chunk_data in pipeline.run_transcription(audio_path):
             yield json.dumps(chunk_data) + "\n"
 

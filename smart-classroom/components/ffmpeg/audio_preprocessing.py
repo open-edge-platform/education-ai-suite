@@ -4,6 +4,9 @@ from uuid import uuid4
 import atexit
 import shutil
 from utils.config_loader import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 CHUNK_DURATION =  config.audio_preprocessing.chunk_duration_sec # seconds
 SILENCE_THRESH = config.audio_preprocessing.silence_threshold  # in dB
@@ -18,7 +21,7 @@ os.makedirs(CHUNKS_DIR, exist_ok=True)
 def cleanup_chunks_folder():
     if os.path.exists(CHUNKS_DIR) and CLEAN_UP_ON_EXIT:
         shutil.rmtree(CHUNKS_DIR)
-        print(f"Cleaned up {CHUNKS_DIR} directory on exit.")
+        logger.info(f"Cleaned up {CHUNKS_DIR} directory on exit.")
 
 def get_audio_duration(audio_path):
     result = subprocess.run([
