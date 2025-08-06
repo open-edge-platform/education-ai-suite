@@ -9,7 +9,7 @@ TEMPERATURE =  config.models.asr.temperature # seconds
 ASR_MODEL =  config.models.asr.name # seconds
 
 class Pipeline:
-    def __init__(self, config):
+    def __init__(self):
         logger.info("pipeline initialized")
         self.config = config
         # Bind models during construction

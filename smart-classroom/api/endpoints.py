@@ -8,7 +8,7 @@ import json
 from fastapi.responses import StreamingResponse
 
 router = APIRouter()
-pipeline = Pipeline(None)
+pipeline = Pipeline()
 
 @router.post("/upload")
 async def upload_audio(file: UploadFile):
