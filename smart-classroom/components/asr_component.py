@@ -5,13 +5,13 @@ from utils.config_loader import config
 DELETE_CHUNK_AFTER_USE =  config.pipeline.delete_chunks_after_use # seconds
 
 class ASRComponent(PipelineComponent):
-    def __init__(self, provider="openvino", model="whisper-small", device="cpu", temperature = 0.0): 
+    def __init__(self, provider="openai", model="whisper-small", device="cpu", temperature = 0.0): 
 
         provider = provider.lower()
         model = model.lower()
 
-        if provider == "openvino" and "whisper" in model:
-            from components.asr.openvino.whisper import Whisper
+        if provider == "openai" and "whisper" in model:
+            from components.asr.openai.whisper import Whisper
             self.asr =  Whisper(model, device, None)
         elif provider == "funasr" and "paraformer" in model:
             from components.asr.funasr.paraformer import Paraformer
