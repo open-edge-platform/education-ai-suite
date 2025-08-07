@@ -5,7 +5,7 @@ app:
 
 models:
   asr:
-    provider: openvino # funasr and openvino supported
+    provider: openai # funasr and openai supported
     name: whisper-tiny # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
     language: en # optional
     device: CPU # or GPU
