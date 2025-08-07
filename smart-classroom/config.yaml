@@ -1,0 +1,30 @@
+app:
+  name: Smart Classroom
+  storage_path: storage/
+  cleanup_on_exit: true
+
+models:
+  asr:
+    provider: openvino # funasr and openvino supported
+    name: whisper-tiny # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
+    language: en # optional
+    device: CPU # or GPU
+    temperature: 0.0
+
+  # summarizer:
+    # provider: openvino
+    # name: qwen2-7B
+    # device: CPU
+    # max_tokens: 512
+    # temperature: 0.7
+    # top_p: 0.9
+
+audio_preprocessing:
+  chunk_duration_sec: 30
+  silence_threshold: -35  # in dB
+  silence_duration: 0.3   # minimum silence length in seconds
+  search_window_sec: 1.5    # how far to look for silence if no silence exactly at chunk boundary
+  chunk_output_path: chunks/
+
+pipeline:
+  delete_chunks_after_use: true

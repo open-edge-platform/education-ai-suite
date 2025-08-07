@@ -1,8 +1,13 @@
-from .pipeline_comoponent import PipelineComponent
+from .base_component import PipelineComponent
+from components.ffmpeg.audio_preprocessing import chunk_audio_by_silence
+
 
 class AudioStreamReader(PipelineComponent):
-    def __init__(self, source_path, mic_streaming=False, chunk_duration=15, sample_rate=16000):
+    def __init__(self):
         pass
 
-    def process(self, _):
-        pass
+    def process(self, input_generator):
+        for input_data in input_generator:
+            audio_path = input_data["audio_path"]
+            for chunk in chunk_audio_by_silence(audio_path):
+                yield chunk  # contains chunk_path, start_time, end_time, etc.

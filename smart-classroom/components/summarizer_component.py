@@ -1,5 +1,4 @@
-from components.pipeline_comoponent import PipelineComponent
-from components.asr.openvino.whisper import Whisper
+from components.base_component import PipelineComponent
 
 class SummarizerComponent(PipelineComponent):
     def __init__(self, model_name=..., revision=..., device="cpu"):
