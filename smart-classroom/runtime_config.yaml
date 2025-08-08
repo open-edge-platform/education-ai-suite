@@ -1,4 +1,4 @@
 "Project":
-  "name": "project"
-  "location": "./projects/"
-  "microphone": "default_mic_1"
+  "name": "smart-classroom"
+  "location": "./storage"
+  "microphone": ""
