@@ -2,6 +2,7 @@ app:
   name: Smart Classroom
   storage_path: storage/
   cleanup_on_exit: true
+  logs_dir: ./execution-logs
 
 models:
   asr:

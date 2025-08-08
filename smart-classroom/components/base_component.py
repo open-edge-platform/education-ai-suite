@@ -1,3 +1,3 @@
 class PipelineComponent:
-    def process(self, input_data):
+    def process(self, _):
         raise NotImplementedError("Must implement in subclass.")
