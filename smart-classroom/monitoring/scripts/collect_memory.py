@@ -4,8 +4,10 @@ import csv
 from datetime import datetime
 import wmi
 import pythoncom
+import logging
+logger = logging.getLogger(__name__)
 
-def start_memory_monitoring(interval_seconds=1, output_dir=None):
+def start_memory_monitoring(interval_seconds, stop_event, output_dir=None):
     pythoncom.CoInitialize()
 
     if output_dir is None:
@@ -15,9 +17,7 @@ def start_memory_monitoring(interval_seconds=1, output_dir=None):
         os.makedirs(output_dir)
 
     memory_file = os.path.join(output_dir, "memory_metrics.csv")
-    print(f"Starting memory monitoring to {memory_file}...")
-
-    # Write header to CSV file
+    # logger.info(f"Starting memory monitoring to {memory_file}...")
     with open(memory_file, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         writer.writerow(["timestamp", "total_kb", "used_kb", "free_kb", "shared_kb", "buffers_kb", "cached_kb"])
@@ -36,22 +36,20 @@ def start_memory_monitoring(interval_seconds=1, output_dir=None):
 
             return total_mem, used_mem, free_mem, shared_mem, buffers_mem, cached_mem
         except Exception as e:
-            print(f"Memory monitoring error: {e}")
+            logger.error(f"Memory monitoring error: {e}")
             return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
     try:
         c = wmi.WMI()
-        while True:
+        while not stop_event.is_set():
             timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             total_mem, used_mem, free_mem, shared_mem, buffers_mem, cached_mem = get_memory_usage(c)
-
             with open(memory_file, mode='a', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
                 writer.writerow([timestamp, total_mem, used_mem, free_mem, shared_mem, buffers_mem, cached_mem])
-
             time.sleep(interval_seconds)
     except KeyboardInterrupt:
-        print("\nMemory monitoring stopped by user.")
+        logger.info("\nMemory monitoring stopped by user.")
     finally:
-        print("Memory monitoring finished.")
+        # logger.info("Memory monitoring finished.")
         pythoncom.CoUninitialize()

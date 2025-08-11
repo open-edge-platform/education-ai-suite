@@ -4,6 +4,8 @@ from datetime import datetime
 import pythoncom  # type: ignore
 import win32com.client  # type: ignore
 import os
+import logging
+logger = logging.getLogger(__name__)
 
 # WMI categories to extract
 TARGET_ENGINES = {
@@ -17,17 +19,14 @@ def get_gpu_metrics(wmi_service):
     gpu_util = {key: 0.0 for key in TARGET_ENGINES}
     total_util = 0.0
     memory_usage = 0
-
     try:
         engine_data = wmi_service.ExecQuery("SELECT * FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine")
         for item in engine_data:
             name = item.Name
             utilization = float(item.UtilizationPercentage)
-
             for label, engtype in TARGET_ENGINES.items():
                 if engtype in name:
                     gpu_util[label] += utilization
-
             total_util += utilization
 
         mem_data = wmi_service.ExecQuery("SELECT * FROM Win32_PerfFormattedData_PerfProc_Process WHERE Name='dwm'")
@@ -40,52 +39,38 @@ def get_gpu_metrics(wmi_service):
                 pass
 
     except Exception as e:
-        print("Error collecting GPU data:", e)
-
+        logger.error("Error collecting GPU data:", e)
     return total_util, gpu_util, memory_usage
 
-def start_gpu_monitoring(interval_seconds=1, output_dir=None):
+def start_gpu_monitoring(interval_seconds, stop_event, output_dir=None):
     if output_dir is None:
         output_dir = os.getcwd()
-
-    # Ensure output directory exists
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-
     gpu_file = os.path.join(output_dir, "gpu_usage_log.csv")
-    print(f"Starting GPU monitoring to {gpu_file}...")
-
+    # logger.info(f"Starting GPU monitoring to {gpu_file}...")
     pythoncom.CoInitialize()
     wmi_service = win32com.client.Dispatch("WbemScripting.SWbemLocator").ConnectServer(".", "root\\CIMV2")
-
-    # Write header if file doesn't exist
     with open(gpu_file, mode='w', newline='') as file:
         writer = csv.writer(file)
         header = ['Timestamp', 'TotalGPUUtil', '3D', 'VideoDecode', 'VideoProcessing', 'VideoEncode', 'GPUMemory(MB)']
         writer.writerow(header)
-    print("GPU monitoring started...")
+    # logger.info("GPU monitoring started...")
 
     try:
-        while True:
+        while not stop_event.is_set():
             timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             total_util, gpu_engines, memory = get_gpu_metrics(wmi_service)
-
             row = [timestamp, total_util]
             for key in TARGET_ENGINES:
                 row.append(gpu_engines[key])
             row.append(memory)
-
-            # Append data to CSV file quickly
             with open(gpu_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow(row)
-
             time.sleep(interval_seconds)
 
     except KeyboardInterrupt:
-        print("\nGPU monitoring stopped.")
+        logger.info("\nGPU monitoring stopped by user.")
     finally:
         pythoncom.CoUninitialize()
-
-# Example usage:
-# start_gpu_monitoring(interval_seconds=1)

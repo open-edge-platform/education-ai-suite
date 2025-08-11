@@ -3,32 +3,26 @@ import time
 import os
 import csv
 from datetime import datetime
-import pythoncom  # Add this import
+import pythoncom  
+import logging
+logger = logging.getLogger(__name__)
 
-def start_cpu_monitoring(interval_seconds=1, output_dir=None):
+def start_cpu_monitoring(interval_seconds, stop_event, output_dir=None):
     pythoncom.CoInitialize()  # Initialize COM for the thread
-
     if output_dir is None:
         output_dir = os.getcwd()
-
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-
     cpu_file = os.path.join(output_dir, "cpu_utilization.csv")
-    print(f"Starting CPU monitoring to {cpu_file}...")
-
-    # Create header for the CSV file
+    # logger.info(f"Starting CPU monitoring to {cpu_file}...")
     with open(cpu_file, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['timestamp', 'total_cpu_utilization', '%user', '%nice', '%system', '%iowait', '%steal', '%idle'])
-
     try:
         # Initialize WMI
         c = wmi.WMI()
-
-        while True:
+        while not stop_event.is_set():
             timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
             try:
                 # Get CPU metrics using WMI
                 cpu_stats = c.Win32_PerfFormattedData_PerfOS_Processor(Name='_Total')
@@ -52,21 +46,20 @@ def start_cpu_monitoring(interval_seconds=1, output_dir=None):
                         writer = csv.writer(f)
                         writer.writerow([timestamp, total_cpu_utilization, percent_user, percent_nice, percent_system, percent_iowait, percent_steal, percent_idle])
                 else:
-                    print("Warning: Failed to get CPU metrics via WMI")
+                    logger.warning("Warning: Failed to get CPU metrics via WMI")
                     with open(cpu_file, 'a', newline='', encoding='utf-8') as f:
                         writer = csv.writer(f)
                         writer.writerow([timestamp, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
             except Exception as e:
-                print(f"Error: Intel CPU monitoring error: {e}")
+                logger.error(f"Error: CPU monitoring error: {e}")
                 with open(cpu_file, 'a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
                     writer.writerow([timestamp, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
             time.sleep(interval_seconds)
     except KeyboardInterrupt:
-        print("\nCPU monitoring stopped by user.")
+        logger.info("CPU monitoring stopped by user.")
     except Exception as e:
-        print(f"Error: CPU monitoring error: {e}")
+        logger.error(f"Error: CPU monitoring error: {e}")
     finally:
-        print("CPU monitoring finished.")
+        # logger.info("CPU monitoring finished.")
         pythoncom.CoUninitialize()  # Uninitialize COM

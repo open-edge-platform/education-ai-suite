@@ -3,8 +3,10 @@ import time
 import csv
 from datetime import datetime
 import wmi # type: ignore
+import logging
+logger = logging.getLogger(__name__)
 
-def start_npu_monitoring(interval_seconds=1, output_dir=None):
+def start_npu_monitoring(interval_seconds, stop_event, output_dir=None):
     if output_dir is None:
         output_dir = os.getcwd()
 
@@ -12,7 +14,7 @@ def start_npu_monitoring(interval_seconds=1, output_dir=None):
         os.makedirs(output_dir)
 
     npu_file = os.path.join(output_dir, "npu_utilization.csv")
-    print(f"Starting NPU monitoring to {npu_file}...")
+    # logger.info(f"Starting NPU monitoring to {npu_file}...")
 
     # Write header to CSV file
     with open(npu_file, mode='w', newline='', encoding='utf-8') as file:
@@ -28,17 +30,15 @@ def start_npu_monitoring(interval_seconds=1, output_dir=None):
             npu_devices = c.Win32_PnPEntity(Name="*Intel*NPU*") + \
                           c.Win32_PnPEntity(Name="*Intel*Neural*") + \
                           c.Win32_PnPEntity(Name="*Intel*VPU*")
-
             if npu_devices:
                 # Device exists but no performance data available
                 return 0.0
-            
             return None
         except Exception as e:
             return None
 
     try:
-        while True:
+        while not stop_event.is_set():
             timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
             usage = get_intel_npu_usage()
 
@@ -53,6 +53,7 @@ def start_npu_monitoring(interval_seconds=1, output_dir=None):
             
             time.sleep(interval_seconds)
     except KeyboardInterrupt:
-        print("\nNPU monitoring stopped.")
+        logger.info("\nNPU monitoring stopped by user.")
     finally:
-        print("NPU monitoring finished.")
+        # logger.info("NPU monitoring finished.") 
+        pass

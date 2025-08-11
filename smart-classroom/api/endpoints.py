@@ -9,7 +9,9 @@ import json
 from fastapi.responses import StreamingResponse
 from utils.runtime_config_loader import RuntimeConfig
 from dto.project_settings import ProjectSettings
-from app import start_monitoring, stop_monitoring
+from monitoring.monitor import start_monitoring, stop_monitoring, get_metrics
+import logging
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/upload")
@@ -47,14 +49,23 @@ def update_project_config(payload: ProjectSettings):
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields to update.")
     return RuntimeConfig.update_section("Project", updates)
+
 @router.post("/start-monitoring")
-async def start_monitoring_endpoint():
+def start_monitoring_endpoint():
+    logger.info("Metrics collection strated")
     start_monitoring()
     return JSONResponse(content={"status": "success", "message": "Monitoring started"})
- 
+
+@router.get("/metrics")
+def get_metrics_endpoint():
+    logger.info("Metrics are being collected")
+    return get_metrics()
+
 @router.post("/stop-monitoring")
-async def stop_monitoring_endpoint():
+def stop_monitoring_endpoint():
+    logger.info("Metrics collection stopped")
     stop_monitoring()
     return JSONResponse(content={"status": "success", "message": "Monitoring stopped"})
+
 def register_routes(app: FastAPI):
     app.include_router(router)

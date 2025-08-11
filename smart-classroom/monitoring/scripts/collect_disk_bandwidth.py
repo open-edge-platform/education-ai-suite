@@ -5,9 +5,11 @@ from datetime import datetime
 import wmi
 import pythoncom
 
-def start_disk_bandwidth_monitoring(interval_seconds=1, output_dir=None):
-    pythoncom.CoInitialize()
+import logging
+logger = logging.getLogger(__name__)
 
+def start_disk_bandwidth_monitoring(interval_seconds, stop_event, output_dir=None):
+    pythoncom.CoInitialize()
     if output_dir is None:
         output_dir = os.getcwd()
 
@@ -15,7 +17,7 @@ def start_disk_bandwidth_monitoring(interval_seconds=1, output_dir=None):
         os.makedirs(output_dir)
 
     disk_file = os.path.join(output_dir, "disk_bandwidth_metrics.csv")
-    print(f"Starting disk bandwidth monitoring to {disk_file}...")
+    # logger.info(f"Starting disk bandwidth monitoring to {disk_file}...")
 
     # Write header to CSV file
     with open(disk_file, mode='w', newline='', encoding='utf-8') as file:
@@ -33,15 +35,15 @@ def start_disk_bandwidth_monitoring(interval_seconds=1, output_dir=None):
 
             read_bytes = float(read_counter.DiskReadBytesPerSec)
             write_bytes = float(write_counter.DiskWriteBytesPerSec)
-
             return read_bytes, write_bytes
+        
         except Exception as e:
-            print(f"Disk monitoring error: {e}")
+            logger.error(f"Disk monitoring error: {e}")
             return 0.0, 0.0
 
     try:
         c = wmi.WMI()
-        while True:
+        while not stop_event.is_set():
             timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             read_bytes, write_bytes = get_disk_io(c)
 
@@ -51,7 +53,7 @@ def start_disk_bandwidth_monitoring(interval_seconds=1, output_dir=None):
 
             time.sleep(interval_seconds)
     except KeyboardInterrupt:
-        print("\nDisk bandwidth monitoring stopped by user.")
+        logger.info("\nDisk bandwidth monitoring stopped by user.")
     finally:
-        print("Disk bandwidth monitoring finished.")
+        # logger.info("Disk bandwidth monitoring finished.")
         pythoncom.CoUninitialize()
