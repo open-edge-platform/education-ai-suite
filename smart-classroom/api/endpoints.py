@@ -52,13 +52,13 @@ def update_project_config(payload: ProjectSettings):
 
 @router.post("/start-monitoring")
 def start_monitoring_endpoint():
-    logger.info("Metrics collection strated")
+    # logger.info("Metrics collection strated")
     start_monitoring()
     return JSONResponse(content={"status": "success", "message": "Monitoring started"})
 
 @router.get("/metrics")
 def get_metrics_endpoint():
-    logger.info("Metrics are being collected")
+    # logger.info("Metrics are being collected")
     return get_metrics()
 
 @router.post("/stop-monitoring")
