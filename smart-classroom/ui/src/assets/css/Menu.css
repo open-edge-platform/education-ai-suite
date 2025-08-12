@@ -1,0 +1,36 @@
+.menu-icon {
+  width: 24px; /* Adjust width as needed */
+  height: 24px; /* Adjust height as needed */
+  cursor: pointer; /* Change cursor to pointer */
+  margin-right: 10px; /* Space between icon and other elements */
+}
+
+.dropdown-menu {
+  position: absolute; /* Position dropdown absolutely */
+  top: 64px; /* Position below the header */
+  right: 10px; /* Align to the right */
+  background-color: white;
+  border: 1px solid #ccc;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  z-index: 1000; /* Ensure dropdown is above other elements */
+  width: 150px; /* Set a fixed width for the dropdown */
+  padding: 10px 0; /* Add padding to the top and bottom */
+  border-radius: 4px; /* Rounded corners */
+}
+
+.dropdown-item {
+  padding: 10px 20px;
+  cursor: pointer;
+  color: #333;
+  display: block; /* Ensure items take full width */
+  width: 100%; /* Ensure items take full width */
+  box-sizing: border-box; /* Include padding in width calculation */
+}
+
+.dropdown-item:hover {
+  background-color: #f1f1f1;
+}
+
+.menu-content {
+  display: none; /* Hide menu content initially */
+}
