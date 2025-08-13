@@ -9,7 +9,8 @@ import json
 from fastapi.responses import StreamingResponse
 from utils.runtime_config_loader import RuntimeConfig
 from dto.project_settings import ProjectSettings
-
+import logging
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/upload")
@@ -47,6 +48,7 @@ def update_project_config(payload: ProjectSettings):
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields to update.")
     return RuntimeConfig.update_section("Project", updates)
+
 
 def register_routes(app: FastAPI):
     app.include_router(router)
