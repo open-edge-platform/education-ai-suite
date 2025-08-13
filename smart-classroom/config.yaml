@@ -4,10 +4,6 @@ app:
   cleanup_on_exit: true
   logs_dir: ./execution-logs
 
-monitoring:
-  logs_dir: ./monitoring/logs
-  interval: 2
-
 models:
   asr:
     provider: openai # funasr and openai supported

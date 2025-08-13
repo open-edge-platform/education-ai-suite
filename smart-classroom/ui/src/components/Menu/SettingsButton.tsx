@@ -1,22 +1,43 @@
 import React from 'react';
+import ProjectNameInput from '../Inputs/ProjectNameInput';
+import MicrophoneSelect from '../Inputs/MicrophoneSelect';
+import ProjectLocationInput from '../Inputs/ProjectLocationInput';
 import '../../assets/css/Settings.css';
-interface SettingsProps {
+
+interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  projectName: string;
+  setProjectName: (name: string) => void;
+  selectedMicrophone: string;
+  setSelectedMicrophone: (microphone: string) => void;
+  projectLocation: string;
+  setProjectLocation: (location: string) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ isOpen, onClose }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({
+  isOpen,
+  onClose,
+  projectName,
+  setProjectName,
+  selectedMicrophone,
+  setSelectedMicrophone,
+  projectLocation,
+  setProjectLocation,
+}) => {
   if (!isOpen) return null;
 
   return (
     <div className="modal-overlay">
       <div className="modal-content">
         <h2>Settings</h2>
-        <p>Adjust your application settings here.</p>
-        <button onClick={onClose} className="close-button">OK</button>
+        <ProjectNameInput projectName={projectName} onChange={setProjectName} />
+        <MicrophoneSelect selectedMicrophone={selectedMicrophone} onChange={setSelectedMicrophone} />
+        <ProjectLocationInput projectLocation={projectLocation} onChange={setProjectLocation} />
+        <button onClick={onClose} className="close-button">Close</button>
       </div>
     </div>
   );
 };
 
-export default Settings;
+export default SettingsModal;

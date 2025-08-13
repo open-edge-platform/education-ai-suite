@@ -1,8 +1,8 @@
 import React, { useState,forwardRef } from 'react';
 import Help from './HelpButton';
 import About from './AboutButton';
-import Settings from './SettingsButton';
 import '../../assets/css/Menu.css';
+import SettingsModal from './SettingsButton';
 
 const Menu = forwardRef<HTMLDivElement>((props, ref) => {
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -29,7 +29,7 @@ const Menu = forwardRef<HTMLDivElement>((props, ref) => {
         {activeSection === 'help' && <Help />}
         {activeSection === 'about' && <About />}
       </div>
-      <Settings isOpen={isSettingsOpen} onClose={closeSettings} />
+      <SettingsModal isOpen={isSettingsOpen} onClose={closeSettings} />
     </div>
   );
 });
