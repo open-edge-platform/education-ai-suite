@@ -7,15 +7,12 @@ interface ProjectLocationInputProps {
 
 const ProjectLocationInput: React.FC<ProjectLocationInputProps> = ({ projectLocation, onChange }) => {
   return (
-    <div>
-      <label htmlFor="project-location">Project Location:</label>
-      <input
-        type="text"
-        id="project-location"
-        value={projectLocation}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
+    <input
+      type="text"
+      value={projectLocation}
+      onChange={(e) => onChange(e.target.value)}
+      id="projectLocation"
+    />
   );
 };
 

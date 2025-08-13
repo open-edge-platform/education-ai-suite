@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Menu from '../Menu/Menu';  
 import '../../assets/css/TopPanel.css';
+import BrandSlot from '../../assets/images/BrandSlot.svg';
+import menu from '../../assets/images/menu.svg';
 const TopPanel: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -32,12 +34,12 @@ const TopPanel: React.FC = () => {
   return (
     <header className="top-panel">
       <div className="brand-slot">
-        <img src="src/assets/images/BrandSlot.svg" alt="Intel Logo" className="logo" />
+        <img src={BrandSlot} alt="Intel Logo" className="logo" />
         <span className="app-title">Smart Classroom Sample App</span>
       </div>
       <div className="action-slot">
         <img
-          src="src/assets/images/menu.svg"
+          src={menu}
           alt="Menu Icon"
           className="menu-icon"
           onClick={toggleMenu}

@@ -1,10 +1,8 @@
 import React from 'react';
-import ProjectNameInput from '../Inputs/ProjectNameInput';
-import MicrophoneSelect from '../Inputs/MicrophoneSelect';
-import ProjectLocationInput from '../Inputs/ProjectLocationInput';
-import '../../assets/css/Settings.css';
+import Modal from '../Modals/Modal';
+import SettingsForm from '../Modals/SettingsForm';
 
-interface SettingsModalProps {
+interface SettingsButtonProps {
   isOpen: boolean;
   onClose: () => void;
   projectName: string;
@@ -15,7 +13,7 @@ interface SettingsModalProps {
   setProjectLocation: (location: string) => void;
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({
+const SettingsButton: React.FC<SettingsButtonProps> = ({
   isOpen,
   onClose,
   projectName,
@@ -25,19 +23,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   projectLocation,
   setProjectLocation,
 }) => {
-  if (!isOpen) return null;
-
   return (
-    <div className="modal-overlay">
-      <div className="modal-content">
-        <h2>Settings</h2>
-        <ProjectNameInput projectName={projectName} onChange={setProjectName} />
-        <MicrophoneSelect selectedMicrophone={selectedMicrophone} onChange={setSelectedMicrophone} />
-        <ProjectLocationInput projectLocation={projectLocation} onChange={setProjectLocation} />
-        <button onClick={onClose} className="close-button">Close</button>
-      </div>
-    </div>
+    <Modal isOpen={isOpen} onClose={onClose}>
+      <SettingsForm
+        onClose={onClose}
+        projectName={projectName}
+        setProjectName={setProjectName}
+        selectedMicrophone={selectedMicrophone}
+        setSelectedMicrophone={setSelectedMicrophone}
+        projectLocation={projectLocation}
+        setProjectLocation={setProjectLocation}
+      />
+    </Modal>
   );
 };
 
-export default SettingsModal;
+export default SettingsButton;
