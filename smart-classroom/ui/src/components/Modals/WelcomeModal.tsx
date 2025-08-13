@@ -1,6 +1,6 @@
 import React from 'react';
 import Modal from './Modal';
-import SettingsForm from './SettingsForm/SettingsForm';
+import SettingsForm from './SettingsForm';
 
 interface WelcomeModalProps {
   isOpen: boolean;

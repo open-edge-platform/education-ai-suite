@@ -7,18 +7,15 @@ interface MicrophoneSelectProps {
 
 const MicrophoneSelect: React.FC<MicrophoneSelectProps> = ({ selectedMicrophone, onChange }) => {
   return (
-    <div>
-      <label htmlFor="microphone-select">Microphone:</label>
-      <select
-        id="microphone-select"
-        value={selectedMicrophone}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="default">Default Microphone</option>
-        <option value="external">External Microphone</option>
-        {/* Add more options as needed */}
-      </select>
-    </div>
+    <select
+      value={selectedMicrophone}
+      onChange={(e) => onChange(e.target.value)}
+      id="microphone"
+    >
+      <option value="IP Microphone">IP Microphone</option>
+      <option value="Default Microphone">Default Microphone</option>
+      {/* Add more options as needed */}
+    </select>
   );
 };
 
