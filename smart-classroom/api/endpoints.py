@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import Header, UploadFile
 from fastapi.responses import JSONResponse
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, File, HTTPException, status
 from dto.transcription_dto import TranscriptionRequest
 from dto.summarizer_dto import SummaryRequest
 from pipeline import Pipeline
@@ -10,13 +10,36 @@ from fastapi.responses import StreamingResponse
 from utils.runtime_config_loader import RuntimeConfig
 from dto.project_settings import ProjectSettings
 from monitoring.monitor import start_monitoring, stop_monitoring, get_metrics
+from utils.audio_util import save_audio_file
 import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.post("/upload")
-async def upload_audio(file: UploadFile):
-    return JSONResponse(content={"status": "success", "message": "Audio upload placeholder"})
+@router.post("/upload-audio")
+def upload_audio(file: UploadFile = File(...)):
+    status_code = status.HTTP_201_CREATED
+    try:
+        filename, filepath = save_audio_file(file)
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "filename": filename,
+                "message": "File uploaded successfully",
+                "path": filepath
+            }
+        )
+    except HTTPException as he:
+        logger.error(f"HTTPException occurred: {he.detail}")
+        status_code = he.status_code
+    except Exception as e:
+        logger.error(f"General exception occurred: {str(e)}")
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "error", "message": "Failed to upload audio file"}
+    )
+
 
 @router.post("/transcribe")
 async def transcribe_audio(
