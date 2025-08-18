@@ -42,7 +42,7 @@ useEffect(() => {
       isRecording ? 'Start recording or upload an audio file to begin a new session' : 'Stop recording to get AI summary'
     );
     if (!isRecording) {
-      setTimer(0); // Reset timer when starting recording
+      setTimer(0); 
     }
   };
 
