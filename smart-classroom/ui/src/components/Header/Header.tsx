@@ -5,30 +5,35 @@ import '../../assets/css/HeaderBar.css';
 import recordON from '../../assets/images/recording-on.svg';
 import recordOFF from '../../assets/images/recording-off.svg';
 import sideRecordIcon from '../../assets/images/sideRecord.svg';
+import {constants} from '../../../public/constants';
 
-const HeaderBar: React.FC = () => {
+interface HeaderBarProps {
+  projectName: string;
+  setProjectName: (name: string) => void;
+}
+
+const HeaderBar: React.FC<HeaderBarProps> = ({ projectName, setProjectName }) => {
   const [isRecording, setIsRecording] = useState(false);
-  const [notification, setNotification] = useState('Start recording or upload an audio file to begin a new session');
-  const [projectName, setProjectName] = useState('Fourth Grade Math 2025-06-26');
+  const [notification, setNotification] = useState(constants.START_NOTIFICATION);
   const [timer, setTimer] = useState(0);
 
-useEffect(() => {
-  let interval: number | null = null;
-  if (isRecording) {
-    interval = window.setInterval(() => {
-      setTimer((prevTimer) => prevTimer + 1);
-    }, 1000);
-  } else if (!isRecording && timer !== 0) {
-    if (interval !== null) {
-      clearInterval(interval);
+  useEffect(() => {
+    let interval: number | null = null;
+    if (isRecording) {
+      interval = window.setInterval(() => {
+        setTimer((prevTimer) => prevTimer + 1);
+      }, 1000);
+    } else if (!isRecording && timer !== 0) {
+      if (interval !== null) {
+        clearInterval(interval);
+      }
     }
-  }
-  return () => {
-    if (interval !== null) {
-      clearInterval(interval);
-    }
-  };
-}, [isRecording, timer]);
+    return () => {
+      if (interval !== null) {
+        clearInterval(interval);
+      }
+    };
+  }, [isRecording, timer]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -39,7 +44,7 @@ useEffect(() => {
   const handleRecordingToggle = () => {
     setIsRecording(!isRecording);
     setNotification(
-      isRecording ? 'Start recording or upload an audio file to begin a new session' : 'Stop recording to get AI summary'
+      isRecording ? constants.START_NOTIFICATION : constants.STOP_NOTIFICATION
     );
     if (!isRecording) {
       setTimer(0); 
@@ -47,7 +52,7 @@ useEffect(() => {
   };
 
   const handleFileUpload = (file: File) => {
-    setNotification('Stop recording to get AI summary');
+    setNotification(constants.STOP_NOTIFICATION);
     console.log('File Uploaded:', file);
   };
 

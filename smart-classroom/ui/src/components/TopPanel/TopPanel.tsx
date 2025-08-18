@@ -1,9 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Menu from '../Menu/Menu';  
 import '../../assets/css/TopPanel.css';
 import BrandSlot from '../../assets/images/BrandSlot.svg';
 import menu from '../../assets/images/menu.svg';
-const TopPanel: React.FC = () => {
+
+interface TopPanelProps {
+  projectName: string;
+  setProjectName: (name: string) => void;
+}
+
+const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName }) => {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuIconRef = useRef<HTMLImageElement>(null);
@@ -19,8 +25,7 @@ const TopPanel: React.FC = () => {
       menuIconRef.current &&
       !menuIconRef.current.contains(event.target as Node)
     ) {
-      console.log('Clicked outside the menu');
-      setIsMenuOpen(false); // Close the menu when clicking outside
+      setIsMenuOpen(false); 
     }
   };
 
@@ -46,7 +51,7 @@ const TopPanel: React.FC = () => {
           ref={menuIconRef}
         />
       </div>
-      {isMenuOpen && <Menu ref={menuRef} />}
+      {isMenuOpen && <Menu ref={menuRef} projectName={projectName} setProjectName={setProjectName} />}
     </header>
   );
 };

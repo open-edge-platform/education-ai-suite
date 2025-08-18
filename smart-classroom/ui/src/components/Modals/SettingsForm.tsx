@@ -1,35 +1,20 @@
-import React, { useState,useRef } from 'react';
+import React, { useState } from 'react';
 import ProjectNameInput from '../Inputs/ProjectNameInput';
 import MicrophoneSelect from '../Inputs/MicrophoneSelect';
 import ProjectLocationInput from '../Inputs/ProjectLocationInput';
 import '../../assets/css/SettingsForm.css';
 import folderIcon from '../../assets/images/folder.svg';
+import { constants } from '../../../public/constants';
 
 interface SettingsFormProps {
   onClose: () => void;
+  projectName: string;
+  setProjectName: (name: string) => void;
 }
 
-const SettingsForm: React.FC<SettingsFormProps> = ({ onClose }) => {
-  const [projectName, setProjectName] = useState('Fourth Grade Math 2025-06-26');
-  const [selectedMicrophone, setSelectedMicrophone] = useState('IP Microphone');
+const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setProjectName }) => {
+  const [selectedMicrophone, setSelectedMicrophone] = useState(constants.MICRO_PHONE);
   const [projectLocation, setProjectLocation] = useState('/live/stream');
-  // const directoryInputRef = useRef<HTMLInputElement>(null);
-
-  // const handleIconClick = () => {
-  //   if (directoryInputRef.current) {
-  //     directoryInputRef.current.click();
-  //   }
-  // };
-
-  // const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-  //   const files = event.target.files;
-  //   if (files && files.length > 0) {
-  //     // Extract the directory name from the first file's webkitRelativePath
-  //     const fullPath = files[0].webkitRelativePath;
-  //     const directoryName = fullPath.split('/')[0]; // Get the directory name
-  //     setProjectLocation(directoryName); // Update the project location state
-  //   }
-  // };
 
   return (
     <div className="settings-form">
@@ -47,15 +32,11 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose }) => {
               src={folderIcon}
               alt="Upload Icon"
               className="upload-icon"
-              // onClick={handleIconClick}
               title="Click to select a directory path"
             />
             <input
               type="file"
-              // ref={directoryInputRef}
               style={{ display: 'none' }}
-              // onChange={handleDirectoryChange}
-              // webkitdirectory="true" // Pass as a string
             />
           </div>
         </div>
