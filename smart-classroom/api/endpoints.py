@@ -13,7 +13,6 @@ from monitoring.monitor import start_monitoring, stop_monitoring, get_metrics
 from utils.audio_util import save_audio_file
 import logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 router = APIRouter()
 
 @router.post("/upload-audio")
