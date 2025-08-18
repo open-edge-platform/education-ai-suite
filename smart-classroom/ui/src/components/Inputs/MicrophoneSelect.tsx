@@ -14,7 +14,6 @@ const MicrophoneSelect: React.FC<MicrophoneSelectProps> = ({ selectedMicrophone,
     >
       <option value="IP Microphone">IP Microphone</option>
       <option value="Default Microphone">Default Microphone</option>
-      {/* Add more options as needed */}
     </select>
   );
 };
