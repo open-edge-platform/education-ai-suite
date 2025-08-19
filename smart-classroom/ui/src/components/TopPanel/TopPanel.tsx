@@ -3,7 +3,7 @@ import Menu from '../Menu/Menu';
 import '../../assets/css/TopPanel.css';
 import BrandSlot from '../../assets/images/BrandSlot.svg';
 import menu from '../../assets/images/menu.svg';
-
+import { constants } from '../../../public/constants';
 interface TopPanelProps {
   projectName: string;
   setProjectName: (name: string) => void;
@@ -40,7 +40,7 @@ const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName }) => {
     <header className="top-panel">
       <div className="brand-slot">
         <img src={BrandSlot} alt="Intel Logo" className="logo" />
-        <span className="app-title">Smart Classroom Sample App</span>
+        <span className="app-title">{constants.TITLE}</span>
       </div>
       <div className="action-slot">
         <img
