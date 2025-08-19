@@ -1,0 +1,22 @@
+.accordion {
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    margin-bottom: 1rem;
+    background: #fff;
+    .accordion-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem;
+      cursor: pointer;
+      background: #f1f1f1;
+      border-bottom: 1px solid #ddd;
+      h3 {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+    }
+    .accordion-content {
+      padding: 1rem;
+    }
+  }

@@ -3,5 +3,8 @@ export const constants ={
   STOP_NOTIFICATION:'Stop recording to get AI summary',
   PROJECT_NAME: 'Fourth Grade Math 2025-06-26',
   MICRO_PHONE:'IP Microphone',
-  TITLE:'Smart Classroom Sample App'
+  TITLE:'Smart Classroom Sample App',
+  SETTINGS:'Settings',
+  HELP:'HELP',
+  ABOUT:'ABOUT'
 };

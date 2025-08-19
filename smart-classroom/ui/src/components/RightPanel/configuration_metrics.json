@@ -1,0 +1,19 @@
+{
+  "platform_configuration": {
+    "processor": "Intel® Core™ Ultra 125H",
+    "npu": "Intel® AI Boost",
+    "igpu": "Intel® Arc™",
+    "memory": "32GB",
+    "storage": "128GB"
+  },
+  "software_configuration": {
+    "llm": "Llama2-70B",
+    "asr": "xxx"
+  },
+  "performance_metrics": {
+    "ttft": "xxms",
+    "tpot": "xx ms",
+    "total_tokens_processed": "xxx",
+    "time_to_generate_summary": "xx s"
+  }
+}

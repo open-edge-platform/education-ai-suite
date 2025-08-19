@@ -1,0 +1,43 @@
+.container {
+  display: flex;
+  height: 100vh;
+  position: relative;
+}
+
+.left-panel, .right-panel {
+  transition: flex 0.3s ease;
+}
+
+.left-panel {
+  flex: 1;
+  background-color: #f8f8f8;
+}
+
+.right-panel {
+  flex: 1;
+  background-color: #f9f9f9;
+  border-left: 1px solid #ddd;
+}
+
+.divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: #ddd;
+  transition: left 0.3s ease;
+}
+
+.arrow {
+  position: absolute;
+  top: 0%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  z-index: 10;
+  transition: left 0.3s ease;
+  color: #0071c5;
+}
+
+.arrow.hidden {
+  display: none;
+}

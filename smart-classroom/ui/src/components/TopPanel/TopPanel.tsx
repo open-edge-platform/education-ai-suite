@@ -4,12 +4,15 @@ import '../../assets/css/TopPanel.css';
 import BrandSlot from '../../assets/images/BrandSlot.svg';
 import menu from '../../assets/images/menu.svg';
 import { constants } from '../../../public/constants';
+
 interface TopPanelProps {
   projectName: string;
   setProjectName: (name: string) => void;
+  isSettingsOpen: boolean;
+  setIsSettingsOpen: (isOpen: boolean) => void;
 }
 
-const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName }) => {
+const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName, isSettingsOpen, setIsSettingsOpen }) => {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuIconRef = useRef<HTMLImageElement>(null);
@@ -51,7 +54,15 @@ const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName }) => {
           ref={menuIconRef}
         />
       </div>
-      {isMenuOpen && <Menu ref={menuRef} projectName={projectName} setProjectName={setProjectName} />}
+      {isMenuOpen && (
+        <Menu
+          ref={menuRef}
+          projectName={projectName}
+          setProjectName={setProjectName}
+          isSettingsOpen={isSettingsOpen}
+          setIsSettingsOpen={setIsSettingsOpen}
+        />
+      )}
     </header>
   );
 };
