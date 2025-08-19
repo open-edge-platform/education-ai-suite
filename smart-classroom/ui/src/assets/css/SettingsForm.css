@@ -51,10 +51,10 @@ select {
 }
 
 .button-container {
-  border-top: 2px solid #ccc; /* Add top border */
-  padding-top: 20px; /* Space between border and button */
+  border-top: 2px solid #ccc;
+  padding-top: 20px; 
   display: flex;
-  justify-content: flex-end; /* Align button to the right */
+  justify-content: flex-end; 
 }
 
 .submit-button {
