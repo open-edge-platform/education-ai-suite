@@ -6,7 +6,7 @@ html, body {
   display: block;
 }
 
-/* Logo Styles */
+
 .logo {
   height: 6em;
   padding: 1.5em;
@@ -37,7 +37,7 @@ html, body {
   }
 }
 
-/* Card Styles */
+
 .card {
   padding: 2em;
 }

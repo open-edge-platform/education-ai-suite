@@ -4,7 +4,12 @@ import About from './AboutButton';
 import '../../assets/css/Menu.css';
 import SettingsModal from './SettingsButton';
 
-const Menu = forwardRef<HTMLDivElement>((props, ref) => {
+interface MenuProps {
+  projectName: string;
+  setProjectName: (name: string) => void;
+}
+
+const Menu = forwardRef<HTMLDivElement, MenuProps>(({ projectName, setProjectName }, ref) => {
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
@@ -29,7 +34,7 @@ const Menu = forwardRef<HTMLDivElement>((props, ref) => {
         {activeSection === 'help' && <Help />}
         {activeSection === 'about' && <About />}
       </div>
-      <SettingsModal isOpen={isSettingsOpen} onClose={closeSettings} />
+      <SettingsModal isOpen={isSettingsOpen} onClose={closeSettings} projectName={projectName} setProjectName={setProjectName} />
     </div>
   );
 });
