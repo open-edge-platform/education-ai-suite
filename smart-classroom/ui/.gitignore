@@ -28,4 +28,4 @@ dist/
 .DS_Store
 Thumbs.db
 
-public/mockAPI/
+public/mock-data/

@@ -5,6 +5,6 @@ export const constants ={
   MICRO_PHONE:'IP Microphone',
   TITLE:'Smart Classroom Sample App',
   SETTINGS:'Settings',
-  HELP:'HELP',
-  ABOUT:'ABOUT'
+  HELP:'Help',
+  ABOUT:'About'
 };

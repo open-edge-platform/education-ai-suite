@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import Accordion from "../common/Accordion";
-import "../../assets/css/RightPanel.css"; // Ensure this path is correct
+import "../../assets/css/RightPanel.css"; 
 
 const ConfigurationMetricsAccordion: React.FC = () => {
   const [configData, setConfigData] = useState<any>(null);
@@ -8,7 +8,7 @@ const ConfigurationMetricsAccordion: React.FC = () => {
   useEffect(() => {
     const fetchConfiguration = async () => {
       try {
-        const response = await fetch("../../../public/mockAPI/configuration_metrics.json"); 
+        const response = await fetch("../../../public/mock-data/configuration_metrics.json"); 
         const data = await response.json();
         setConfigData(data);
       } catch (error) {
