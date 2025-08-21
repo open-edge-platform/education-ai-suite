@@ -3,7 +3,7 @@ from ipex_llm.transformers import AutoModelForCausalLM
 import torch
 
 
-class IPEXSummarizer(BaseSummarizer):
+class Summarizer(BaseSummarizer):
     def __init__(self, model_name, device="xpu", model_hub="huggingface"):
         if model_hub == "huggingface":
             from transformers import AutoTokenizer

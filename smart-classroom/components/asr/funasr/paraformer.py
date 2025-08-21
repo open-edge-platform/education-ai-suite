@@ -16,6 +16,7 @@ class Paraformer(BaseASR):
             raise Exception(f"Invalid ASR model name {model_name}. Please refer to https://github.com/modelscope/FunASR/blob/main/model_zoo/readme.md for supported Paraformer models")
         
         # use same vad and punc model for different ASR models
+        self.enable_diarization = enable_diarization
         if enable_diarization:
             self.model = AutoModel(model=model_name, model_revision=revision,
                             vad_model="fsmn-vad", vad_model_revision="v2.0.4",
@@ -35,8 +36,20 @@ class Paraformer(BaseASR):
     def transcribe(self, audio_path: str) -> str:
         # Return transcribed text from .wav file
         res = self.model.generate(input=audio_path)
-        # res [{'key': <input>, 'text': '...', , 'timestamp': [[], [], ...], 'spk': <label>}]
-        if res.size() > 0:
+        # res [{'key': <input>, 'text': '...', , 'timestamp': [[], [], ...]}]
+        if len(res) > 0:
             return res[0]["text"]
+        else:
+            raise Exception("ASR transcription failed")
+        
+    def transcribe_with_speaker_label(self, audio_path: str) -> dict:
+        if not self.enable_diarization:
+            raise Exception(f"Diarization is not enabled. Please init the model with enable_diarization=True")
+        
+        # Return transcribed text from .wav file
+        res = self.model.generate(input=audio_path)
+        # res [{'key': <input>, 'text': '...', , 'timestamp': [[], [], ...], 'spk': <label>}]
+        if len(res) > 0:
+            return res[0]
         else:
             raise Exception("ASR transcription failed")
