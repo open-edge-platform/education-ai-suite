@@ -27,3 +27,5 @@ dist/
 .env
 .DS_Store
 Thumbs.db
+
+public/mockAPI/
