@@ -20,8 +20,9 @@ class TestSummarizer(unittest.TestCase):
     @patch("components.summarizer.ipex.summarizer.AutoModelForCausalLM")
     @patch("components.summarizer.ipex.summarizer.torch")
     def test_init_invalid_modelhub(self, mock_torch, mock_model):
-        with self.assertRaises(Exception):
-            Summarizer(TEST_MODEL, model_hub="invalidhub")
+        summarizer = Summarizer(TEST_MODEL, model_hub="invalidhub")
+        self.assertIsNone(summarizer.model)
+        self.assertIsNone(summarizer.tokenizer)
 
     @patch("components.summarizer.ipex.summarizer.AutoModelForCausalLM")
     @patch("components.summarizer.ipex.summarizer.torch")
@@ -52,6 +53,13 @@ class TestSummarizer(unittest.TestCase):
 
         result = summarizer.generate("test prompt")
         self.assertEqual(result, "summary")
+
+    @patch("components.summarizer.ipex.summarizer.AutoModelForCausalLM")
+    @patch("components.summarizer.ipex.summarizer.torch")
+    def test_generate_with_uninitialized_model(self, mock_torch, mock_model):
+        summarizer = Summarizer(TEST_MODEL, model_hub="invalidhub")
+        result = summarizer.generate("test prompt")
+        self.assertEqual(result, "")
 
 if __name__ == "__main__":
     unittest.main()

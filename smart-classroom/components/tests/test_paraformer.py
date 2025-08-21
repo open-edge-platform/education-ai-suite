@@ -47,8 +47,8 @@ class TestParaformer(unittest.TestCase):
         paraformer = Paraformer(TEST_MODEL, device="cpu", enable_diarization=False)
         self.assertEqual(paraformer.model, mock_model)
 
-        with self.assertRaises(Exception):
-            Paraformer("invalid-model", device="cpu")
+        paraformer_invalid = Paraformer("invalid-model", device="cpu")
+        self.assertIsNone(paraformer_invalid.model)
 
     def test_transcribe_en(self):
         # Download the test audio file
