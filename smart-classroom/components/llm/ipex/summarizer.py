@@ -28,6 +28,7 @@ class Summarizer(BaseSummarizer):
 
     def generate(self, prompt: str, max_new_tokens: int = 512) -> str:
         #Summarize
+        response = ""
         with torch.inference_mode():
             text = self.tokenizer.apply_chat_template(
                 prompt,
