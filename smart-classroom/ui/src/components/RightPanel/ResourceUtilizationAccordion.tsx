@@ -12,7 +12,7 @@ const ResourceUtilizationAccordion: React.FC = () => {
   useEffect(() => {
     const fetchResourceData = async () => {
       try {
-        const response = await fetch("src\\components\\RightPanel\\metrics.json"); 
+        const response = await fetch("../../../public/mockAPI/metrics.json"); 
         if (!response.ok) {
           throw new Error('Network response was not ok');
         }

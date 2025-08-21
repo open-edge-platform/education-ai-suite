@@ -8,7 +8,7 @@ const ConfigurationMetricsAccordion: React.FC = () => {
   useEffect(() => {
     const fetchConfiguration = async () => {
       try {
-        const response = await fetch("src\\components\\RightPanel\\configuration_metrics.json"); 
+        const response = await fetch("../../../public/mockAPI/configuration_metrics.json"); 
         const data = await response.json();
         setConfigData(data);
       } catch (error) {
