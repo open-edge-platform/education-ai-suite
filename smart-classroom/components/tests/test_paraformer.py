@@ -37,6 +37,7 @@ class TestParaformer(unittest.TestCase):
             # Test the transcribe function with the real model
             paraformer = Paraformer(TEST_MODEL, device="cpu")
             result = paraformer.transcribe(local_audio_path)
+            result = result.strip()
 
             # Ground truth for the test audio
             expected_transcription = EN_AUDIO_TRANSCRIPT
@@ -65,6 +66,7 @@ class TestParaformer(unittest.TestCase):
             # Test the transcribe function with the real model
             paraformer = Paraformer(TEST_MODEL, device="cpu")
             result = paraformer.transcribe(local_audio_path)
+            result = result.strip()
 
             # Ground truth for the test audio
             expected_transcription = ZH_AUDIO_TRANSCRIPT
