@@ -32,7 +32,6 @@ def read_log_file(file_path, indices):
                 timestamp = values[0]
                 data_points = [float(values[i]) for i in indices]
                 data.append([timestamp] + data_points)
-            # logger.info(f"Successfully read data from {file_path}")
             return data
     except Exception as e:
         logger.error(f"Error reading log file {file_path}: {e}")
@@ -48,7 +47,7 @@ def monitor_logs(metrics_logs):
 
     log_files = {
         "cpu_utilization": (os.path.join(metrics_logs, "cpu_utilization.csv"), [1]),
-        "gpu_utilization": (os.path.join(metrics_logs, "gpu_metrics.csv"), [1, 2, 3, 4, 5, 6,7,8]),
+        "gpu_utilization": (os.path.join(metrics_logs, "gpu_metrics.csv"), [1, 2, 3, 4, 5, 6,7,8,9]),
         "memory": (os.path.join(metrics_logs, "memory_metrics.csv"), [1, 2, 3,4]),
         "power": (os.path.join(metrics_logs, "power_metrics.csv"), [1])
     }
