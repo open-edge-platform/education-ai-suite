@@ -5,7 +5,7 @@ from fastapi import APIRouter, FastAPI, File, HTTPException, status
 from dto.transcription_dto import TranscriptionRequest
 from dto.summarizer_dto import SummaryRequest
 from pipeline import Pipeline
-import json
+import json, os
 from fastapi.responses import StreamingResponse
 from utils.runtime_config_loader import RuntimeConfig
 from dto.project_settings import ProjectSettings
@@ -44,7 +44,7 @@ def upload_audio(file: UploadFile = File(...)):
 @router.post("/transcribe")
 async def transcribe_audio(
     request: TranscriptionRequest,
-    x_session_id: Optional[str] = Header(None)  # Accept custom header
+    x_session_id: Optional[str] = Header(None)
 ):
     pipeline = Pipeline(x_session_id)
     audio_path = request.audio_filename
@@ -59,8 +59,14 @@ async def transcribe_audio(
 
 
 @router.post("/summarize")
-async def summarize_audio(request: SummaryRequest):
-    return JSONResponse(content={"status": "success", "summary": "Summary placeholder"})
+def summarize_audio(request: SummaryRequest):
+    pipeline = Pipeline(request.session_id)
+
+    def event_stream():
+        for token in pipeline.run_summarizer():
+            yield json.dumps({"token": token}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/json")
 
 @router.get("/project")
 def get_project_config():
@@ -80,7 +86,10 @@ def start_monitoring_endpoint():
 
 @router.get("/metrics")
 def get_metrics_endpoint(x_session_id: Optional[str] = Header(None)):
-    return get_metrics()
+    if x_session_id is None or "":
+        return ""
+    project_config = RuntimeConfig.get_section("Project")
+    return get_metrics(os.path.join(project_config.get("location"), project_config.get("name"), x_session_id))
 
 @router.post("/stop-monitoring")
 def stop_monitoring_endpoint():

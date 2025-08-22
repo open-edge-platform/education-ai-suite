@@ -1,13 +1,15 @@
+from fastapi import HTTPException, status
 from components.stream_reader import AudioStreamReader
 from components.asr_component import ASRComponent
 from utils.config_loader import config
-import logging
+import logging, os
 from utils.session_manager import generate_session_id
+from components.summarizer_component import SummarizerComponent
+from utils.runtime_config_loader import RuntimeConfig
+from utils.storage_manager import StorageManager
+from monitoring import monitor
 
 logger = logging.getLogger(__name__)
-
-TEMPERATURE =  config.models.asr.temperature # seconds
-ASR_MODEL =  config.models.asr.name # seconds
 
 class Pipeline:
     def __init__(self, session_id=None):
@@ -16,16 +18,53 @@ class Pipeline:
         # Bind models during construction
         self.transcription_pipeline = [
             AudioStreamReader(self.session_id),
-            ASRComponent(self.session_id, model=ASR_MODEL, temperature=TEMPERATURE) 
+            ASRComponent(self.session_id, model=config.models.asr.name , temperature=config.models.asr.temperature) 
+        ]
+
+        self.summarizer_pipeline = [
+            SummarizerComponent(self.session_id, model_name=config.models.summarizer.name, temperature=config.models.summarizer.temperature, device=config.models.summarizer.device)
         ]
 
     def run_transcription(self, audio_path: str):
-        input_gen = ({"audio_path": audio_path} for _ in range(1))  # initial input generator
+        project_config = RuntimeConfig.get_section("Project")
+        monitor.start_monitoring(os.path.join(project_config.get("location"), project_config.get("name"), self.session_id))
+
+        input_gen = ({"audio_path": audio_path} for _ in range(1))
 
         for component in self.transcription_pipeline:
             input_gen = component.process(input_gen)
 
-            # for chunk_data in input_gen:
-            #     logger.debug(f"[DEBUG] Processed Chunk Data:\n{chunk_data}\n")
+        try:
+            for chunk_trancription in input_gen:
+                yield chunk_trancription
+        finally:
+            monitor.stop_monitoring()
+            
+    
+    def run_summarizer(self):
 
-        return input_gen
+        project_config = RuntimeConfig.get_section("Project")
+        transcription_path = os.path.join(project_config.get("location"), project_config.get("name"), self.session_id, "transcription.txt")
+        monitor.start_monitoring(os.path.join(project_config.get("location"), project_config.get("name"), self.session_id))
+
+        try:
+            input = StorageManager.read_text_file(transcription_path)
+            if not input:
+                logger.error(f"Transcription is empty. No content available for summarization.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transcription is empty. No content available for summarization.")
+        except FileNotFoundError:
+            logger.error(f"Invalid Session ID: {self.session_id}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid session id: {self.session_id}, transcription not found.")
+        except Exception:
+            logger.error(f"An unexpected error occurred while accessing the transcription.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred while accessing the transcription.")
+        
+        for component in self.summarizer_pipeline:
+            input = component.process(input)
+
+        try:
+            for token in input:
+                yield token
+        finally:
+            monitor.stop_monitoring()            
+            
