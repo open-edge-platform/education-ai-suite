@@ -5,23 +5,15 @@ import win32pdh
 import re
 from collections import defaultdict
 import threading
+import logging
 from datetime import datetime
 
-# Define weights for GPU engine types
-ENGINE_WEIGHTS = {
-    "engtype_3D": 1.0,
-    "engtype_VideoEncode": 0.55,
-    "engtype_VideoDecode": 0.35,
-    "engtype_VideoProcessing": 0.35,
-    "engtype_Copy": 0.2,
-    "engtype_GDIRender": 0.2,
-    "engtype_LegacyOverlay": 0.1,
-}
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def get_gpu_memory_total():
     try:
         query = win32pdh.OpenQuery()
-
         counters_dedicated = []
         counters_shared = []
 
@@ -49,7 +41,6 @@ def get_gpu_memory_total():
 
         win32pdh.CloseQuery(query)
 
-        # Convert bytes to MB
         dedicated_mb = total_dedicated / (1024 * 1024)
         shared_mb = total_shared / (1024 * 1024)
         total_mb = dedicated_mb + shared_mb
@@ -57,33 +48,32 @@ def get_gpu_memory_total():
         return total_mb, dedicated_mb, shared_mb
 
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return None, None, None
+
 
 def get_gpu_utilization():
     query = win32pdh.OpenQuery()
     counters = []
 
-
     _, instances = win32pdh.EnumObjectItems(None, None, "GPU Engine", win32pdh.PERF_DETAIL_WIZARD)
+    engine_types = ["engtype_3D", "engtype_VideoEncode", "engtype_VideoDecode",
+                    "engtype_VideoProcessing", "engtype_Copy", "engtype_Compute"]
 
     for inst in instances:
-        for engine_type, weight in ENGINE_WEIGHTS.items():
+        for engine_type in engine_types:
             if re.search(engine_type, inst, re.IGNORECASE):
                 try:
                     c = win32pdh.AddCounter(query, f"\\GPU Engine({inst})\\Utilization Percentage")
-                    counters.append((c, engine_type, weight))
+                    counters.append((c, engine_type))
                 except Exception as e:
-                    print(f"Skipping {inst}: {e}")
-
-    # First collection (warm-up)
+                    logger.info(f"Skipping {inst}: {e}")
     win32pdh.CollectQueryData(query)
-    time.sleep(0.2)
+    time.sleep(1)
     win32pdh.CollectQueryData(query)
 
-    # Track totals per type
     engine_totals = defaultdict(float)
-    for c, engine_type, weight in counters:
+    for c, engine_type in counters:
         try:
             _, val = win32pdh.GetFormattedCounterValue(c, win32pdh.PDH_FMT_DOUBLE)
             engine_totals[engine_type] += val
@@ -91,11 +81,8 @@ def get_gpu_utilization():
             pass
 
     win32pdh.CloseQuery(query)
+    return engine_totals
 
-    # Calculate weighted total
-    weighted_total = sum(engine_totals[etype] * ENGINE_WEIGHTS[etype] for etype in engine_totals)
-
-    return weighted_total, engine_totals
 
 def start_gpu_monitoring(interval_seconds, stop_event, output_dir=None):
     if output_dir is None:
@@ -109,39 +96,41 @@ def start_gpu_monitoring(interval_seconds, stop_event, output_dir=None):
     try:
         with open(gpu_file, mode, newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            if mode=='w':
+            if mode == 'w':
                 writer.writerow([
                     "timestamp", "total_memory_mb", "dedicated_memory_mb", "shared_memory_mb",
-                    "weighted_utilization_percent", "3D_utilization_percent", "VideoEncode_utilization_percent",
-                    "VideoDecode_utilization_percent", "VideoProcessing_utilization_percent","compute"
+                    "3D_utilization_percent", "VideoEncode_utilization_percent",
+                    "VideoDecode_utilization_percent", "VideoProcessing_utilization_percent",
+                    "Copy_utilization_percent", "Compute_utilization_percent"
                 ])
-                file.flush()  
+                file.flush()
 
             while not stop_event.is_set():
                 start_time = time.perf_counter()
                 timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
                 try:
                     total, dedicated, shared = get_gpu_memory_total()
-                    weighted_utilization, engine_totals = get_gpu_utilization()
+                    engine_totals = get_gpu_utilization()
 
                     if total is not None:
                         writer.writerow([
-                            timestamp, total, dedicated, shared, weighted_utilization,
+                            timestamp, total, dedicated, shared,
                             engine_totals.get("engtype_3D", 0.0),
                             engine_totals.get("engtype_VideoEncode", 0.0),
                             engine_totals.get("engtype_VideoDecode", 0.0),
                             engine_totals.get("engtype_VideoProcessing", 0.0),
-                            -1
+                            engine_totals.get("engtype_Copy", 0.0),
+                            engine_totals.get("engtype_Compute", 0.0)
                         ])
                     else:
-                        writer.writerow([timestamp, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,-1])
-                    file.flush()  
+                        writer.writerow([timestamp, 0.0, 0.0, 0.0] + [0.0]*6)
+                    file.flush()
                 except Exception as e:
                     print(f"Error: {e}")
-                    writer.writerow([timestamp, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,-1])
+                    writer.writerow([timestamp, 0.0, 0.0, 0.0] + [0.0]*6)
                     file.flush()
-                
+
                 elapsed_time = time.perf_counter() - start_time
                 stop_event.wait(max(0, interval_seconds - elapsed_time))
     except KeyboardInterrupt:
-        print("\nGPU monitoring stopped by user.")
+        logger.info("\nGPU monitoring stopped by user.")

@@ -32,7 +32,6 @@ def read_log_file(file_path, indices):
                 timestamp = values[0]
                 data_points = [float(values[i]) for i in indices]
                 data.append([timestamp] + data_points)
-            # logger.info(f"Successfully read data from {file_path}")
             return data
     except Exception as e:
         logger.error(f"Error reading log file {file_path}: {e}")
