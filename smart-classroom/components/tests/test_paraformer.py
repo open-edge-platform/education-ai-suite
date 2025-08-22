@@ -17,7 +17,7 @@ class TestParaformer(unittest.TestCase):
         mock_model = MagicMock()
         MockAutoModel.return_value = mock_model
 
-        paraformer = Paraformer(TEST_MODEL, device="cpu", enable_diarization=False)
+        paraformer = Paraformer(TEST_MODEL, device="cpu")
         self.assertEqual(paraformer.model, mock_model)
 
         paraformer_invalid = Paraformer("invalid-model", device="cpu")
