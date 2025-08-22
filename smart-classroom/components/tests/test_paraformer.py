@@ -5,38 +5,11 @@ from unittest.mock import patch, MagicMock
 from components.asr.funasr.paraformer import Paraformer, FUNASR_MODEL_LIST
 
 EN_AUDIO_EXAMPLE_URL = "https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/test_audio/asr_example_en.wav"
-EN_AUDIO_TRANSCRIPT = "he tried to think how it could be"
+EN_AUDIO_TRANSCRIPT = "he tried to think how it could be."
 ZH_AUDIO_EXAMPLE_URL = "https://isv-data.oss-cn-hangzhou.aliyuncs.com/ics/MaaS/ASR/test_audio/asr_example_zh.wav"
-ZH_AUDIO_TRANSCRIPT = "欢迎大家来体验达摩院推出的语音识别模型"
+ZH_AUDIO_TRANSCRIPT = "欢迎大家来体验达摩院推出的语音识别模型。"
 
 TEST_MODEL = FUNASR_MODEL_LIST[0]
-
-# a simplified calculation of WER, without proper tokenization, for simple test only
-def calculate_wer(reference, hypothesis):
-    """
-    Calculate the Word Error Rate (WER) between the reference and hypothesis.
-    """
-    ref_words = reference.split()
-    hyp_words = hypothesis.split()
-    d = [[0] * (len(hyp_words) + 1) for _ in range(len(ref_words) + 1)]
-
-    for i in range(len(ref_words) + 1):
-        d[i][0] = i
-    for j in range(len(hyp_words) + 1):
-        d[0][j] = j
-
-    for i in range(1, len(ref_words) + 1):
-        for j in range(1, len(hyp_words) + 1):
-            if ref_words[i - 1] == hyp_words[j - 1]:
-                d[i][j] = d[i - 1][j - 1]
-            else:
-                d[i][j] = min(
-                    d[i - 1][j] + 1,  # Deletion
-                    d[i][j - 1] + 1,  # Insertion
-                    d[i - 1][j - 1] + 1,  # Substitution
-                )
-
-    return d[len(ref_words)][len(hyp_words)] / len(ref_words)
 
 class TestParaformer(unittest.TestCase):
     @patch("components.asr.funasr.paraformer.AutoModel")
@@ -71,10 +44,8 @@ class TestParaformer(unittest.TestCase):
             print("Model generated transcript: ", result)
             print("Expected transcript: ", expected_transcription)
 
-            wer = calculate_wer(expected_transcription.lower(), result.lower())
-
             # Assertions
-            self.assertLess(wer, 5, f"WER is too high: {wer:.2f}")
+            self.assertEqual(expected_transcription.lower(), result.lower())
         finally:
             # Clean up the downloaded file
             if os.path.exists(local_audio_path):
@@ -101,10 +72,8 @@ class TestParaformer(unittest.TestCase):
             print("Model generated transcript: ", result)
             print("Expected transcript: ", expected_transcription)
 
-            wer = calculate_wer(expected_transcription.lower(), result.lower())
-
             # Assertions
-            self.assertLess(wer, 5, f"WER is too high: {wer:.2f}")
+            self.assertEqual(expected_transcription.lower(), result.lower())
         finally:
             # Clean up the downloaded file
             if os.path.exists(local_audio_path):

@@ -22,7 +22,7 @@ class Paraformer(BaseASR):
                 self.model = AutoModel(model=model_name, model_revision=revision,
                                 vad_model="fsmn-vad", vad_model_revision="v2.0.4",
                                 punc_model="iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch", punc_model_revision=revision,
-                                  spk_model="cam++", spk_model_revision="v2.0.2",
+                                spk_model="cam++", spk_model_revision="v2.0.2",
                                 device=device, disable_update=True, ncpu=ncpu
                                 )
             else:
