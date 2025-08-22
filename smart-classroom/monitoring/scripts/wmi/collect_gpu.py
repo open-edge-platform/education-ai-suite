@@ -69,7 +69,7 @@ def get_gpu_utilization():
                 except Exception as e:
                     logger.info(f"Skipping {inst}: {e}")
     win32pdh.CollectQueryData(query)
-    time.sleep(1)
+    time.sleep(0.2)
     win32pdh.CollectQueryData(query)
 
     engine_totals = defaultdict(float)
