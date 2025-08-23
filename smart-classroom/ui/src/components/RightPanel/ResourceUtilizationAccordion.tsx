@@ -3,28 +3,29 @@ import { Line } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
 import Accordion from '../common/Accordion'; 
 import '../../assets/css/RightPanel.css'
+import resourceData from '../../mock-data/metrics.json'; // direct import
 
 Chart.register(...registerables);
 
 const ResourceUtilizationAccordion: React.FC = () => {
-  const [resourceData, setResourceData] = useState<any>(null);
+  // const [resourceData, setResourceData] = useState<any>(null);
 
-  useEffect(() => {
-    const fetchResourceData = async () => {
-      try {
-        const response = await fetch("../../../public/mock-data/metrics.json"); 
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        const data = await response.json();
-        setResourceData(data);
-      } catch (error) {
-        console.error('Error fetching resource data:', error);
-      }
-    };
+  // useEffect(() => {
+  //   const fetchResourceData = async () => {
+  //     try {
+  //       const response = await fetch("/mock-data/metrics.json"); 
+  //       if (!response.ok) {
+  //         throw new Error('Network response was not ok');
+  //       }
+  //       const data = await response.json();
+  //       setResourceData(data);
+  //     } catch (error) {
+  //       console.error('Error fetching resource data:', error);
+  //     }
+  //   };
 
-    fetchResourceData();
-  }, []);
+  //   fetchResourceData();
+  // }, []);
 
 const createChartData = (data: any[], label: string) => {
   return {

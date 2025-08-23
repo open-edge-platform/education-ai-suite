@@ -3,6 +3,7 @@ import TranscriptsTab from "../Tabs/TranscriptsTab";
 import AISummaryTab from "../Tabs/AISummaryTab";
 import "../../assets/css/LeftPanel.css";
 
+
 const LeftPanel = () => {
   const [activeTab, setActiveTab] = useState<"transcripts" | "summary">("transcripts");
 

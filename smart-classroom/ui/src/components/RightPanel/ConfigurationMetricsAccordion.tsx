@@ -1,23 +1,24 @@
 import React, { useState, useEffect } from "react";
 import Accordion from "../common/Accordion";
 import "../../assets/css/RightPanel.css"; 
+import configData from "../../mock-data/configuration_metrics.json"; // direct import
 
 const ConfigurationMetricsAccordion: React.FC = () => {
-  const [configData, setConfigData] = useState<any>(null);
+ // const [configData, setConfigData] = useState<any>(null);
 
-  useEffect(() => {
-    const fetchConfiguration = async () => {
-      try {
-        const response = await fetch("../../../public/mock-data/configuration_metrics.json"); 
-        const data = await response.json();
-        setConfigData(data);
-      } catch (error) {
-        console.error("Error fetching configuration data:", error);
-      }
-    };
+  // useEffect(() => {
+  //   const fetchConfiguration = async () => {
+  //     try {
+  //       const response = await fetch("/mock-data/configuration_metrics.json"); 
+  //       const data = await response.json();
+  //       setConfigData(data);
+  //     } catch (error) {
+  //       console.error("Error fetching configuration data:", error);
+  //     }
+  //   };
 
-    fetchConfiguration();
-  }, []);
+  //   fetchConfiguration();
+  // }, []);
 
   return (
     <Accordion title="Configuration & Metrics">
