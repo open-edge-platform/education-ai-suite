@@ -2,6 +2,7 @@ import os
 import json
 from threading import Thread
 from typing import Union
+from pathlib import Path
 
 
 class StorageManager:
@@ -44,3 +45,16 @@ class StorageManager:
     @staticmethod
     def save_async(path: str, data: Union[str, dict], append: bool = False):
         Thread(target=StorageManager._write, args=(path, data, append)).start()
+
+    @staticmethod
+    def read_text_file(path: str | Path) -> str | None:
+        """
+        Reads a text file and returns its content as a string.
+        Returns None if the file is empty or contains only whitespace.
+        """
+        try:
+            return Path(path).read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Error reading file {path}: {e}")

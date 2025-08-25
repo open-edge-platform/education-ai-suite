@@ -12,16 +12,19 @@ models:
     provider: openai # funasr and openai supported
     name: whisper-tiny # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
     language: en # optional
-    device: CPU # or GPU
+    device: CPU # only CPU for whisper
     temperature: 0.0
 
-  # summarizer:
-    # provider: openvino
-    # name: qwen2-7B
-    # device: CPU
-    # max_tokens: 512
-    # temperature: 0.7
-    # top_p: 0.9
+  summarizer:
+    provider: openvino
+    name: Qwen/Qwen1.5-7B-Chat
+    device: GPU # GPU or CPU
+    weight_format: fp16
+    quant_mode: int8
+    # max_tokens: 1000
+    temperature: 0.7
+    models_base_path: "models"
+    system_prompt: "Summarize the classroom transcription in clear English. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription. return the result in Markdown"
 
 audio_preprocessing:
   chunk_duration_sec: 30
