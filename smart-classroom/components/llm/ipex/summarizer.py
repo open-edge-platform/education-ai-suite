@@ -4,7 +4,7 @@ import torch
 import threading
 
 from utils.config_loader import config
-import logger
+import logging
 logger = logging.getLogger(__name__)
 
 from transformers import TextIteratorStreamer

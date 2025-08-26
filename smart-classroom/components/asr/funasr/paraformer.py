@@ -1,7 +1,7 @@
 from components.asr.base_asr import BaseASR
 from funasr import AutoModel
 
-import logger
+import logging
 logger = logging.getLogger(__name__)
 
 FUNASR_MODEL_MAP = {
