@@ -3,6 +3,10 @@ from unittest.mock import patch, MagicMock
 import os
 
 TEST_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+TEST_PROMPT = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Please summarize the following: The Smart Classroom project is a modular, extensible framework designed to process and summarize educational content using advanced AI models. It supports transcription, summarization, and future capabilities like video understanding and real-time analysis. "}
+    ]
 
 class TestSummarizer(unittest.TestCase):
     @patch("components.llm.ipex.summarizer.config")
@@ -50,6 +54,23 @@ class TestSummarizer(unittest.TestCase):
 
             result = summarizer.generate("test prompt", stream=False)
             self.assertEqual(result, "summary")
+
+    @patch("components.llm.ipex.summarizer.config")
+    def test_generate_stream(self, mock_config):
+        mock_config.models.summarizer.model_hub = "huggingface"
+        mock_config.models.summarizer.max_new_tokens = 50
+        from components.llm.ipex.summarizer import Summarizer
+        model = Summarizer(TEST_MODEL, "xpu")
+        for response in model.generate(TEST_PROMPT):
+            print(response)
+
+    @patch("components.llm.ipex.summarizer.config")
+    def test_generate_nonstream(self, mock_config):
+        mock_config.models.summarizer.model_hub = "huggingface"
+        mock_config.models.summarizer.max_new_tokens = 50
+        from components.llm.ipex.summarizer import Summarizer
+        model = Summarizer(TEST_MODEL, "xpu")
+        print(model.generate(TEST_PROMPT, stream=False))
 
 if __name__ == "__main__":
     unittest.main()
