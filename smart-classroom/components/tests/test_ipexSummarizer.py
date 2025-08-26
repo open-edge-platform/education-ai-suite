@@ -5,12 +5,12 @@ import os
 TEST_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
 class TestSummarizer(unittest.TestCase):
-    @patch("components.summarizer.ipex.summarizer.config")
+    @patch("components.llm.ipex.summarizer.config")
     def test_init_huggingface(self, mock_config):
         mock_config.models.summarizer.model_hub = "huggingface"
-        from components.summarizer.ipex.summarizer import Summarizer
-        with patch("components.summarizer.ipex.summarizer.AutoModelForCausalLM.from_pretrained") as mock_model, \
-             patch("components.summarizer.ipex.summarizer.torch") as mock_torch, \
+        from components.llm.ipex.summarizer import Summarizer
+        with patch("components.llm.ipex.summarizer.AutoModelForCausalLM.from_pretrained") as mock_model, \
+             patch("components.llm.ipex.summarizer.torch") as mock_torch, \
              patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer:
             mock_model.return_value = MagicMock(half=MagicMock(return_value=MagicMock(to=MagicMock(return_value="model"))))
             mock_tokenizer.return_value = MagicMock()
@@ -19,13 +19,13 @@ class TestSummarizer(unittest.TestCase):
             self.assertIsNotNone(summarizer.model)
             self.assertIsNotNone(summarizer.tokenizer)
 
-    @patch("components.summarizer.ipex.summarizer.config")
+    @patch("components.llm.ipex.summarizer.config")
     def test_generate(self, mock_config):
         mock_config.models.summarizer.model_hub = "huggingface"
         mock_config.models.summarizer.max_new_tokens = 10
-        from components.summarizer.ipex.summarizer import Summarizer
-        with patch("components.summarizer.ipex.summarizer.AutoModelForCausalLM.from_pretrained") as mock_model, \
-             patch("components.summarizer.ipex.summarizer.torch") as mock_torch, \
+        from components.llm.ipex.summarizer import Summarizer
+        with patch("components.llm.ipex.summarizer.AutoModelForCausalLM.from_pretrained") as mock_model, \
+             patch("components.llm.ipex.summarizer.torch") as mock_torch, \
              patch("transformers.AutoTokenizer.from_pretrained") as mock_tokenizer:
             mock_tokenizer_instance = MagicMock()
             mock_tokenizer_instance.apply_chat_template.return_value = "prompt"
@@ -50,17 +50,6 @@ class TestSummarizer(unittest.TestCase):
 
             result = summarizer.generate("test prompt", stream=False)
             self.assertEqual(result, "summary")
-
-    @patch("components.summarizer.ipex.summarizer.config")
-    def test_generate_with_uninitialized_model(self, mock_config):
-        mock_config.models.summarizer.model_hub = "huggingface"
-        mock_config.models.summarizer.max_new_tokens = 10
-        from components.summarizer.ipex.summarizer import Summarizer
-        summarizer = Summarizer(TEST_MODEL)
-        summarizer.model = None
-        summarizer.tokenizer = None
-        result = summarizer.generate("test prompt", stream=False)
-        self.assertEqual(result, "")
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-from components.summarizer.base_summarizer import BaseSummarizer
+from components.llm.base_summarizer import BaseSummarizer
 from ipex_llm.transformers import AutoModelForCausalLM
 import torch
 import threading
