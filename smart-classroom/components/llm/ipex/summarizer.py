@@ -41,23 +41,20 @@ class Summarizer(BaseSummarizer):
         )
 
     def generate(self, prompt: str, stream: bool = True):
-        #Summarize
         if config.models.summarizer.max_new_tokens is not None:
             max_new_tokens = config.models.summarizer.max_new_tokens
         else:
             max_new_tokens = 1024
 
-        response = ""
-        if not stream:
-            try:
-                with torch.inference_mode():
-                    text = self.tokenizer.apply_chat_template(
-                        prompt,
-                        tokenize=False,
-                        add_generation_prompt=True
-                    )
-                    model_inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
-
+        with torch.inference_mode():
+            text = self.tokenizer.apply_chat_template(
+                prompt,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            model_inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
+            if not stream:
+                try:
                     generated_ids = self.model.generate(
                         model_inputs.input_ids,
                         max_new_tokens=max_new_tokens
@@ -69,19 +66,12 @@ class Summarizer(BaseSummarizer):
                     ]
 
                     response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-            except Exception as e:
-                logger.error(f"Error during generation: {e}")
-            return response
-        else:
-            # Streaming output using TextIteratorStreamer
-            try:
-                with torch.inference_mode():
-                    text = self.tokenizer.apply_chat_template(
-                        prompt,
-                        tokenize=False,
-                        add_generation_prompt=True
-                    )
-                    model_inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
+                    return response
+                except Exception as e:
+                    logger.error(f"Error during generation: {e}")
+                    return None
+            else:
+                try:
                     streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True, skip_prompt=True)
                     gen_kwargs = dict(
                         input_ids=model_inputs.input_ids,
@@ -92,6 +82,6 @@ class Summarizer(BaseSummarizer):
                     thread = threading.Thread(target=self.model.generate, kwargs=gen_kwargs)
                     thread.start()
                     return streamer
-            except Exception as e:
-                logger.error(f"Error during streaming generation: {e}")
-                return None
+                except Exception as e:
+                    logger.error(f"Error during streaming generation: {e}")
+                    return None
