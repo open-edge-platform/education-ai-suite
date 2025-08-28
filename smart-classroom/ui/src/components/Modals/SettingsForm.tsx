@@ -4,7 +4,8 @@ import MicrophoneSelect from '../Inputs/MicrophoneSelect';
 import ProjectLocationInput from '../Inputs/ProjectLocationInput';
 import '../../assets/css/SettingsForm.css';
 import folderIcon from '../../assets/images/folder.svg';
-import { constants } from '../../../public/constants';
+import { saveSettings, getSettings } from '../../services/api';
+import { useTranslation } from 'react-i18next';
 
 interface SettingsFormProps {
   onClose: () => void;
@@ -13,40 +14,85 @@ interface SettingsFormProps {
 }
 
 const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setProjectName }) => {
-  const [selectedMicrophone, setSelectedMicrophone] = useState(constants.MICRO_PHONE);
+  const [selectedMicrophone, setSelectedMicrophone] = useState('');
   const [projectLocation, setProjectLocation] = useState('/live/stream');
+  const dirInputRef = React.useRef<HTMLInputElement>(null);
+  const { t } = useTranslation();
+
+  React.useEffect(() => {
+    getSettings().then(s => {
+      if (!s) return;
+      setProjectName(s.projectName);
+      setProjectLocation(s.projectLocation);
+      setSelectedMicrophone(s.microphone);
+    });
+  }, [setProjectName]);
+
+  const openDirectoryPicker = async () => {
+    if ('showDirectoryPicker' in window) {
+      try {
+        // @ts-expect-error: experimental API
+        const dir = await window.showDirectoryPicker();
+        setProjectLocation(dir.name || '/live/stream');
+        return;
+      } catch { /* user cancelled */ }
+    }
+    dirInputRef.current?.click();
+  };
+
+  const handleSave = async () => {
+    const settings = { projectName, projectLocation, microphone: selectedMicrophone };
+    await saveSettings(settings);
+    onClose();
+  };
 
   return (
     <div className="settings-form">
-      <h2>Settings</h2>
+      <h2>{t('settings.title')}</h2>
       <div className="settings-body">
         <div>
-          <label htmlFor="projectName">Project Name</label>
+          <label htmlFor="projectName">{t('settings.projectName')}</label>
           <ProjectNameInput projectName={projectName} onChange={setProjectName} />
         </div>
         <div>
-          <label htmlFor="projectLocation">Project Location</label>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
+          <label htmlFor="projectLocation">{t('settings.projectLocation')}</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ProjectLocationInput projectLocation={projectLocation} onChange={setProjectLocation} />
             <img
               src={folderIcon}
-              alt="Upload Icon"
+              alt={t('settings.projectLocation')}
               className="upload-icon"
-              title="Click to select a directory path"
+              title={t('settings.projectLocation')}
+              onClick={openDirectoryPicker}
+              style={{ cursor: 'pointer' }}
             />
             <input
+              ref={dirInputRef}
               type="file"
               style={{ display: 'none' }}
+              // @ts-expect-error: non-standard Chromium attribute
+              webkitdirectory="true"
+              onChange={(e) => {
+                const anyFile = e.currentTarget.files?.[0];
+                if (anyFile) {
+                  const rel = anyFile.webkitRelativePath as string | undefined;
+                  if (rel) {
+                    const dir = rel.split('/')[0];
+                    setProjectLocation('/' + dir);
+                  }
+                }
+                e.currentTarget.value = '';
+              }}
             />
           </div>
         </div>
         <div>
-          <label htmlFor="microphone">Microphone</label>
+          <label htmlFor="microphone">{t('settings.microphone')}</label>
           <MicrophoneSelect selectedMicrophone={selectedMicrophone} onChange={setSelectedMicrophone} />
         </div>
       </div>
       <div className="button-container">
-        <button onClick={onClose} className="submit-button">OK</button>
+        <button onClick={handleSave} className="submit-button">{t('settings.ok')}</button>
       </div>
     </div>
   );

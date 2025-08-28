@@ -1,0 +1,75 @@
+{
+    "header": {
+      "title": "Smart Classroom Sample App",
+      "startRecording": "Start Recording",
+      "stopRecording": "Stop Recording",
+      "uploadFile": "Upload File",
+      "timer": "Timer"
+    },
+    "footer": {
+      "copyright": "© 2024 Smart Classroom Sample App"
+    },
+    "notifications": {
+      "start": "Start recording or upload an audio file to begin a new session",
+      "stop": "Stop recording to get AI summary",
+      "recording": "Recording…",
+      "uploading": "Uploading transcript…",
+      "generatingSummary": "Generating summary…",
+      "streamingSummary": "Streaming summary…",
+      "loadingTranscript": "Loading transcript…",
+      "analyzingAudio": "Analyzing audio…",
+      "summaryReady": "Summary ready"
+    },
+    "settings": {
+      "title": "Settings",
+      "projectName": "Project Name",
+      "projectLocation": "Project Location",
+      "microphone": "Microphone",
+      "ok": "OK"
+    },
+    "menu": {
+      "settings": "Settings",
+      "help": "Help",
+      "about": "About"
+    },
+    "tabs": {
+      "transcripts": "Transcripts",
+      "summary": "AI Summary"
+    },
+    "accordion": {
+      "configuration": "Configuration & Metrics",
+      "resource": "Resource Utilization",
+      "models": "Pre-validated Models",
+      "subtitle_configuration": "Platform and software configuration details",
+      "subtitle_resource": "CPU, GPU, Memory, and Power usage over time",
+      "subtitle_models": "Select models for transcripts and summary",
+      "platformConfiguration": "Platform Configuration",
+      "processor": "Processor",
+      "npu": "NPU",
+      "igpu": "iGPU",
+      "memory": "Memory",
+      "storage": "Storage",
+      "softwareConfiguration": "Software Configuration",
+      "llm": "LLM",
+      "asr": "ASR",
+      "performanceMetrics": "Performance Metrics",
+      "ttft": "TTFT",
+      "tpot": "TPOT",
+      "totalTokensProcessed": "Total tokens processed",
+      "timeToGenerateSummary": "Time taken to generate summary",
+      "loadingConfiguration": "Loading configuration data...",
+      "cpuUtilization": "CPU Utilization",
+      "gpuUtilization": "GPU Utilization",
+      "memoryUtilization": "Memory Utilization",
+      "powerUtilization": "Power Utilization",
+      "loadingResource": "Loading resource data...",
+      "transcriptsModel": "Transcripts Model",
+      "summaryModel": "Summary",
+      "whisper": "Whisper",
+      "model1": "Model 1",
+      "model2": "Model 2",
+      "gpt-4": "GPT-4",
+      "model3": "Model 3",
+      "model4": "Model 4"
+    }
+  }

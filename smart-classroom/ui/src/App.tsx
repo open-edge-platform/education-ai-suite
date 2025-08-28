@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import TopPanel from './components/TopPanel/TopPanel';
 import HeaderBar from './components/Header/Header';
 import Body from './components/common/Body';
-import { constants } from '../public/constants';
+import Footer from './components/Footer/Footer';
+import { constants } from './constants';
 import './App.css';
 
 const App: React.FC = () => {
@@ -18,7 +19,10 @@ const App: React.FC = () => {
         setIsSettingsOpen={setIsSettingsOpen}
       />
       <HeaderBar projectName={projectName} setProjectName={setProjectName} />
-      <Body isModalOpen={isSettingsOpen} />
+      <div className="main-content">
+        <Body isModalOpen={isSettingsOpen} />
+      </div>
+      <Footer />
     </div>
   );
 };

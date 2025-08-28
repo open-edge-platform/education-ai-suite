@@ -1,48 +1,52 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import "../../assets/css/TranscriptsTab.css";
 import transcriptData from "../../mock-data/mock_transcript.json";
+import { simulateTranscriptStream } from "../../services/streamSimulator";
+import { useAppDispatch, useAppSelector } from "../../redux/hooks";
+import { appendTranscript, finishTranscript, startTranscript } from "../../redux/slices/transcriptSlice";
+import { transcriptionComplete } from "../../redux/slices/uiSlice";
 
-const TYPE_SPEED = 30;   // ms per character
-const CHUNK_DELAY = 80;  // ms between chunks
-
-const TranscriptsTab = () => {
-  const [displayedTranscript, setDisplayedTranscript] = useState("");
-  const runId = useRef(0);
-
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const TranscriptsTab: React.FC = () => {
+  const dispatch = useAppDispatch();
+  const abortRef = useRef<AbortController | null>(null);
+  const startedRef = useRef(false);
+  const { finalText, streamingText } = useAppSelector(s => s.transcript);
+  const aiProcessing = useAppSelector(s => s.ui.aiProcessing);
 
   useEffect(() => {
-    const id = ++runId.current;
+    if (!aiProcessing || startedRef.current) return;
+    startedRef.current = true;
+
+    const aborter = new AbortController();
+    abortRef.current = aborter;
 
     const run = async () => {
-      setDisplayedTranscript("");
-      const chunks: string[] = Array.isArray(transcriptData.transcript)
-        ? transcriptData.transcript.map((c: unknown) => String(c ?? ""))
-        : [];
-
-      for (let c = 0; c < chunks.length; c++) {
-        const chunk = chunks[c];
-        for (let i = 0; i < chunk.length; i++) {
-          if (runId.current !== id) return; // canceled (StrictMode or unmount)
-          setDisplayedTranscript((prev) => prev + chunk.charAt(i));
-          await sleep(TYPE_SPEED);
+      const chunks: string[] = Array.isArray((transcriptData as any).transcript)
+        ? (transcriptData as any).transcript : [];
+      const stream = simulateTranscriptStream(chunks, { startDelayMs: 1200, tokenDelayMs: 120, signal: aborter.signal });
+      let sentFirst = false;
+      try {
+        for await (const ev of stream) {
+          if (ev.type === "transcript") {
+            if (!sentFirst) { dispatch(startTranscript()); sentFirst = true; }
+            dispatch(appendTranscript(ev.token));
+          } else if (ev.type === "done") {
+            dispatch(finishTranscript());
+            dispatch(transcriptionComplete()); // triggers summaryEnabled
+          }
         }
-        if (runId.current !== id) return;
-        await sleep(CHUNK_DELAY);
-      }
+      } catch { /* ignore aborts */ }
     };
 
     run();
-    return () => {
-      // invalidate this run (stops any pending awaits)
-      runId.current++;
-    };
-  }, []);
+    return () => aborter.abort();
+  }, [dispatch, aiProcessing]);
+
+  const text = finalText ?? streamingText;
 
   return (
     <div className="transcripts-tab">
-      <h2>Live Transcript</h2>
-      <div className="transcript-content">{displayedTranscript}</div>
+      <div className="transcript-content">{text}</div>
     </div>
   );
 };

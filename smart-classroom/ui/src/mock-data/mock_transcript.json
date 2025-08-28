@@ -1,13 +1,32 @@
 {
-    "transcript": [
-      "Welcome to the Smart Classroom demo.",
-      "This is a sample transcript streaming in real-time.",
-      "You can see the text appear as if it is being typed.",
-      "Enjoy testing the typewriter effect!",
-      "The system supports live transcription for lectures.",
-      "Students can follow along as the instructor speaks.",
-      "Transcripts are updated seamlessly and in real-time.",
-      "This improves accessibility and engagement for everyone.",
-      "Thank you for trying out this feature!"
-    ]
-  }
+  "transcript": [
+    "Good morning everyone. Today we are exploring ecosystems and how energy moves through a food web.",
+    "An ecosystem is a community of living organisms interacting with each other and with their physical environment.",
+    "Producers, like plants and algae, capture sunlight through photosynthesis and convert it into chemical energy.",
+    "This stored energy forms the base of the food web and supports consumers such as herbivores, carnivores, and omnivores.",
+    "Decomposers, including fungi and bacteria, break down dead material and recycle nutrients back into the soil.",
+    "Energy transfer between trophic levels is inefficient. Typically, only about ten percent of energy moves up to the next level.",
+    "Because of this energy loss, food webs have many producers, fewer primary consumers, and even fewer top predators.",
+    "Let’s consider a simple pond ecosystem: phytoplankton are producers, zooplankton are primary consumers,",
+    "small fish eat zooplankton, larger fish eat small fish, and birds like herons may eat the larger fish.",
+    "If pollution reduces the phytoplankton, it limits energy entering the system and can collapse higher trophic levels.",
+    "Biodiversity increases ecosystem stability. With more species playing similar roles, the system is more resilient to change.",
+    "Disturbances like droughts or invasive species can shift the balance, but diverse ecosystems recover more quickly.",
+    "Human activities such as habitat destruction and nutrient runoff can degrade ecosystems and reduce biodiversity.",
+    "Restoration efforts focus on removing stressors, reintroducing native species, and allowing natural processes to resume.",
+    "Now, let’s connect to cycles: water, carbon, and nitrogen cycles link ecosystems across regions and timescales.",
+    "The water cycle moves water via evaporation, condensation, precipitation, and runoff, distributing life’s most basic resource.",
+    "The carbon cycle ties photosynthesis and respiration together. Plants fix carbon; consumers and decomposers return it to the atmosphere.",
+    "Excess atmospheric CO2 from fossil fuels intensifies the greenhouse effect, altering temperature and precipitation patterns.",
+    "The nitrogen cycle depends on specialized bacteria that fix atmospheric nitrogen into forms organisms can use.",
+    "Agricultural fertilizers add reactive nitrogen, which can wash into waterways and cause algal blooms.",
+    "When algal blooms die, decomposition consumes oxygen, creating hypoxic zones that stress or kill aquatic life.",
+    "Sustainable practices—buffer strips, wetland conservation, and precision fertilization—help protect water quality.",
+    "Food webs are dynamic. Seasonal changes, migration, and life cycles cause energy pathways to shift over time.",
+    "Monitoring indicators such as species richness, primary productivity, and nutrient concentrations helps assess ecosystem health.",
+    "Technologies like remote sensing and environmental DNA give scientists powerful tools to track change at scale.",
+    "Finally, remember that small actions scale up: reducing waste, supporting habitat projects, and informed policy choices matter.",
+    "In our next session, we will analyze a case study where wetland restoration increased biodiversity and improved water quality.",
+    "For now, take a moment to sketch a food web from your local area and note possible stressors and mitigation strategies."
+  ]
+}

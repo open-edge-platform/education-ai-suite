@@ -1,50 +1,37 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import Accordion from "../common/Accordion";
 import "../../assets/css/RightPanel.css"; 
-import configData from "../../mock-data/configuration_metrics.json"; // direct import
+import configData from "../../mock-data/configuration_metrics.json";
+import { useTranslation } from 'react-i18next';
 
 const ConfigurationMetricsAccordion: React.FC = () => {
- // const [configData, setConfigData] = useState<any>(null);
-
-  // useEffect(() => {
-  //   const fetchConfiguration = async () => {
-  //     try {
-  //       const response = await fetch("/mock-data/configuration_metrics.json"); 
-  //       const data = await response.json();
-  //       setConfigData(data);
-  //     } catch (error) {
-  //       console.error("Error fetching configuration data:", error);
-  //     }
-  //   };
-
-  //   fetchConfiguration();
-  // }, []);
-
+  const { t } = useTranslation();
   return (
-    <Accordion title="Configuration & Metrics">
+    <Accordion title={t('accordion.configuration')}>
+      <div className="accordion-subtitle">{t('accordion.subtitle_configuration')}</div>
       {configData ? (
         <div className="configuration-metrics">
           <div className="platform-configuration">
-            <h3>Platform Configuration</h3>
-            <p>Processor: {configData.platform_configuration.processor}</p>
-            <p>NPU: {configData.platform_configuration.npu}</p>
-            <p>iGPU: {configData.platform_configuration.igpu}</p>
-            <p>Memory: {configData.platform_configuration.memory}</p>
-            <p>Storage: {configData.platform_configuration.storage}</p>
+            <h3>{t('accordion.platformConfiguration') || "Platform Configuration"}</h3>
+            <p>{t('accordion.processor') || "Processor"}: {configData.platform_configuration.processor}</p>
+            <p>{t('accordion.npu') || "NPU"}: {configData.platform_configuration.npu}</p>
+            <p>{t('accordion.igpu') || "iGPU"}: {configData.platform_configuration.igpu}</p>
+            <p>{t('accordion.memory') || "Memory"}: {configData.platform_configuration.memory}</p>
+            <p>{t('accordion.storage') || "Storage"}: {configData.platform_configuration.storage}</p>
           </div>
           <div className="software-performance">
-            <h3>Software Configuration</h3>
-            <p>LLM: {configData.software_configuration.llm}</p>
-            <p>ASR: {configData.software_configuration.asr}</p>
-            <h3>Performance Metrics</h3>
-            <p>TTFT: {configData.performance_metrics.ttft}</p>
-            <p>TPOT: {configData.performance_metrics.tpot}</p>
-            <p>Total tokens processed: {configData.performance_metrics.total_tokens_processed}</p>
-            <p>Time taken to generate summary: {configData.performance_metrics.time_to_generate_summary}</p>
+            <h3>{t('accordion.softwareConfiguration') || "Software Configuration"}</h3>
+            <p>{t('accordion.llm') || "LLM"}: {configData.software_configuration.llm}</p>
+            <p>{t('accordion.asr') || "ASR"}: {configData.software_configuration.asr}</p>
+            <h3>{t('accordion.performanceMetrics') || "Performance Metrics"}</h3>
+            <p>{t('accordion.ttft') || "TTFT"}: {configData.performance_metrics.ttft}</p>
+            <p>{t('accordion.tpot') || "TPOT"}: {configData.performance_metrics.tpot}</p>
+            <p>{t('accordion.totalTokensProcessed') || "Total tokens processed"}: {configData.performance_metrics.total_tokens_processed}</p>
+            <p>{t('accordion.timeToGenerateSummary') || "Time taken to generate summary"}: {configData.performance_metrics.time_to_generate_summary}</p>
           </div>
         </div>
       ) : (
-        <p>Loading configuration data...</p>
+        <p className="accordion-content">{t('accordion.loadingConfiguration') || "Loading configuration data..."}</p>
       )}
     </Accordion>
   );
