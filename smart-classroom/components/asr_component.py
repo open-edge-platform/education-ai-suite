@@ -3,26 +3,35 @@ import os
 from utils.config_loader import config
 from utils.storage_manager import StorageManager
 from utils.runtime_config_loader import RuntimeConfig
+from components.asr.openai.whisper import Whisper
+from components.asr.funasr.paraformer import Paraformer
 
 DELETE_CHUNK_AFTER_USE =  config.pipeline.delete_chunks_after_use
-LOGS_DIR =  config.app.logs_dir
 
 class ASRComponent(PipelineComponent):
-    def __init__(self, session_id, provider="openai", model="whisper-small", device="cpu", temperature = 0.0): 
+
+    _model = None
+    _config = None
+
+    def __init__(self, session_id, provider="openai", model_name="whisper-small", device="cpu", temperature=0.0):
+
         self.session_id = session_id
-        provider = provider.lower()
-        model = model.lower()
-
-        if provider == "openai" and "whisper" in model:
-            from components.asr.openai.whisper import Whisper
-            self.asr =  Whisper(model, device, None)
-        elif provider == "funasr" and "paraformer" in model:
-            from components.asr.funasr.paraformer import Paraformer
-            self.asr =  Paraformer(model, device, None)
-        else:
-            raise ValueError(f"Unsupported ASR provider/model: {provider}/{model}")
-
         self.temperature = temperature
+        provider, model_name = provider.lower(), model_name.lower()
+
+        config = (provider, model_name, device)
+
+        # Reload only if config changed
+        if ASRComponent._model is None or ASRComponent._config != config:
+            if provider == "openai" and "whisper" in model_name:
+                ASRComponent._model = Whisper(model_name, device, None)
+            elif provider == "funasr" and "paraformer" in model_name:
+                ASRComponent._model = Paraformer(model_name, device, None)
+            else:
+                raise ValueError(f"Unsupported ASR provider/model: {provider}/{model_name}")
+            ASRComponent._config = config
+
+        self.asr = ASRComponent._model
 
     def process(self, input_generator):
 

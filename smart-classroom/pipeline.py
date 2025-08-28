@@ -18,11 +18,11 @@ class Pipeline:
         # Bind models during construction
         self.transcription_pipeline = [
             AudioStreamReader(self.session_id),
-            ASRComponent(self.session_id, model=config.models.asr.name , temperature=config.models.asr.temperature) 
+            ASRComponent(self.session_id, provider=config.models.asr.provider, model_name=config.models.asr.name , temperature=config.models.asr.temperature) 
         ]
 
         self.summarizer_pipeline = [
-            SummarizerComponent(self.session_id, model_name=config.models.summarizer.name, temperature=config.models.summarizer.temperature, device=config.models.summarizer.device)
+            SummarizerComponent(self.session_id, provider=config.models.summarizer.provider, model_name=config.models.summarizer.name, temperature=config.models.summarizer.temperature, device=config.models.summarizer.device)
         ]
 
     def run_transcription(self, audio_path: str):
