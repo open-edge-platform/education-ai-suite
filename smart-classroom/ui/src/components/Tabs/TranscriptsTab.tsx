@@ -1,10 +1,9 @@
 import React, { useEffect, useRef } from "react";
 import "../../assets/css/TranscriptsTab.css";
-import transcriptData from "../../mock-data/mock_transcript.json";
-import { simulateTranscriptStream } from "../../services/streamSimulator";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { appendTranscript, finishTranscript, startTranscript } from "../../redux/slices/transcriptSlice";
 import { transcriptionComplete } from "../../redux/slices/uiSlice";
+import { streamTranscript } from "../../services/api";
 
 const TranscriptsTab: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -21,9 +20,8 @@ const TranscriptsTab: React.FC = () => {
     abortRef.current = aborter;
 
     const run = async () => {
-      const chunks: string[] = Array.isArray((transcriptData as any).transcript)
-        ? (transcriptData as any).transcript : [];
-      const stream = simulateTranscriptStream(chunks, { startDelayMs: 1200, tokenDelayMs: 120, signal: aborter.signal });
+      // Replace 'sessionId' with your actual session identifier
+      const stream = streamTranscript('sessionId', { signal: aborter.signal });
       let sentFirst = false;
       try {
         for await (const ev of stream) {
@@ -32,7 +30,7 @@ const TranscriptsTab: React.FC = () => {
             dispatch(appendTranscript(ev.token));
           } else if (ev.type === "done") {
             dispatch(finishTranscript());
-            dispatch(transcriptionComplete()); // triggers summaryEnabled
+            dispatch(transcriptionComplete());
           }
         }
       } catch { /* ignore aborts */ }
@@ -46,7 +44,12 @@ const TranscriptsTab: React.FC = () => {
 
   return (
     <div className="transcripts-tab">
-      <div className="transcript-content">{text}</div>
+      <div className="transcript-content">
+        {text && text.trim().length > 0
+          ? text
+          : <span style={{ color: "#888" }}>Transcripts not found</span>
+        }
+      </div>
     </div>
   );
 };

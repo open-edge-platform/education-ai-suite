@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Line } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
 import Accordion from '../common/Accordion'; 
 import '../../assets/css/RightPanel.css'
-import resourceData from '../../mock-data/metrics.json';
 import { useTranslation } from 'react-i18next';
+import { getResourceMetrics } from '../../services/api';
 Chart.register(...registerables);
 
 const createChartData = (data: any[], label: string) => ({
@@ -24,6 +24,11 @@ const createChartData = (data: any[], label: string) => ({
 
 const ResourceUtilizationAccordion: React.FC = () => {
   const { t } = useTranslation();
+  const [resourceData, setResourceData] = useState<any>(null);
+
+  useEffect(() => {
+    getResourceMetrics().then(setResourceData);
+  }, []);
   return (
     <Accordion title={t('accordion.resource')}>
       <div className="accordion-subtitle">{t('accordion.subtitle_resource')}</div>

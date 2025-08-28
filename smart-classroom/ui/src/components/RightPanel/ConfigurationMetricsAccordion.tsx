@@ -1,11 +1,16 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Accordion from "../common/Accordion";
 import "../../assets/css/RightPanel.css"; 
-import configData from "../../mock-data/configuration_metrics.json";
 import { useTranslation } from 'react-i18next';
+import { getConfigurationMetrics } from '../../services/api';
 
 const ConfigurationMetricsAccordion: React.FC = () => {
   const { t } = useTranslation();
+  const [configData, setConfigData] = useState<any>(null);
+  useEffect(() => {
+    getConfigurationMetrics().then(setConfigData);
+  }, []);
+
   return (
     <Accordion title={t('accordion.configuration')}>
       <div className="accordion-subtitle">{t('accordion.subtitle_configuration')}</div>
@@ -37,4 +42,4 @@ const ConfigurationMetricsAccordion: React.FC = () => {
   );
 };
 
-export default ConfigurationMetricsAccordion;
+export default ConfigurationMetricsAccordion;         

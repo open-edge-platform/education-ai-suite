@@ -1,11 +1,4 @@
-import mockTranscript from '../mock-data/mock_transcript.json';
-import mockSummary from '../mock-data/mock_summary.json';
-import configMetrics from '../mock-data/configuration_metrics.json';
-import resourceMetrics from '../mock-data/metrics.json';
-import {
-  simulateTranscriptStream,
-  simulateSummaryStream,
-} from './streamSimulator';
+import { simulateTranscriptStream, simulateSummaryStream } from './streamSimulator';
 import type { StreamEvent, StreamOptions } from './streamSimulator';
 
 export type Settings = {
@@ -26,22 +19,9 @@ export type StartSessionRequest = {
 export type StartSessionResponse = { sessionId: string };
 
 const env = (import.meta as any).env ?? {};
-const USE_MOCKS: boolean = String(env.VITE_USE_MOCKS ?? 'true') !== 'false';
 const BASE_URL: string = env.VITE_API_BASE_URL || '/api';
 
-const LS_SETTINGS = 'smart-classroom:settings';
-const LS_LAST_SESSION = 'smart-classroom:lastSession';
-
-function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
-function newSessionId() { return 'sess_' + Math.random().toString(36).slice(2, 10); }
-
-/* Settings */
 export async function saveSettings(settings: Settings): Promise<Settings> {
-  if (USE_MOCKS) {
-    await sleep(150);
-    localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
-    return settings;
-  }
   const res = await fetch(`${BASE_URL}/settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -52,23 +32,12 @@ export async function saveSettings(settings: Settings): Promise<Settings> {
 }
 
 export async function getSettings(): Promise<Settings | null> {
-  if (USE_MOCKS) {
-    const raw = localStorage.getItem(LS_SETTINGS);
-    return raw ? (JSON.parse(raw) as Settings) : null;
-  }
   const res = await fetch(`${BASE_URL}/settings`);
   if (!res.ok) return null;
   return (await res.json()) as Settings;
 }
 
-/* Session start/upload (kept for later backend integration) */
 export async function startSession(req: StartSessionRequest): Promise<StartSessionResponse> {
-  if (USE_MOCKS) {
-    await sleep(100);
-    const sessionId = newSessionId();
-    localStorage.setItem(LS_LAST_SESSION, JSON.stringify({ sessionId, ...req, ts: Date.now() }));
-    return { sessionId };
-  }
   const res = await fetch(`${BASE_URL}/session/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -82,15 +51,6 @@ export async function uploadAudio(
   file: File,
   meta: Omit<StartSessionRequest, 'mode'>
 ): Promise<StartSessionResponse> {
-  if (USE_MOCKS) {
-    await sleep(200);
-    const sessionId = newSessionId();
-    localStorage.setItem(
-      LS_LAST_SESSION,
-      JSON.stringify({ sessionId, ...meta, mode: 'upload', fileName: file.name, ts: Date.now() })
-    );
-    return { sessionId };
-  }
   const form = new FormData();
   form.append('file', file);
   form.append('projectName', meta.projectName);
@@ -101,39 +61,32 @@ export async function uploadAudio(
   return (await res.json()) as StartSessionResponse;
 }
 
-/* Streaming adapters (mock) */
-export function streamTranscript(_sessionId: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
-  const chunks: string[] = Array.isArray((mockTranscript as any).transcript)
-    ? ((mockTranscript as any).transcript as string[])
-    : ['Transcription mock is missing.\n'];
-  return simulateTranscriptStream(chunks, opts);
+// Streaming transcript from backend (implement according to your backend API)
+// For local/manual testing, you can use simulateTranscriptStream with sample data
+export async function* streamTranscript(sessionId: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
+  // TODO: Integrate with backend streaming API
+  // Example usage for local testing:
+  // yield* simulateTranscriptStream(['Sample transcript line 1.', 'Sample transcript line 2.'], opts);
+  throw new Error('streamTranscript not implemented. Integrate with backend streaming API.');
 }
 
-export function streamSummary(_sessionId: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
-  const text: string = String((mockSummary as any)?.summary ?? 'Summary mock is missing.');
-  return simulateSummaryStream(text, opts);
+// Streaming summary from backend (implement according to your backend API)
+// For local/manual testing, you can use simulateSummaryStream with sample data
+export async function* streamSummary(sessionId: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
+  // TODO: Integrate with backend streaming API
+  // Example usage for local testing:
+  // yield* simulateSummaryStream('Sample summary text.', opts);
+  throw new Error('streamSummary not implemented. Integrate with backend streaming API.');
 }
 
-/* Metrics/config (mock) */
 export async function getConfigurationMetrics(): Promise<any> {
-  if (USE_MOCKS) return configMetrics;
   const res = await fetch(`${BASE_URL}/configuration-metrics`);
   if (!res.ok) throw new Error('Failed to fetch configuration metrics');
   return res.json();
 }
 
 export async function getResourceMetrics(): Promise<any> {
-  if (USE_MOCKS) return resourceMetrics;
   const res = await fetch(`${BASE_URL}/metrics`);
   if (!res.ok) throw new Error('Failed to fetch metrics');
   return res.json();
 }
-
-/*
-Backend contract (later):
-- POST /settings, GET /settings
-- POST /session/start, POST /upload
-- STREAM /session/:id/transcript -> {type:'transcript'|'done'}
-- STREAM /session/:id/summary   -> {type:'summary_token'|'done'}
-- GET /configuration-metrics, GET /metrics
-*/
