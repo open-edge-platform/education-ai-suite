@@ -1,8 +1,40 @@
 .summary-tab {
-    padding: 1rem;
-  }
-  
-  .summary-tab h2 {
-    font-size: 1.5rem;
-    margin-bottom: 1rem;
-  }
+  padding: 1rem 0.75rem;
+  background: none;
+  color: var(--color-dark);
+  font-family: var(--font-text);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.summary-loading {
+  color: var(--color-gray-700);
+  font-size: 12px;
+  padding: 0.5rem 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c5d7f0;
+  border-top-color: #3b5bdb;
+  border-radius: 50%;
+  animation: tab-spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes tab-spin {
+  to { transform: rotate(360deg); }
+}
+
+.summary-content {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 14px;
+}
