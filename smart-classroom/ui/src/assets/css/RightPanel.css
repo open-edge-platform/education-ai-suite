@@ -5,14 +5,14 @@
   border-left: 1px solid #ddd;
   display: flex;
   flex-direction: column;
-  height: 100vh;
   min-width: 0;
   overflow-x: hidden;
+  padding: 12px 8px; /* Match left-panel */
 }
 
 .configuration-metrics {
   display: flex;
-  gap: 20px; 
+  /* gap: 20px;  */
 }
 
 .platform-configuration,
@@ -73,4 +73,27 @@ h3 {
 .dropdown {
   width: 100%;
   padding: 5px;
+}
+.arrow {
+  position: absolute;
+  top: 50%;
+  left: calc(50% - 10px); /* Default position */
+  transform: translateY(-50%);
+  cursor: pointer;
+  z-index: 100;
+  color: #0071c5;
+  background: #fff;
+  border-radius: 50%;
+  border: 1px solid #e6e7e8;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+  transition: left 0.3s ease;
+}
+
+.arrow.collapsed {
+  left: calc(100% - 38px); /* When collapsed, keep it visible */
 }

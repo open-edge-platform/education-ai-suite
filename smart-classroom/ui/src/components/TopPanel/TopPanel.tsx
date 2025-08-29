@@ -3,7 +3,9 @@ import Menu from '../Menu/Menu';
 import '../../assets/css/TopPanel.css';
 import BrandSlot from '../../assets/images/BrandSlot.svg';
 import menu from '../../assets/images/menu.svg';
-import { constants } from '../../../public/constants';
+import { constants } from '../../constants';
+import LanguageSwitcher from '../LanguageSwitcher';
+import { useTranslation } from 'react-i18next';
 
 interface TopPanelProps {
   projectName: string;
@@ -16,7 +18,7 @@ const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName, isSett
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuIconRef = useRef<HTMLImageElement>(null);
-
+  const { t } = useTranslation();
   const toggleMenu = () => {
     setIsMenuOpen(!isMenuOpen);
   };
@@ -43,9 +45,10 @@ const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName, isSett
     <header className="top-panel">
       <div className="brand-slot">
         <img src={BrandSlot} alt="Intel Logo" className="logo" />
-        <span className="app-title">{constants.TITLE}</span>
+        <span className="app-title">{t('header.title')}</span>
       </div>
       <div className="action-slot">
+      <LanguageSwitcher />
         <img
           src={menu}
           alt="Menu Icon"
