@@ -7,8 +7,8 @@ monitoring:
   interval: 2
 models:
   asr:
-    provider: openai # funasr and openai supported
-    name: whisper-tiny # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
+    provider: funasr # funasr and openai supported
+    name: paraformer-zh # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
     device: CPU # only CPU for whisper
     temperature: 0.0
 

@@ -46,10 +46,10 @@ class ASRComponent(PipelineComponent):
             if os.path.exists(chunk_data["chunk_path"]) and DELETE_CHUNK_AFTER_USE:
                 os.remove(chunk_data["chunk_path"])
 
-            StorageManager.save_async(os.path.join(project_path, "transcription.txt"), transcribed_text["text"], append=True)
+            StorageManager.save_async(os.path.join(project_path, "transcription.txt"), transcribed_text, append=True)
 
             yield {
                 **chunk_data,  # keep all chunk metadata
-                "text": transcribed_text["text"]
+                "text": transcribed_text
             }
             

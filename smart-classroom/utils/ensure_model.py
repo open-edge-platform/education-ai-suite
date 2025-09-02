@@ -52,7 +52,5 @@ def ensure_model() -> str:
         _download_openvino_model(config.models.summarizer.name, output_dir, config.models.summarizer.weight_format, config.models.summarizer.quant_mode)
         return output_dir
 
-    raise NotImplementedError(f"Provider '{config.models.summarizer.provider}' not supported yet!")
-
 def get_model_path() -> str:
     return os.path.join(config.models.summarizer.models_base_path, config.models.summarizer.provider, f"{config.models.summarizer.name.replace("/", "_")}_{config.models.summarizer.weight_format}_Q{config.models.summarizer.quant_mode}")
