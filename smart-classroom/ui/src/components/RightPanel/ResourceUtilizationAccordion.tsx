@@ -349,7 +349,7 @@ useEffect(() => {
                   resourceData.power.length > 0;
 
   return (
-    <Accordion title={t('Resource Utilization')}>
+    <Accordion title={t('accordion.resource')}>
       {hasData ? (
         <div className="accordion-content">
           <div className="charts-grid">
@@ -407,8 +407,6 @@ useEffect(() => {
                 </div>
               </div>
             </div>
-            
-            {/* Second Row */}
             <div className="chart-row">
               <div className="chart-container-half">
                 <h4 className="chart-title">{t('Memory Utilization')}</h4>
@@ -443,9 +441,7 @@ useEffect(() => {
           </div>
         </div>
       ) : (
-        <div className="loading-message">
-          <p>{t('Loading resource data...')}</p>
-        </div>
+          <p className="accordion-content">{t('accordion.loadingResource') || "Loading resource data..."}</p>
       )}
     </Accordion>
   );
