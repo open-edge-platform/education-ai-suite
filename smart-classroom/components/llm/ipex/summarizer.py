@@ -41,10 +41,11 @@ class Summarizer(BaseSummarizer):
         )
 
     def generate(self, prompt: str, stream: bool = True):
-        if config.models.summarizer.max_new_tokens is not None:
-            max_new_tokens = config.models.summarizer.max_new_tokens
-        else:
-            max_new_tokens = 1024
+        max_new_tokens = getattr(
+            getattr(config.models.summarizer, "max_new_tokens", None),
+            "__int__",
+            lambda: None
+        )() if hasattr(config.models, "summarizer") and hasattr(config.models.summarizer, "max_new_tokens") and config.models.summarizer.max_new_tokens is not None else 1024
 
         with torch.inference_mode():
             text = self.tokenizer.apply_chat_template(
