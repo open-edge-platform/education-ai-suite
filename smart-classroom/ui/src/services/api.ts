@@ -85,8 +85,22 @@ export async function getConfigurationMetrics(): Promise<any> {
   return res.json();
 }
 
-export async function getResourceMetrics(): Promise<any> {
-  const res = await fetch(`${BASE_URL}/metrics`);
-  if (!res.ok) throw new Error('Failed to fetch metrics');
-  return res.json();
-}
+
+export const getResourceMetrics = async (sessionId?: string) => {
+  const headers: HeadersInit = sessionId ? { "x-session-id": sessionId } : {};
+  const response = await fetch(`${BASE_URL}/metrics`, {
+    method: "GET",
+    headers,
+  });
+  if (!response.ok) {
+    throw new Error("Failed to fetch metrics");
+  }
+  const data = await response.json();
+  const trimData = (arr: any[]) => (arr.length > 10 ? arr.slice(-10) : arr);
+  return {
+    cpu_utilization: trimData(data.cpu_utilization ?? []),
+    gpu_utilization: trimData(data.gpu_utilization ?? []),
+    memory: trimData(data.memory ?? []),
+    power: trimData(data.power ?? []),
+  };
+};
