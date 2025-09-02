@@ -18,10 +18,21 @@ from components.asr.openai.whisper import Whisper
 from components.llm.ipex.summarizer import Summarizer as IpexSummarizer
 from components.llm.openvino.summarizer import Summarizer as OvSummarizer
 
+from utils.ensure_model import ensure_model
+from utils.config_loader import config
+
 from evaluation.template import templ_sum_en, templ_sum_zh, templ_score_en, templ_score_zh
 
 
 JWT_token = "{your JWT token}"
+
+
+def get_message(input, language):
+    system_prompt = config.models.summarizer.system_prompt if language=="en" else config.models.summarizer.system_prompt_zh
+    return [
+            {"role": "system", "content": f"{system_prompt}"},
+            {"role": "user", "content": f"{input}"}
+        ]
 
 def get_audio_length_pydub(wav_file: str) -> float:
     """Return the length of the audio file in seconds."""
@@ -42,12 +53,13 @@ def transcribe(model_name: str, local_audio_path: str) -> str:
 def summarize(model_name: str, prompt, provider) -> str:
     """Generate a summary using the Summarizer model."""
     if provider == "openvino":
-        model = OvSummarizer(model_name, "xpu")
+        model = OvSummarizer(model_name, "GPU")
     elif provider == "ipex":
         model = IpexSummarizer(model_name, "xpu")
     else:
         print("Unknown summarization model")
         return None
+    prompt = model.tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
     result = ""
     for response in model.generate(prompt):
         result += response
@@ -83,7 +95,6 @@ def main():
     parser.add_argument("--audio_file", help="Audio file", required=True)
     parser.add_argument("--sum_model", help="Summarizer model")
     parser.add_argument("--sum_provider", help="Summarizer model provider, ov or ipex")
-    parser.add_argument("--config", help="Path to config.yaml", default="config.yaml")
     parser.add_argument("--request_url", help="Request URL for API", default="https://deepseek.intel.com/api/chat/completions")
     parser.add_argument("--eval_model", help="Evaluation model", default="emr./models/DeepSeek-R1-Channel-INT8")
     parser.add_argument("--language", help="Language for the prompt, en or zh", default="en")
@@ -96,18 +107,10 @@ def main():
     parser.add_argument("--skip_evaluate", action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
 
-    # Load config.yaml
-    config_path = Path(args.config)
-    if not config_path.exists():
-        print(f"Config file not found: {config_path}")
-        sys.exit(1)
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-
     # Get asr_model from args or config
     asr_model = args.asr_model
     if not asr_model:
-        asr_model = config.get("models", {}).get("asr", {}).get("name")
+        asr_model = config.models.asr.name
         if not asr_model:
             print("asr_model must be specified via --asr_model or in config.yaml")
             sys.exit(1)
@@ -115,7 +118,7 @@ def main():
     # Get sum_model from args or config
     sum_model = args.sum_model
     if not sum_model:
-        sum_model = config.get("models", {}).get("summarizer", {}).get("name")
+        sum_model = config.models.summarizer.name
         if not sum_model:
             print("sum_model must be specified via --sum_model or in config.yaml")
             sys.exit(1)
@@ -123,7 +126,7 @@ def main():
     # Get sum_provider from args or config
     sum_provider = args.sum_provider
     if not sum_provider:
-        sum_provider = config.get("models", {}).get("summarizer", {}).get("provider", "")
+        sum_provider = config.models.summarizer.provider
         if not sum_provider:
             print("sum_provider must be specified via --sum_provider or in config.yaml (provider=openvino/ipex)")
             sys.exit(1)
@@ -132,9 +135,12 @@ def main():
         print("sum_provider must be either openvino or ipex")
         exit(0)
 
+    if sum_provider.lower()  == "openvino":
+        ensure_model()
+
     language = args.language
     if not language:
-        language = config.get("models", {}).get("asr", {}).get("language")
+        language = config.models.asr.language
         if not language:
             print("language must be specified via --language or in config.yaml")
             sys.exit(1)
@@ -167,7 +173,7 @@ def main():
         result_dir = Path(args.result_dir)
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    t_start = t_end = s_start = s_end = e_start = e_end = None
+    t_start = t_end = s_start = s_end = e_start = e_end = 0
 
     # transcribe
     if not skip_transcribe:
@@ -196,12 +202,8 @@ def main():
                 print(f"Failed to read transcript: {e}")
                 sys.exit(1)
         sum_prompt_filled = sum_prompt.format(transcript=transcript)
-        message = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": sum_prompt_filled}
-        ]
         s_start = time.time()
-        summary = summarize(sum_model, message, sum_provider)
+        summary = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider)
         s_end = time.time()
         try:
             with open(result_dir / sum_result_file, 'w', encoding='utf-8') as output_file:

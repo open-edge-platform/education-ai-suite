@@ -24,12 +24,24 @@ class Summarizer(BaseSummarizer):
             raise ValueError(f"Unsupported Model Hub: {model_hub}, should be huggingface or modelscope")
 
         # Load model
+        if config.models.summarizer.use_cache is not None:
+            use_cache = config.models.summarizer.use_cache
+        else:
+            use_cache = True
+
+        if config.models.summarizer.quant_mode and config.models.summarizer.quant_mode.lower() == "int4":
+            logger.info("Loading model in 4-bit quantization mode.")
+            load_in_4bit = True
+        else:
+            logger.info("4-bit quantization model load disabled.")
+            load_in_4bit = False
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            load_in_4bit=True,
+            load_in_4bit=load_in_4bit,
             optimize_model=True,
             trust_remote_code=True,
-            use_cache=True,
+            use_cache=use_cache,
             model_hub=model_hub
         )
         self.device = device
@@ -41,19 +53,10 @@ class Summarizer(BaseSummarizer):
         )
 
     def generate(self, prompt: str, stream: bool = True):
-        max_new_tokens = getattr(
-            getattr(config.models.summarizer, "max_new_tokens", None),
-            "__int__",
-            lambda: None
-        )() if hasattr(config.models, "summarizer") and hasattr(config.models.summarizer, "max_new_tokens") and config.models.summarizer.max_new_tokens is not None else 1024
+        max_new_tokens = config.models.summarizer.max_new_tokens or 1024
 
         with torch.inference_mode():
-            text = self.tokenizer.apply_chat_template(
-                prompt,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-            model_inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
+            model_inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             if not stream:
                 try:
                     generated_ids = self.model.generate(
