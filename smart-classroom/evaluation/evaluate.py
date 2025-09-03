@@ -21,7 +21,7 @@ from components.llm.openvino.summarizer import Summarizer as OvSummarizer
 from utils.ensure_model import ensure_model
 from utils.config_loader import config
 
-from evaluation.template import templ_sum_en, templ_sum_zh, templ_score_en, templ_score_zh
+from evaluation.template import templ_sum_en, templ_sum_zh, templ_score_en, templ_score_zh, sys_prompt_score_en, sys_prompt_score_zh
 
 
 JWT_token = "{your JWT token}"
@@ -65,11 +65,13 @@ def summarize(model_name: str, prompt, provider) -> str:
         result += response
     return result
 
-def evaluate(eval_model: str, prompt: str, request_url: str) -> str:
+def evaluate(eval_model: str, prompt: str, request_url: str, language) -> str:
     """Evaluate the summary using an external API."""
+    system_prompt = sys_prompt_score_en if language=="en" else sys_prompt_score_zh
     payload = {
         "model": eval_model,
         "messages": [
+            {"role": "system", "content": f"{system_prompt}"},
             {"role": "user", "content": prompt}
         ],
         "stream": False,
@@ -239,7 +241,7 @@ def main():
                 sys.exit(1)
         score_prompt_filled = score_prompt.format(summary=summary, transcript=transcript)
         e_start = time.time()
-        result = evaluate(eval_model, score_prompt_filled, request_url)
+        result = evaluate(eval_model, score_prompt_filled, request_url, language)
         e_end = time.time()
         try:
             with open(result_dir / eval_report_file, 'w', encoding='utf-8') as output_file:
