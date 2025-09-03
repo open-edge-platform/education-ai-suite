@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from transformers import TextIteratorStreamer
 
 class Summarizer(BaseSummarizer):
-    def __init__(self, model_name, device="xpu"):
+    def __init__(self, model_name, device="xpu", temperature=0.7):
         if config.models.summarizer.model_hub is not None:
             model_hub = config.models.summarizer.model_hub
         else:
@@ -51,6 +51,8 @@ class Summarizer(BaseSummarizer):
         self.device = device
         self.model = self.model.half().to(self.device)
 
+        self.temperature = temperature
+
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
             trust_remote_code=True
@@ -65,7 +67,8 @@ class Summarizer(BaseSummarizer):
                 try:
                     generated_ids = self.model.generate(
                         model_inputs.input_ids,
-                        max_new_tokens=max_new_tokens
+                        max_new_tokens=max_new_tokens,
+                        temperature=self.temperature
                     )
                     torch.xpu.synchronize()
                     generated_ids = generated_ids.cpu()
@@ -84,6 +87,7 @@ class Summarizer(BaseSummarizer):
                     gen_kwargs = dict(
                         input_ids=model_inputs.input_ids,
                         max_new_tokens=max_new_tokens,
+                        temperature=self.temperature,
                         streamer=streamer
                     )
                     

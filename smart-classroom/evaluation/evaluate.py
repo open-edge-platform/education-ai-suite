@@ -61,9 +61,11 @@ def summarize(model_name: str, prompt, provider) -> str:
         return None
     prompt = model.tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
     result = ""
+    num_tokens = 0
     for response in model.generate(prompt):
         result += response
-    return result
+        num_tokens += 1
+    return result, num_tokens
 
 def evaluate(eval_model: str, prompt: str, request_url: str, language) -> str:
     """Evaluate the summary using an external API."""
@@ -205,7 +207,7 @@ def main():
                 sys.exit(1)
         sum_prompt_filled = sum_prompt.format(transcript=transcript)
         s_start = time.time()
-        summary = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider)
+        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider)
         s_end = time.time()
         try:
             with open(result_dir / sum_result_file, 'w', encoding='utf-8') as output_file:
@@ -261,6 +263,7 @@ def main():
         print(f"Transcription time: {t_end-t_start:.2f} seconds")
     if s_start and s_end:
         print(f"Summarization time: {s_end-s_start:.2f} seconds")
+        print(f"Summarization output token number: {num_tokens}")
     if e_start and e_end:
         print(f"Evaluation time: {e_end-e_start:.2f} seconds")
 
