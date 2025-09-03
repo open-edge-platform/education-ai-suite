@@ -30,15 +30,19 @@ class Summarizer(BaseSummarizer):
             use_cache = True
 
         if config.models.summarizer.quant_mode and config.models.summarizer.quant_mode.lower() == "int4":
-            logger.info("Loading model in 4-bit quantization mode.")
-            load_in_4bit = True
+            logger.info("Loading model in sym_int4 quantization mode.")
+            load_in_low_bit = "sym_int4"
+        elif config.models.summarizer.quant_mode and config.models.summarizer.quant_mode.lower() == "int8":
+            logger.info("Loading model in sym_int8 quantization mode.")
+            load_in_low_bit = "sym_int8"
         else:
-            logger.info("4-bit quantization model load disabled.")
-            load_in_4bit = False
+            logger.info("Loading model in full precision mode.")
+            load_in_low_bit = None
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            load_in_4bit=load_in_4bit,
+            # load_in_4bit=True,
+            load_in_low_bit=load_in_low_bit,
             optimize_model=True,
             trust_remote_code=True,
             use_cache=use_cache,
