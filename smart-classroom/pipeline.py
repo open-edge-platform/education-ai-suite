@@ -27,7 +27,7 @@ class Pipeline:
 
     def run_transcription(self, audio_path: str):
         project_config = RuntimeConfig.get_section("Project")
-        monitor.start_monitoring(os.path.join(project_config.get("location"), project_config.get("name"), self.session_id))
+        monitor.start_monitoring(os.path.join(project_config.get("location"), project_config.get("name"), self.session_id, "utilization_logs"))
 
         input_gen = ({"audio_path": audio_path} for _ in range(1))
 
@@ -45,7 +45,7 @@ class Pipeline:
 
         project_config = RuntimeConfig.get_section("Project")
         transcription_path = os.path.join(project_config.get("location"), project_config.get("name"), self.session_id, "transcription.txt")
-        monitor.start_monitoring(os.path.join(project_config.get("location"), project_config.get("name"), self.session_id))
+        monitor.start_monitoring(os.path.join(project_config.get("location"), project_config.get("name"), self.session_id, "utilization_logs"))
 
         try:
             input = StorageManager.read_text_file(transcription_path)

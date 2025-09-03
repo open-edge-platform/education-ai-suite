@@ -89,7 +89,7 @@ def get_metrics_endpoint(x_session_id: Optional[str] = Header(None)):
     if x_session_id is None or "":
         return ""
     project_config = RuntimeConfig.get_section("Project")
-    return get_metrics(os.path.join(project_config.get("location"), project_config.get("name"), x_session_id))
+    return get_metrics(os.path.join(project_config.get("location"), project_config.get("name"), x_session_id, "utilization_logs"))
 
 @router.post("/stop-monitoring")
 def stop_monitoring_endpoint():

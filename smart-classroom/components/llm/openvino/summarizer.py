@@ -18,5 +18,5 @@ class Summarizer(BaseSummarizer):
 
     def generate(self, prompt):
         streamer = YieldingTextStreamer(self.tokenizer)
-        threading.Thread(target=lambda: self.model.generate(prompt, streamer=streamer, max_new_tokens=config.models.summarizer.max_new_tokens), daemon=True).start()
+        threading.Thread(target=lambda: self.model.generate(prompt, streamer=streamer, max_new_tokens=config.models.summarizer.max_new_tokens, temperature=self.temperature), daemon=True).start()
         return streamer.stream()

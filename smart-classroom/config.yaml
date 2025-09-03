@@ -7,8 +7,8 @@ monitoring:
   interval: 2
 models:
   asr:
-    provider: funasr # funasr and openai supported
-    name: paraformer-zh # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
+    provider: openai # funasr and openai supported
+    name: whisper-tiny # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
     device: CPU # only CPU for whisper
     temperature: 0.0
 
@@ -16,10 +16,9 @@ models:
     provider: openvino
     name: Qwen/Qwen1.5-7B-Chat
     device: GPU # GPU or CPU
-    weight_format: fp16
-    quant_mode: int8
+    weight_format: int4 # openvino supports fp16, fp32, int4, int8
     max_new_tokens: 1024
-    temperature: 0.7
+    temperature: 0.7 # 0.7 default
     models_base_path: "models"
     system_prompt: "Summarize the classroom transcription in clear English. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription. return the result in Markdown"
     model_hub: huggingface # huggingface or modelscope

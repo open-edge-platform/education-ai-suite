@@ -13,8 +13,7 @@ def _ir_exists(output_dir: str) -> bool:
 def _download_openvino_model(
     model_name: str,
     output_dir: str,
-    weight_format: str = "fp16",
-    quant_mode: str = "int8",
+    weight_format: str,
     force: bool = False
 ) -> Tuple[bool, str]:
     """Export a HuggingFace model to OpenVINO IR using optimum-cli."""
@@ -28,11 +27,11 @@ def _download_openvino_model(
         "optimum-cli", "export", "openvino",
         "--model", model_name,
         "--weight-format", weight_format,
-        "--quant-mode", quant_mode,
+        "--trust-remote-code",
         output_dir,
     ]
 
-    logging.info(f"🚀 Exporting {model_name} → {output_dir} ({weight_format}, {quant_mode})")
+    logging.info(f"🚀 Exporting {model_name} → {output_dir} ({weight_format})")
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         logging.debug(result.stdout.strip())
@@ -49,8 +48,8 @@ def _download_openvino_model(
 def ensure_model() -> str:
     output_dir = get_model_path()
     if config.models.summarizer.provider == "openvino":
-        _download_openvino_model(config.models.summarizer.name, output_dir, config.models.summarizer.weight_format, config.models.summarizer.quant_mode)
+        _download_openvino_model(config.models.summarizer.name, output_dir, config.models.summarizer.weight_format, None)
         return output_dir
 
 def get_model_path() -> str:
-    return os.path.join(config.models.summarizer.models_base_path, config.models.summarizer.provider, f"{config.models.summarizer.name.replace("/", "_")}_{config.models.summarizer.weight_format}_Q{config.models.summarizer.quant_mode}")
+    return os.path.join(config.models.summarizer.models_base_path, config.models.summarizer.provider, f"{config.models.summarizer.name.replace("/", "_")}_{config.models.summarizer.weight_format}")
