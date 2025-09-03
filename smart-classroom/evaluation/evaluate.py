@@ -48,7 +48,7 @@ def transcribe(model_name: str, local_audio_path: str) -> str:
     else:
         print("Unknown transcription model")
         return None
-    return model.transcribe(local_audio_path)
+    return model.transcribe(local_audio_path, 0.0)
 
 def summarize(model_name: str, prompt, provider) -> str:
     """Generate a summary using the Summarizer model."""
