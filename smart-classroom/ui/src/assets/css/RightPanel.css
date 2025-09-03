@@ -12,6 +12,7 @@
 
 .configuration-metrics {
   display: flex;
+  gap: 20px; 
 }
 
 .platform-configuration,

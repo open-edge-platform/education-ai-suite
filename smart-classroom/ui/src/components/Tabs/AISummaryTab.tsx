@@ -10,30 +10,28 @@ const AISummaryTab: React.FC = () => {
   const summaryEnabled = useAppSelector(s => s.ui.summaryEnabled);
   const isLoading = useAppSelector(s => s.ui.summaryLoading);
   const { streamingText, finalText, status } = useAppSelector(s => s.summary);
+  const sessionId = useAppSelector(s => s.ui.sessionId); 
   const abortRef = useRef<AbortController | null>(null);
   const startedRef = useRef(false);
 
   useEffect(() => {
-    if (!summaryEnabled || status === 'idle') {
-      startedRef.current = false;
-      if (abortRef.current) abortRef.current.abort();
-    }
-  }, [summaryEnabled, status]);
-
-  useEffect(() => {
-    if (!summaryEnabled || status !== 'idle' || startedRef.current) return;
+    console.log('AISummaryTab:', {
+      summaryEnabled,
+      status,
+      sessionId,
+      started: startedRef.current
+    });
+    if (!summaryEnabled || status !== 'idle' || startedRef.current || !sessionId) return;
     startedRef.current = true;
-
     dispatch(startSummary());
     const aborter = new AbortController();
     abortRef.current = aborter;
-
     const run = async () => {
-      // Replace 'sessionId' with your actual session identifier
-      const stream = streamSummary('sessionId', { signal: aborter.signal });
+      const stream = streamSummary(sessionId, { signal: aborter.signal });
       let sentFirst = false;
       try {
         for await (const ev of stream) {
+          console.log('Summary event:', ev);
           if (ev.type === "summary_token") {
             if (!sentFirst) { dispatch(firstSummaryToken()); sentFirst = true; }
             dispatch(appendSummary(ev.token));
@@ -44,10 +42,9 @@ const AISummaryTab: React.FC = () => {
         }
       } catch {/* ignore aborts */}
     };
-
     run();
     return () => aborter.abort();
-  }, [dispatch, summaryEnabled, status]);
+  }, [dispatch, summaryEnabled, status, sessionId]);
 
   const typed = finalText ?? streamingText;
   const isComplete = status === 'done';

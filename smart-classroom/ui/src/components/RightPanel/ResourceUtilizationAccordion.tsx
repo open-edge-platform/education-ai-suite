@@ -6,6 +6,7 @@ import '../../assets/css/RightPanel.css'
 import { useTranslation } from 'react-i18next';
 import { getResourceMetrics } from '../../services/api';
 
+import { useAppSelector } from '../../redux/hooks';
 Chart.register(...registerables);
 
 type GPUMetricKey = 'shared_memory_mb' | '3D_utilization_percent' | 'VideoDecode_utilization_percent' | 'VideoProcessing_utilization_percent' | 'Compute_utilization_percent';
@@ -347,6 +348,7 @@ useEffect(() => {
                   resourceData.gpu_utilization.length > 0 || 
                   resourceData.memory.length > 0 || 
                   resourceData.power.length > 0;
+  // const resourceData = useAppSelector(s => s.resource.metrics);
 
   return (
     <Accordion title={t('accordion.resource')}>

@@ -9,6 +9,8 @@ export interface UIState {
   summaryLoading: boolean;
   activeTab: Tab;
   autoSwitched: boolean;
+  sessionId: string | null;
+  uploadedAudioPath: string | null;
 }
 
 const initialState: UIState = {
@@ -17,6 +19,8 @@ const initialState: UIState = {
   summaryLoading: false,
   activeTab: 'transcripts',
   autoSwitched: false,
+  sessionId: null,
+  uploadedAudioPath: null,
 };
 
 const uiSlice = createSlice({
@@ -29,14 +33,23 @@ const uiSlice = createSlice({
       state.summaryLoading = false;
       state.activeTab = 'transcripts';
       state.autoSwitched = false;
+      state.sessionId = null;
+      state.uploadedAudioPath = null;
     },
     transcriptionComplete(state) {
+      console.log('transcriptionComplete reducer called');
       state.summaryEnabled = true;
-      state.summaryLoading = true; // show spinner until first token
+      state.summaryLoading = true; 
       if (!state.autoSwitched) {
         state.activeTab = 'summary';
         state.autoSwitched = true;
       }
+    },
+    setUploadedAudioPath(state, action: PayloadAction<string>) {
+      state.uploadedAudioPath = action.payload;
+    },
+    setSessionId(state, action: PayloadAction<string | null>) {
+      state.sessionId = action.payload;
     },
     firstSummaryToken(state) {
       state.summaryLoading = false; // hide spinner on first token
@@ -56,6 +69,8 @@ const uiSlice = createSlice({
 export const {
   startProcessing,
   transcriptionComplete,
+  setUploadedAudioPath,
+  setSessionId,
   firstSummaryToken,
   summaryDone,
   setActiveTab,

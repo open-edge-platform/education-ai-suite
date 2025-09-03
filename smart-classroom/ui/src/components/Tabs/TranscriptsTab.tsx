@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from "react";
-import "../../assets/css/TranscriptsTab.css";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { appendTranscript, finishTranscript, startTranscript } from "../../redux/slices/transcriptSlice";
-import { transcriptionComplete } from "../../redux/slices/uiSlice";
+import { transcriptionComplete, setSessionId } from "../../redux/slices/uiSlice";
 import { streamTranscript } from "../../services/api";
 
 const TranscriptsTab: React.FC = () => {
@@ -11,17 +10,27 @@ const TranscriptsTab: React.FC = () => {
   const startedRef = useRef(false);
   const { finalText, streamingText } = useAppSelector(s => s.transcript);
   const aiProcessing = useAppSelector(s => s.ui.aiProcessing);
+  const audioPath = useAppSelector(s => s.ui.uploadedAudioPath); 
+  const sessionId = useAppSelector(s => s.ui.sessionId); 
+  useEffect(() => {
+    console.log('Updated sessionId:', sessionId);
+  }, [sessionId]);
 
   useEffect(() => {
-    if (!aiProcessing || startedRef.current) return;
+    if (!aiProcessing || !audioPath || startedRef.current) return;
     startedRef.current = true;
 
     const aborter = new AbortController();
     abortRef.current = aborter;
 
     const run = async () => {
-      // Replace 'sessionId' with your actual session identifier
-      const stream = streamTranscript('sessionId', { signal: aborter.signal });
+      const stream = streamTranscript(audioPath, {
+        signal: aborter.signal,
+        onSessionId: (id) => {
+          console.log('Dispatching setSessionId:', id);
+          dispatch(setSessionId(id));
+        }, 
+      });
       let sentFirst = false;
       try {
         for await (const ev of stream) {
@@ -30,7 +39,9 @@ const TranscriptsTab: React.FC = () => {
             dispatch(appendTranscript(ev.token));
           } else if (ev.type === "done") {
             dispatch(finishTranscript());
+            console.log('Transcription finished, dispatching transcriptionComplete');
             dispatch(transcriptionComplete());
+            console.log('Session ID:', sessionId);
           }
         }
       } catch { /* ignore aborts */ }
@@ -38,7 +49,7 @@ const TranscriptsTab: React.FC = () => {
 
     run();
     return () => aborter.abort();
-  }, [dispatch, aiProcessing]);
+  }, [dispatch, aiProcessing, audioPath]);
 
   const text = finalText ?? streamingText;
 
