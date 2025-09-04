@@ -29,12 +29,15 @@ class Summarizer(BaseSummarizer):
         else:
             use_cache = True
 
-        if config.models.summarizer.quant_mode and config.models.summarizer.quant_mode.lower() == "int4":
+        if config.models.summarizer.weight_format and config.models.summarizer.weight_format.lower() == "int4":
             logger.info("Loading model in sym_int4 quantization mode.")
             load_in_low_bit = "sym_int4"
-        elif config.models.summarizer.quant_mode and config.models.summarizer.quant_mode.lower() == "int8":
+        elif config.models.summarizer.weight_format and config.models.summarizer.weight_format.lower() == "int8":
             logger.info("Loading model in sym_int8 quantization mode.")
             load_in_low_bit = "sym_int8"
+        elif config.models.summarizer.weight_format and config.models.summarizer.weight_format.lower() == "fp16":
+            logger.info("Loading model in fp16 quantization mode.")
+            load_in_low_bit = "fp16"
         else:
             logger.info("Loading model in full precision mode.")
             load_in_low_bit = None
