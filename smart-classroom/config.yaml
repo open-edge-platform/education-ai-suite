@@ -14,7 +14,7 @@ models:
 
   summarizer:
     provider: openvino
-    name: Qwen/Qwen1.5-7B-Chat
+    name: Qwen/Qwen2.5-7B-Instruct # Qwen/Qwen1.5-7B-Chat
     device: GPU # GPU or CPU
     weight_format: int4 # openvino supports fp16, fp32, int4, int8
     max_new_tokens: 1024
