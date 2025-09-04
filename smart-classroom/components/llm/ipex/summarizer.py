@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from transformers import TextIteratorStreamer
 
 class Summarizer(BaseSummarizer):
-    def __init__(self, model_name, device="xpu"):
+    def __init__(self, model_name, device="xpu", temperature=0.7):
         if config.models.summarizer.model_hub is not None:
             model_hub = config.models.summarizer.model_hub
         else:
@@ -24,16 +24,37 @@ class Summarizer(BaseSummarizer):
             raise ValueError(f"Unsupported Model Hub: {model_hub}, should be huggingface or modelscope")
 
         # Load model
+        if config.models.summarizer.use_cache is not None:
+            use_cache = config.models.summarizer.use_cache
+        else:
+            use_cache = True
+
+        if config.models.summarizer.weight_format and config.models.summarizer.weight_format.lower() == "int4":
+            logger.info("Loading model in sym_int4 quantization mode.")
+            load_in_low_bit = "sym_int4"
+        elif config.models.summarizer.weight_format and config.models.summarizer.weight_format.lower() == "int8":
+            logger.info("Loading model in sym_int8 quantization mode.")
+            load_in_low_bit = "sym_int8"
+        elif config.models.summarizer.weight_format and config.models.summarizer.weight_format.lower() == "fp16":
+            logger.info("Loading model in fp16 quantization mode.")
+            load_in_low_bit = "fp16"
+        else:
+            logger.info("Loading model in full precision mode.")
+            load_in_low_bit = None
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            load_in_4bit=True,
+            # load_in_4bit=True,
+            load_in_low_bit=load_in_low_bit,
             optimize_model=True,
             trust_remote_code=True,
-            use_cache=True,
+            use_cache=use_cache,
             model_hub=model_hub
         )
         self.device = device
         self.model = self.model.half().to(self.device)
+
+        self.temperature = temperature
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
@@ -41,23 +62,16 @@ class Summarizer(BaseSummarizer):
         )
 
     def generate(self, prompt: str, stream: bool = True):
-        if config.models.summarizer.max_new_tokens is not None:
-            max_new_tokens = config.models.summarizer.max_new_tokens
-        else:
-            max_new_tokens = 1024
+        max_new_tokens = config.models.summarizer.max_new_tokens or 1024
 
         with torch.inference_mode():
-            text = self.tokenizer.apply_chat_template(
-                prompt,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-            model_inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
+            model_inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
             if not stream:
                 try:
                     generated_ids = self.model.generate(
                         model_inputs.input_ids,
-                        max_new_tokens=max_new_tokens
+                        max_new_tokens=max_new_tokens,
+                        temperature=self.temperature
                     )
                     torch.xpu.synchronize()
                     generated_ids = generated_ids.cpu()
@@ -76,6 +90,7 @@ class Summarizer(BaseSummarizer):
                     gen_kwargs = dict(
                         input_ids=model_inputs.input_ids,
                         max_new_tokens=max_new_tokens,
+                        temperature=self.temperature,
                         streamer=streamer
                     )
                     
