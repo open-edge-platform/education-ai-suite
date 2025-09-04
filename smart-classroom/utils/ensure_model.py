@@ -1,6 +1,5 @@
-import logging, os, subprocess
+import logging, os
 from typing import Tuple
-import sys
 from utils.config_loader import config
 from utils.cli_utils import run_cli
 logger = logging.getLogger(__name__)
