@@ -19,8 +19,12 @@ models:
     weight_format: int8 # openvino supports fp16, fp32, int4, int8
     max_new_tokens: 1024
     temperature: 0.7 # 0.7 default
+    use_cache: True
     models_base_path: "models"
-    system_prompt: "Summarize the classroom transcription in clear English. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription. return the result in Markdown"
+    language: en # en or zh
+    system_prompt: 
+      en: "Summarize the classroom transcription in clear English. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription. Return the result in Markdown format"
+      zh: "你是一个课堂教学助手，根据提供的原始课堂音频的转录文本，以Markdown格式提炼出本节课的核心内容、知识点结构、讲解顺序，解释每个知识点后，用简洁清晰的语言进行总结。注意不要遗漏主要知识点，也不要捏造任何没有提及的知识点，总结要保证知识点真实准确，避免任何冗余或误导性内容。"
     model_hub: huggingface # huggingface or modelscope
 
 audio_preprocessing:
