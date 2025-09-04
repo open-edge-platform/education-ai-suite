@@ -1,0 +1,33 @@
+import subprocess
+from typing import Callable, List
+
+def run_cli(cmd: List[str], log_fn: Callable[[str], None] = print) -> int:
+    """
+    Run a CLI command and stream stdout + stderr in real-time.
+
+    Args:
+        cmd: Command as a list of strings, e.g., ["python", "script.py"]
+        log_fn: Function to log each line (default: print)
+
+    Returns:
+        The CLI process return code
+    """
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # merge stderr into stdout
+            text=True,
+            bufsize=1  # line-buffered
+        )
+
+        # Stream output line by line
+        for line in iter(process.stdout.readline, ''):
+            log_fn(line.rstrip())
+
+        process.stdout.close()
+        return process.wait()
+
+    except Exception as e:
+        log_fn(f"❌ Command execution failed: {e}")
+        return -1

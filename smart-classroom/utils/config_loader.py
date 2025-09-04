@@ -11,7 +11,7 @@ def _dict_to_namespace(d):
     return d
 
 def load_config(path="config.yaml"):
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return _dict_to_namespace(data)
 

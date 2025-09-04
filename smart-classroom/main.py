@@ -3,7 +3,6 @@ setup_logger()
 
 from fastapi import FastAPI
 from api.endpoints import register_routes
-from components.ffmpeg.audio_preprocessing import chunk_audio_by_silence
 from utils.runtime_config_loader import RuntimeConfig
 from utils.ensure_model import ensure_model
 from utils.preload_models import preload_models
