@@ -3,7 +3,8 @@ import Help from './HelpButton';
 import About from './AboutButton';
 import '../../assets/css/Menu.css';
 import SettingsModal from './SettingsButton';
-import { constants } from '../../../public/constants';
+import { constants } from '../../constants';
+import { useTranslation } from 'react-i18next';
 interface MenuProps {
   projectName: string;
   setProjectName: (name: string) => void;
@@ -13,7 +14,7 @@ interface MenuProps {
 
 const Menu = forwardRef<HTMLDivElement, MenuProps>(({ projectName, setProjectName, isSettingsOpen, setIsSettingsOpen }, ref) => {
   const [activeSection, setActiveSection] = useState<string | null>(null);
-
+  const { t } = useTranslation();
   const handleMenuClick = (section: string) => {
     if (section === 'settings') {
       setIsSettingsOpen(true);
@@ -28,9 +29,9 @@ const Menu = forwardRef<HTMLDivElement, MenuProps>(({ projectName, setProjectNam
 
   return (
     <div className="dropdown-menu" ref={ref}>
-      <div className="dropdown-item" onClick={() => handleMenuClick('settings')}>{constants.SETTINGS}</div>
-      <div className="dropdown-item" onClick={() => handleMenuClick('help')}>{constants.HELP}</div>
-      <div className="dropdown-item" onClick={() => handleMenuClick('about')}>{constants.ABOUT}</div>
+      <div className="dropdown-item" onClick={() => handleMenuClick('settings')}>{t('menu.settings')}</div>
+      <div className="dropdown-item" onClick={() => handleMenuClick('help')}>{t('menu.help')}</div>
+      <div className="dropdown-item" onClick={() => handleMenuClick('about')}>{t('menu.about')}</div>
       <div className="menu-content">
         {activeSection === 'help' && <Help />}
         {activeSection === 'about' && <About />}

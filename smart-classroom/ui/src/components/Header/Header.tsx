@@ -5,55 +5,83 @@ import '../../assets/css/HeaderBar.css';
 import recordON from '../../assets/images/recording-on.svg';
 import recordOFF from '../../assets/images/recording-off.svg';
 import sideRecordIcon from '../../assets/images/sideRecord.svg';
-import {constants} from '../../../public/constants';
-
+import { constants } from '../../constants';
+import { useAppDispatch, useAppSelector } from '../../redux/hooks';
+import { resetFlow, startProcessing } from '../../redux/slices/uiSlice';
+import { resetTranscript } from '../../redux/slices/transcriptSlice';
+import { resetSummary } from '../../redux/slices/summarySlice';
+import { useTranslation } from 'react-i18next';
+import LanguageSwitcher from '../LanguageSwitcher';
 interface HeaderBarProps {
   projectName: string;
   setProjectName: (name: string) => void;
 }
 
-const HeaderBar: React.FC<HeaderBarProps> = ({ projectName, setProjectName }) => {
+const HeaderBar: React.FC<HeaderBarProps> = ({ projectName /*, setProjectName*/ }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [notification, setNotification] = useState(constants.START_NOTIFICATION);
+  const { t } = useTranslation();
   const [timer, setTimer] = useState(0);
 
+  const dispatch = useAppDispatch();
+  const isBusy = useAppSelector((s) => s.ui.aiProcessing);
+  const summaryEnabled = useAppSelector((s) => s.ui.summaryEnabled);
+  const summaryLoading = useAppSelector((s) => s.ui.summaryLoading);
+  const transcriptStatus = useAppSelector((s) => s.transcript.status);
+
+  // Timer
   useEffect(() => {
     let interval: number | null = null;
     if (isRecording) {
-      interval = window.setInterval(() => {
-        setTimer((prevTimer) => prevTimer + 1);
-      }, 1000);
+      interval = window.setInterval(() => setTimer((t) => t + 1), 1000);
     } else if (!isRecording && timer !== 0) {
-      if (interval !== null) {
-        clearInterval(interval);
-      }
+      if (interval !== null) clearInterval(interval);
     }
-    return () => {
-      if (interval !== null) {
-        clearInterval(interval);
-      }
-    };
+    return () => { if (interval !== null) clearInterval(interval); };
   }, [isRecording, timer]);
+
+  // Notifications synced with stream phases
+  useEffect(() => {
+    if (summaryEnabled && summaryLoading) setNotification(t('notifications.generatingSummary'));
+    else if (summaryEnabled && isBusy && !summaryLoading) setNotification(t('notifications.streamingSummary'));
+    else if (isBusy && transcriptStatus === 'streaming') setNotification(t('notifications.loadingTranscript'));
+    else if (isBusy && !summaryEnabled) setNotification(t('notifications.analyzingAudio'));
+    else if (!isBusy && summaryEnabled) setNotification(t('notifications.summaryReady'));
+    else setNotification(t('notifications.start'));
+  }, [isBusy, summaryEnabled, summaryLoading, transcriptStatus, t]);
+
+  
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
-
   const handleRecordingToggle = () => {
-    setIsRecording(!isRecording);
-    setNotification(
-      isRecording ? constants.START_NOTIFICATION : constants.STOP_NOTIFICATION
-    );
-    if (!isRecording) {
-      setTimer(0); 
+    if (isBusy && !isRecording) return;
+    const next = !isRecording;
+    setIsRecording(next);
+  
+    if (next) {
+      setTimer(0);
+      setNotification(t('notifications.recording'));
+      dispatch(resetFlow());
+      dispatch(resetTranscript());
+      dispatch(resetSummary());
+    } else {
+      setNotification(t('notifications.uploading'));
+      dispatch(startProcessing());
     }
   };
-
+  
   const handleFileUpload = (file: File) => {
-    setNotification(constants.STOP_NOTIFICATION);
-    console.log('File Uploaded:', file);
+    if (isBusy || isRecording) return;
+    setNotification(t('notifications.uploading'));
+    dispatch(resetFlow());
+    dispatch(resetTranscript());
+    dispatch(resetSummary());
+    dispatch(startProcessing());
+    console.log('File Uploaded:', file.name);
   };
 
   return (
@@ -61,36 +89,46 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName, setProjectName }) =>
       <div className="navbar-left">
         <img
           src={isRecording ? recordON : recordOFF}
-          alt="Record Icon"
+          alt="Record"
           className="record-icon"
           onClick={handleRecordingToggle}
+          style={{ opacity: isBusy && !isRecording ? 0.5 : 1, cursor: isBusy && !isRecording ? 'not-allowed' : 'pointer' }}
         />
-        {isRecording ? (
-          <span className="timer">{formatTime(timer)}</span>
-        ) : (
-          <img src={sideRecordIcon} alt="Side Record Icon" className="side-record-icon" />
-        )}
-        <button className="text-button" onClick={handleRecordingToggle} title={isRecording ? 'Stop Recording' : 'Start Recording'}>
-          <span>{isRecording ? 'Stop Recording' : 'Start Recording'}</span>
+        <img src={sideRecordIcon} alt="Side Record" className="side-record-icon" />
+        <span className="timer">{formatTime(timer)}</span>
+
+        <button
+          className="text-button"
+          onClick={handleRecordingToggle}
+          disabled={isBusy && !isRecording}
+          title={isRecording ? t('header.stopRecording') : t('header.startRecording')}
+        >
+          {isRecording ? t('header.stopRecording') : t('header.startRecording')}
         </button>
-        <button className="text-button" onClick={() => document.getElementById('fileInput')?.click()} disabled={isRecording} 
-          title="Upload audio">
-          Upload File
-        </button>
-        <input
-          type="file"
-          id="fileInput"
-          accept="audio/*"
-          style={{ display: 'none' }}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) handleFileUpload(file);
-          }}
-        />
+
+        <label
+          className="text-button"
+          style={{ opacity: isBusy || isRecording ? 0.6 : 1, cursor: isBusy || isRecording ? 'not-allowed' : 'pointer' }}
+        >
+          <input
+            type="file"
+            accept="audio/*"
+            style={{ display: 'none' }}
+            disabled={isBusy || isRecording}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFileUpload(f);
+              e.currentTarget.value = '';
+            }}
+          />
+          {t('header.uploadFile')}
+        </label>
       </div>
+
       <div className="navbar-center">
         <NotificationsDisplay notification={notification} />
       </div>
+
       <div className="navbar-right">
         <ProjectNameDisplay projectName={projectName} />
       </div>
