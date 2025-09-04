@@ -1,5 +1,6 @@
 from components.base_component import PipelineComponent
 from components.llm.openvino.summarizer import Summarizer as OvSummarizer
+from components.llm.ipex.summarizer import Summarizer as IpexSummarizer
 from utils.runtime_config_loader import RuntimeConfig
 from utils.config_loader import config
 from utils.storage_manager import StorageManager
@@ -25,6 +26,11 @@ class SummarizerComponent(PipelineComponent):
                     device=device,
                     temperature=temperature,
                     revision=None
+                )
+            elif provider == "ipex":
+                SummarizerComponent._model = IpexSummarizer(
+                    model_name=model_name,
+                    device=device.lower()
                 )
             else:
                 raise ValueError(f"Unsupported summarizer provider: {provider}")

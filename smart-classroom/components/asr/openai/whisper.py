@@ -19,5 +19,4 @@ class Whisper(BaseASR):
         self.model = whisper.load_model(model)
  
    def transcribe(self, audio_path: str, temperature: float) -> str:
-        result = self.model.transcribe(audio_path, temperature=temperature)  # can be .mp3, .wav, .m4a, etc.
-        return result
+        return self.model.transcribe(audio_path, temperature=temperature)["text"]
