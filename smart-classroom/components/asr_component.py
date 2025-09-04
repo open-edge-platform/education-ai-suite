@@ -1,5 +1,6 @@
 from components.base_component import PipelineComponent
 import os
+import time
 from utils.config_loader import config
 from utils.storage_manager import StorageManager
 from utils.runtime_config_loader import RuntimeConfig
@@ -17,8 +18,9 @@ class ASRComponent(PipelineComponent):
 
         self.session_id = session_id
         self.temperature = temperature
+        self.provider = provider
+        self.model_name = model_name
         provider, model_name = provider.lower(), model_name.lower()
-
         config = (provider, model_name, device)
 
         # Reload only if config changed
@@ -37,19 +39,39 @@ class ASRComponent(PipelineComponent):
 
         project_config = RuntimeConfig.get_section("Project")
         project_path = os.path.join(project_config.get("location"), project_config.get("name"), self.session_id)
-        StorageManager.save(os.path.join(project_path, "transcription.txt"), "", append=False)
-      
-        for chunk_data in input_generator:
-            chunk_path = chunk_data["chunk_path"]
-            transcribed_text = self.asr.transcribe(chunk_path, temperature=self.temperature)
+        transcription_file = os.path.join(project_path, "transcription.txt")
+        metrics_csv_path = os.path.join(project_path, "performance_metrics.csv")
+        
+        StorageManager.save(transcription_file, "", append=False)
 
-            if os.path.exists(chunk_data["chunk_path"]) and DELETE_CHUNK_AFTER_USE:
-                os.remove(chunk_data["chunk_path"])
+        start_time = time.perf_counter()
 
-            StorageManager.save_async(os.path.join(project_path, "transcription.txt"), transcribed_text, append=True)
+        try:
+            for chunk_data in input_generator:
+                chunk_path = chunk_data["chunk_path"]
 
-            yield {
-                **chunk_data,  # keep all chunk metadata
-                "text": transcribed_text
-            }
+                transcribed_text = self.asr.transcribe(chunk_path, temperature=self.temperature)
+
+                if os.path.exists(chunk_path) and DELETE_CHUNK_AFTER_USE:
+                    os.remove(chunk_path)
+                    
+                StorageManager.save_async(transcription_file, transcribed_text, append=True)
+
+                yield {
+                    **chunk_data,
+                    "text": transcribed_text
+                }
+
+        finally:
+            end_time = time.perf_counter()
+            transcription_time = end_time - start_time
+
+            # Save the transcription time in the metrics CSV file
+            StorageManager.update_csv(
+                path=metrics_csv_path,
+                new_data={
+                    "configuration.asr_model": f"{self.provider}/{self.model_name}",
+                    "performance.transcription_time": round(transcription_time, 4)
+                }
+            )
             

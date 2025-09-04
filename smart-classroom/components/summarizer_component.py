@@ -38,6 +38,7 @@ class SummarizerComponent(PipelineComponent):
             SummarizerComponent._config = config
 
         self.summarizer = SummarizerComponent._model
+        self.model_name = model_name
 
     def _get_message(self, input):
         return [
@@ -48,16 +49,51 @@ class SummarizerComponent(PipelineComponent):
     def process(self, input):
         project_config = RuntimeConfig.get_section("Project")
         project_path = os.path.join(project_config.get("location"), project_config.get("name"), self.session_id)
-        StorageManager.save(os.path.join(project_path, "summary.md"), "", append=False)
+        summary_path = os.path.join(project_path, "summary.md")
+        metrics_csv_path = os.path.join(project_path, "performance_metrics.csv")
+        StorageManager.save(summary_path, "", append=False)
         prompt = self.summarizer.tokenizer.apply_chat_template(self._get_message(input), tokenize=False, add_generation_prompt=True)
-        start = time.perf_counter()
+        start_summarization = time.time()
+        first_token_time = None
+        total_tokens = 0
+
         try:
             for token in self.summarizer.generate(prompt):
-                StorageManager.save_async(os.path.join(project_path, "summary.md"), token, append=True)
+                if first_token_time is None:
+                    first_token_time = time.time()
+
+                total_tokens += 1
+                StorageManager.save_async(summary_path, token, append=True)
                 yield token
         finally:
-            end = time.perf_counter()
-            logger.info(f"Total inference time: {end - start:.2f} seconds")
-        
+            end_summarization = time.time()
+            summarization_time = end_summarization - start_summarization
+            ttft = (first_token_time - start_summarization) if first_token_time else -1
+            tps = (total_tokens / summarization_time) if summarization_time > 0 else -1
+
+            # Get performance metrics and configurations from CSV using StorageManager helper
+            performance_data = StorageManager.read_performance_metrics(
+                project_config.get("location"),
+                project_config.get("name"),
+                self.session_id
+            )
+
+            performance_metrics = performance_data.get("performance", {})
+            asr_transcription_time = performance_metrics.get("transcription_time", 0)
+            end_to_end_time = asr_transcription_time + summarization_time
+
+
+            # Update CSV with new summarization performance data
+            StorageManager.update_csv(
+                path=metrics_csv_path,
+                new_data={
+                    "configuration.summarizer_model": self.model_name,
+                    "performance.summarizer_time": round(summarization_time, 4),
+                    "performance.ttft": round(ttft, 4),
+                    "performance.tps": round(tps, 4),
+                    "performance.total_tokens": total_tokens,
+                    "performance.end_to_end_time": round(end_to_end_time, 4),
+                }
+            )
 
 
