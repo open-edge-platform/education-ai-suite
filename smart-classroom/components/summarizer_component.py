@@ -42,7 +42,7 @@ class SummarizerComponent(PipelineComponent):
     def _get_message(self, input):
 
         lang_prompt = vars(config.models.summarizer.system_prompt)
-        logger.info(f"System Prompt: {lang_prompt.get(config.models.summarizer.language)}")
+        logger.debug(f"System Prompt: {lang_prompt.get(config.models.summarizer.language)}")
 
         return [
                 {"role": "system", "content": f"{lang_prompt.get(config.models.summarizer.language)}"},
