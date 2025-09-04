@@ -28,7 +28,7 @@ JWT_token = "{your JWT token}"
 
 
 def get_message(input, language):
-    system_prompt = config.models.summarizer.system_prompt if language=="en" else config.models.summarizer.system_prompt_zh
+    system_prompt = config.models.summarizer.system_prompt.en if language=="en" else config.models.summarizer.system_prompt.zh
     return [
             {"role": "system", "content": f"{system_prompt}"},
             {"role": "user", "content": f"{input}"}
@@ -144,7 +144,7 @@ def main():
 
     language = args.language
     if not language:
-        language = config.models.asr.language
+        language = config.models.summarizer.language
         if not language:
             print("language must be specified via --language or in config.yaml")
             sys.exit(1)
