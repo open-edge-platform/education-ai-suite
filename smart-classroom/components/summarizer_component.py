@@ -49,26 +49,23 @@ class SummarizerComponent(PipelineComponent):
     def process(self, input):
         project_config = RuntimeConfig.get_section("Project")
         project_path = os.path.join(project_config.get("location"), project_config.get("name"), self.session_id)
-        summary_path = os.path.join(project_path, "summary.md")
-        metrics_csv_path = os.path.join(project_path, "performance_metrics.csv")
-        StorageManager.save(summary_path, "", append=False)
+        StorageManager.save(os.path.join(project_path, "summary.md"), "", append=False)
         prompt = self.summarizer.tokenizer.apply_chat_template(self._get_message(input), tokenize=False, add_generation_prompt=True)
-        start_summarization = time.time()
+        start = time.perf_counter()
         first_token_time = None
         total_tokens = 0
-
         try:
             for token in self.summarizer.generate(prompt):
                 if first_token_time is None:
                     first_token_time = time.time()
 
                 total_tokens += 1
-                StorageManager.save_async(summary_path, token, append=True)
+                StorageManager.save_async(os.path.join(project_path, "summary.md"), token, append=True)
                 yield token
         finally:
-            end_summarization = time.time()
-            summarization_time = end_summarization - start_summarization
-            ttft = (first_token_time - start_summarization) if first_token_time else -1
+            end = time.perf_counter()
+            summarization_time = end - start
+            ttft = (first_token_time - start) if first_token_time else -1
             tps = (total_tokens / summarization_time) if summarization_time > 0 else -1
 
             # Get performance metrics and configurations from CSV using StorageManager helper
@@ -85,7 +82,7 @@ class SummarizerComponent(PipelineComponent):
 
             # Update CSV with new summarization performance data
             StorageManager.update_csv(
-                path=metrics_csv_path,
+                path=os.path.join(project_path, "performance_metrics.csv"),
                 new_data={
                     "configuration.summarizer_model": self.model_name,
                     "performance.summarizer_time": round(summarization_time, 4),
@@ -95,5 +92,6 @@ class SummarizerComponent(PipelineComponent):
                     "performance.end_to_end_time": round(end_to_end_time, 4),
                 }
             )
+        
 
 

@@ -39,36 +39,29 @@ class ASRComponent(PipelineComponent):
 
         project_config = RuntimeConfig.get_section("Project")
         project_path = os.path.join(project_config.get("location"), project_config.get("name"), self.session_id)
-        transcription_file = os.path.join(project_path, "transcription.txt")
-        metrics_csv_path = os.path.join(project_path, "performance_metrics.csv")
-        
-        StorageManager.save(transcription_file, "", append=False)
-
+        StorageManager.save(os.path.join(project_path, "transcription.txt"), "", append=False)
         start_time = time.perf_counter()
-
-        try:
+        try: 
             for chunk_data in input_generator:
                 chunk_path = chunk_data["chunk_path"]
-
                 transcribed_text = self.asr.transcribe(chunk_path, temperature=self.temperature)
 
-                if os.path.exists(chunk_path) and DELETE_CHUNK_AFTER_USE:
-                    os.remove(chunk_path)
-                    
-                StorageManager.save_async(transcription_file, transcribed_text, append=True)
+                if os.path.exists(chunk_data["chunk_path"]) and DELETE_CHUNK_AFTER_USE:
+                    os.remove(chunk_data["chunk_path"])
+
+                StorageManager.save_async(os.path.join(project_path, "transcription.txt"), transcribed_text, append=True)
 
                 yield {
-                    **chunk_data,
+                    **chunk_data,  # keep all chunk metadata
                     "text": transcribed_text
                 }
-
         finally:
             end_time = time.perf_counter()
             transcription_time = end_time - start_time
 
             # Save the transcription time in the metrics CSV file
             StorageManager.update_csv(
-                path=metrics_csv_path,
+                path=os.path.join(project_path, "performance_metrics.csv"),
                 new_data={
                     "configuration.asr_model": f"{self.provider}/{self.model_name}",
                     "performance.transcription_time": round(transcription_time, 4)
