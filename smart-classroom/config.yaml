@@ -20,7 +20,10 @@ models:
     max_new_tokens: 1024
     temperature: 0.7 # 0.7 default
     models_base_path: "models"
-    system_prompt: "Summarize the classroom transcription in clear English. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription. return the result in Markdown"
+    language: en # en or zh
+    system_prompt: 
+      en: "Summarize the classroom transcription in clear English. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription. Return the result in Markdown format"
+      zh: "Summarize the classroom transcription in clear Mandarin. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription. Return the result in Markdown format"
     model_hub: huggingface # huggingface or modelscope
 
 audio_preprocessing:
