@@ -48,7 +48,7 @@ def _download_openvino_model(
 def ensure_model() -> str:
     output_dir = get_model_path()
     if config.models.summarizer.provider == "openvino":
-        _download_openvino_model(config.models.summarizer.name, output_dir, config.models.summarizer.weight_format, None)
+        _download_openvino_model(config.models.summarizer.name, output_dir, config.models.summarizer.weight_format)
         return output_dir
 
 def get_model_path() -> str:
