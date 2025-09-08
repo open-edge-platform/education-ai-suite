@@ -40,6 +40,10 @@
     "summary": "人工智能摘要"
   },
   "accordion": {
+    "noData": "暂无数据",
+    "noSessionActive": "无活动会话。请上传音频文件并开始转录以开始监控。",
+    "lastUpdated": "最后更新",
+    "resourceUtilization": "资源利用率",
     "configuration": "配置与指标",
     "resource": "资源利用率",
     "models": "预验证模型",
@@ -68,10 +72,10 @@
     "loadingResource": "正在加载资源数据...",
     "transcriptsModel": "转录模型",
     "summaryModel": "摘要",
-    "whisper": "耳语",
+    "whisper": "中文语音识别模型",
     "model1": "模型1",
     "model2": "模型2",
-    "gpt-4": "通用预训练变换器4",
+    "gpt-4": "通义千问2-70亿参数指令模型",
     "model3": "模型3",
     "model4": "模型4"
   },

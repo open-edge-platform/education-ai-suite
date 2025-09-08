@@ -1,22 +1,42 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 
-interface ResourceState {
-  metrics: any | null;
+interface ResourceMetrics {
+  cpu_utilization: any[];
+  gpu_utilization: any[];
+  memory: any[];
+  power: any[];
 }
 
-const initialState: ResourceState = { metrics: null };
+interface ResourceState {
+  metrics: ResourceMetrics;
+  lastUpdated: number | null;
+}
+
+const initialState: ResourceState = {
+  metrics: {
+    cpu_utilization: [],
+    gpu_utilization: [],
+    memory: [],
+    power: []
+  },
+  lastUpdated: null
+};
 
 const resourceSlice = createSlice({
   name: 'resource',
   initialState,
   reducers: {
-    setMetrics(state, action: PayloadAction<any>) {
+    setMetrics: (state, action: PayloadAction<ResourceMetrics>) => {
       state.metrics = action.payload;
+      state.lastUpdated = Date.now();
     },
-    resetMetrics: () => initialState,
-  },
+    clearMetrics: (state) => {
+      state.metrics = initialState.metrics;
+      state.lastUpdated = null;
+    }
+  }
 });
 
-export const { setMetrics, resetMetrics } = resourceSlice.actions;
+export const { setMetrics, clearMetrics } = resourceSlice.actions;
 export default resourceSlice.reducer;
