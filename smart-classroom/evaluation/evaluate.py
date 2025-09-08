@@ -208,7 +208,7 @@ def main():
         sum_prompt_filled = sum_prompt.format(transcript=transcript)
         device = config.models.summarizer.device if config.models.summarizer.device else "GPU"
         s_start = time.time()
-        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device)
+        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device.lower())
         s_end = time.time()
         try:
             with open(result_dir / sum_result_file, 'w', encoding='utf-8') as output_file:
