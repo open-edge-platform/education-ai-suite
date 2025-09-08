@@ -1,5 +1,6 @@
 from components.base_component import PipelineComponent
 import os
+import time
 from utils.config_loader import config
 from utils.storage_manager import StorageManager
 from utils.runtime_config_loader import RuntimeConfig
@@ -19,8 +20,9 @@ class ASRComponent(PipelineComponent):
 
         self.session_id = session_id
         self.temperature = temperature
+        self.provider = provider
+        self.model_name = model_name
         provider, model_name = provider.lower(), model_name.lower()
-
         config = (provider, model_name, device)
 
         # Reload only if config changed
@@ -40,8 +42,10 @@ class ASRComponent(PipelineComponent):
         project_config = RuntimeConfig.get_section("Project")
         project_path = os.path.join(project_config.get("location"), project_config.get("name"), self.session_id)
         StorageManager.save(os.path.join(project_path, "transcription.txt"), "", append=False)
-        
-        try:
+
+        start_time = time.perf_counter()
+        try: 
+
             for chunk_data in input_generator:
                 chunk_path = chunk_data["chunk_path"]
                 transcribed_text = self.asr.transcribe(chunk_path, temperature=self.temperature)
@@ -56,5 +60,19 @@ class ASRComponent(PipelineComponent):
                     "text": transcribed_text
                 }
         finally:
+
+            end_time = time.perf_counter()
+            transcription_time = end_time - start_time
+
+            # Save the transcription time in the metrics CSV file
+            StorageManager.update_csv(
+                path=os.path.join(project_path, "performance_metrics.csv"),
+                new_data={
+                    "configuration.asr_model": f"{self.provider}/{self.model_name}",
+                    "performance.transcription_time": round(transcription_time, 4)
+                }
+            )
+
             logger.info(f"Transcription Complete: {self.session_id}")
+
             

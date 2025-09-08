@@ -8,6 +8,7 @@ from pipeline import Pipeline
 import json, os
 from fastapi.responses import StreamingResponse
 from utils.runtime_config_loader import RuntimeConfig
+from utils.storage_manager import StorageManager
 from dto.project_settings import ProjectSettings
 from monitoring.monitor import start_monitoring, stop_monitoring, get_metrics
 from utils.audio_util import save_audio_file
@@ -67,6 +68,36 @@ def summarize_audio(request: SummaryRequest):
             yield json.dumps({"token": token}) + "\n"
 
     return StreamingResponse(event_stream(), media_type="application/json")
+
+@router.get("/performance-metrics")
+def get_summary_metrics(session_id: Optional[str] = Header(None, alias="session_id")):
+    project_config = RuntimeConfig.get_section("Project")
+    location = project_config.get("location")
+    name = project_config.get("name")
+
+    if not session_id:
+        return JSONResponse(
+            content={"error": "Missing required header: session_id"},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
+    if not location or not name:
+        return JSONResponse(
+            content={"error": "Missing project configuration for 'location' or 'name'"},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        nested_metrics = StorageManager.read_performance_metrics(location, name, session_id)
+        return JSONResponse(
+            content=nested_metrics,
+            status_code=status.HTTP_200_OK
+        )
+    except Exception as e:
+        logger.error(f"Error reading performance metrics: {e}")
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 @router.get("/project")
 def get_project_config():
