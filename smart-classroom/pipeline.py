@@ -8,7 +8,7 @@ from components.summarizer_component import SummarizerComponent
 from utils.runtime_config_loader import RuntimeConfig
 from utils.storage_manager import StorageManager
 from monitoring import monitor
-
+import time
 logger = logging.getLogger(__name__)
 
 class Pipeline:
@@ -39,6 +39,7 @@ class Pipeline:
                 yield chunk_trancription
         finally:
             monitor.stop_monitoring()
+            time.sleep(3) #time for socwatch to get clean-start
             
     
     def run_summarizer(self):

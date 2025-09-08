@@ -5,6 +5,8 @@ app:
 monitoring:
   logs_dir: ./monitoring/logs
   interval: 2
+  socwatch_path: monitoring/tools/socwatch_windows_v2025.5.1/64/socwatch.exe
+  execution_logs: monitoring/executionlogs
 models:
   asr:
     provider: openai # funasr and openai supported
