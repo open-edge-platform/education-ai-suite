@@ -25,13 +25,56 @@ The goal is to transform raw classroom recordings into concise, structured summa
 pip install -r requirements.txt
 ```
 
+**c. [Optional] Install IPEX-LLM to use IPEX-based LLM model for summarization:**
+
+```bash
+pip install --pre --upgrade ipex-llm[xpu_2.6] --extra-index-url https://download.pytorch.org/whl/xpu
+```
+---
+### ⚙️ 2. Default Configuration
+
+By default, the project uses Whisper for transcription and OpenVINO-based Qwen models for summarization.You can modify these settings in the configuration file:
+
+```bash
+asr:
+  provider: openai            # Supported: openai, funasr
+  name: whisper-tiny          # Options: whisper-tiny, whisper-small, paraformer-zh etc.
+  device: CPU                 # Whisper currently supports only CPU
+  temperature: 0.0
+
+summarizer:
+  provider: openvino          # Options: openvino or ipex
+  name: Qwen/Qwen2-7B-Instruct # Examples: Qwen/Qwen1.5-7B-Chat, Qwen/Qwen2-7B-Instruct, Qwen/Qwen2.5-7B-Instruct
+  device: GPU                 # Options: GPU or CPU
+  weight_format: int8         # Supported: fp16, fp32, int4, int8
+  max_new_tokens: 1024        # Maximum tokens to generate in summaries
+```
+### 💡 Tips:
+* For Chinese audio transcription, switch to funASR with Paraformer:
+
+```bash
+asr:
+  provider: funasr
+  name: paraformer-zh
+```
+
+* (Optional) If you want to use IPEX-based summarization, make sure IPEX-LLM is installed and set:
+
+```bash
+summarizer:
+  provider: ipex
+```
+
+**Important: After updating the configuration, reload the application for changes to take effect.**
+
 ---
 
-### ✅ 2. **Run the Application**
+### ✅ 3. **Run the Application**
 
 ```bash
 python main.py
 ```
+**To monitor power usage, run your shell with admin privileges before starting the application.**
 
 You should see logs similar to this:
 
