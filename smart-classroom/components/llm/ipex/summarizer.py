@@ -23,6 +23,13 @@ class Summarizer(BaseSummarizer):
         else:
             raise ValueError(f"Unsupported Model Hub: {model_hub}, should be huggingface or modelscope")
 
+        if not device.startswith("gpu") and device != "cpu":
+            raise ValueError(f"Unknown device {device}")
+        if device == "gpu" or device == "gpu.0":
+            device = "xpu"
+        elif device.startswith("gpu.") and device[4:].isdigit():
+            device = f"xpu:{device[4:]}"
+                
         # Load model
         if config.models.summarizer.use_cache is not None:
             use_cache = config.models.summarizer.use_cache

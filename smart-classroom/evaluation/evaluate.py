@@ -50,12 +50,12 @@ def transcribe(model_name: str, local_audio_path: str) -> str:
         return None
     return model.transcribe(local_audio_path, 0.0)
 
-def summarize(model_name: str, prompt, provider) -> str:
+def summarize(model_name: str, prompt, provider, device) -> str:
     """Generate a summary using the Summarizer model."""
     if provider == "openvino":
-        model = OvSummarizer(model_name, "GPU")
+        model = OvSummarizer(model_name, device)
     elif provider == "ipex":
-        model = IpexSummarizer(model_name, "xpu")
+        model = IpexSummarizer(model_name, device.lower())
     else:
         print("Unknown summarization model")
         return None
@@ -206,8 +206,9 @@ def main():
                 print(f"Failed to read transcript: {e}")
                 sys.exit(1)
         sum_prompt_filled = sum_prompt.format(transcript=transcript)
+        device = config.models.summarizer.device if config.models.summarizer.device else "GPU"
         s_start = time.time()
-        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider)
+        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device)
         s_end = time.time()
         try:
             with open(result_dir / sum_result_file, 'w', encoding='utf-8') as output_file:

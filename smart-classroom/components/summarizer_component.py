@@ -30,7 +30,8 @@ class SummarizerComponent(PipelineComponent):
             elif provider == "ipex":
                 SummarizerComponent._model = IpexSummarizer(
                     model_name=model_name,
-                    device=device.lower()
+                    device=device.lower(),
+                    temperature=temperature
                 )
             else:
                 raise ValueError(f"Unsupported summarizer provider: {provider}")
