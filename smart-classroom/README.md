@@ -71,12 +71,19 @@ summarizer:
 
 ### ✅ 3. **Run the Application**
 
+Bring Up Backend:
 ```bash
 python main.py
 ```
 **To monitor power usage, run your shell with admin privileges before starting the application.**
 
-You should see logs similar to this:
+Bring Up Frontend:
+```bash
+npm install
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+💡 Tips: You should see backend logs similar to this:
 
 ```
 pipeline initialized
