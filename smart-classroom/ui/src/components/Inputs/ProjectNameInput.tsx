@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface ProjectNameInputProps {
   projectName: string;
@@ -11,17 +12,19 @@ interface ProjectNameInputProps {
 const ProjectNameInput: React.FC<ProjectNameInputProps> = ({
   projectName,
   onChange,
-  placeholder = "Enter project name",
+  placeholder,
   maxLength = 32,
   autoFocus = false,
 }) => {
+  const { t } = useTranslation();
+  const effectivePlaceholder = placeholder ?? t('settings.projectNamePlaceholder');
   return (
     <input
       type="text"
       value={projectName}
       onChange={(e) => onChange(e.target.value)} 
       id="projectName"
-      placeholder={placeholder}
+      placeholder={effectivePlaceholder}
       maxLength={maxLength}
       autoFocus={autoFocus}
       style={{ background: "#f8f8f8" }}

@@ -3,7 +3,6 @@ import Menu from '../Menu/Menu';
 import '../../assets/css/TopPanel.css';
 import BrandSlot from '../../assets/images/BrandSlot.svg';
 import menu from '../../assets/images/menu.svg';
-import { constants } from '../../constants';
 import LanguageSwitcher from '../LanguageSwitcher';
 import { useTranslation } from 'react-i18next';
 
@@ -64,6 +63,7 @@ const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName, isSett
           setProjectName={setProjectName}
           isSettingsOpen={isSettingsOpen}
           setIsSettingsOpen={setIsSettingsOpen}
+          onRequestCloseMenu={() => setIsMenuOpen(false)} 
         />
       )}
     </header>

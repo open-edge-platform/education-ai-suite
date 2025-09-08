@@ -31,7 +31,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
   const summaryLoading = useAppSelector((s) => s.ui.summaryLoading);
   const transcriptStatus = useAppSelector((s) => s.transcript.status);
 
-  // Timer
   useEffect(() => {
     let interval: number | null = null;
     if (isRecording) {
@@ -42,7 +41,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
     return () => { if (interval !== null) clearInterval(interval); };
   }, [isRecording, timer]);
 
-  // Notifications synced with stream phases
   useEffect(() => {
     if (summaryEnabled && summaryLoading) setNotification(t('notifications.generatingSummary'));
     else if (summaryEnabled && isBusy && !summaryLoading) setNotification(t('notifications.streamingSummary'));
@@ -107,9 +105,10 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
 
         <button
           className="text-button"
-          onClick={handleRecordingToggle}
-          disabled={isBusy && !isRecording}
-          title={isRecording ? t('header.stopRecording') : t('header.startRecording')}
+          onClick={(e) => { e.preventDefault(); }} 
+          disabled={true}
+          title="Recording disabled"
+          style={{ cursor: 'not-allowed', opacity: 0.6 }}
         >
           {isRecording ? t('header.stopRecording') : t('header.startRecording')}
         </button>

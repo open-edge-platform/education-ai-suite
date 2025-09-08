@@ -1,14 +1,29 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Accordion from "../common/Accordion";
 import "../../assets/css/RightPanel.css"; 
 import { useTranslation } from 'react-i18next';
-import { getConfigurationMetrics } from '../../services/api';
+import { getSettings } from '../../services/api';
 
 const ConfigurationMetricsAccordion: React.FC = () => {
   const { t } = useTranslation();
-  const [configData, setConfigData] = useState<any>(null);
+  const [configData] = useState<any>(null);
+  const didRunRef = useRef(false); // guard StrictMode double-invoke
+
   useEffect(() => {
-    getConfigurationMetrics().then(setConfigData);
+    if (didRunRef.current) return;
+    didRunRef.current = true;
+
+    (async () => {
+      try {
+        // Ensure first call is /project
+        await getSettings();
+// -        const data = await getConfigurationMetrics();
+// -        setConfigData(data);
+//+        // Defer calling /configuration-metrics; it will be triggered later in the flow
+      } catch {
+        // ignore (keep placeholder UI)
+      }
+    })();
   }, []);
 
   return (
@@ -42,4 +57,4 @@ const ConfigurationMetricsAccordion: React.FC = () => {
   );
 };
 
-export default ConfigurationMetricsAccordion;         
+export default ConfigurationMetricsAccordion;

@@ -11,6 +11,7 @@ export interface UIState {
   autoSwitched: boolean;
   sessionId: string | null;
   uploadedAudioPath: string | null;
+  shouldStartSummary: boolean; // trigger to start summary once
 }
 
 const initialState: UIState = {
@@ -21,6 +22,7 @@ const initialState: UIState = {
   autoSwitched: false,
   sessionId: null,
   uploadedAudioPath: null,
+  shouldStartSummary: false,
 };
 
 const uiSlice = createSlice({
@@ -35,21 +37,30 @@ const uiSlice = createSlice({
       state.autoSwitched = false;
       state.sessionId = null;
       state.uploadedAudioPath = null;
+      state.shouldStartSummary = false;
     },
     transcriptionComplete(state) {
       console.log('transcriptionComplete reducer called');
       state.summaryEnabled = true;
-      state.summaryLoading = true; 
+      state.summaryLoading = true; // show spinner until first token
+      state.shouldStartSummary = true; // request summary start
       if (!state.autoSwitched) {
         state.activeTab = 'summary';
         state.autoSwitched = true;
       }
     },
+    clearSummaryStartRequest(state) {
+      state.shouldStartSummary = false;
+    },
     setUploadedAudioPath(state, action: PayloadAction<string>) {
       state.uploadedAudioPath = action.payload;
     },
     setSessionId(state, action: PayloadAction<string | null>) {
-      state.sessionId = action.payload;
+      const v = action.payload;
+      if (typeof v === 'string' && v.trim().length > 0) {
+        state.sessionId = v;
+      }
+      // ignore null/empty to avoid accidental reset
     },
     firstSummaryToken(state) {
       state.summaryLoading = false; // hide spinner on first token
@@ -69,6 +80,7 @@ const uiSlice = createSlice({
 export const {
   startProcessing,
   transcriptionComplete,
+  clearSummaryStartRequest,
   setUploadedAudioPath,
   setSessionId,
   firstSummaryToken,

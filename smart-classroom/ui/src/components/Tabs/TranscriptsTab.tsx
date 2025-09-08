@@ -41,7 +41,6 @@ const TranscriptsTab: React.FC = () => {
             dispatch(finishTranscript());
             console.log('Transcription finished, dispatching transcriptionComplete');
             dispatch(transcriptionComplete());
-            console.log('Session ID:', sessionId);
           }
         }
       } catch { /* ignore aborts */ }
@@ -58,7 +57,7 @@ const TranscriptsTab: React.FC = () => {
       <div className="transcript-content">
         {text && text.trim().length > 0
           ? text
-          : <span style={{ color: "#888" }}>Transcripts not found</span>
+          : <span style={{ color: "#888" }}></span>
         }
       </div>
     </div>
