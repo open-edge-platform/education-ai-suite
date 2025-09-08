@@ -55,7 +55,7 @@ def summarize(model_name: str, prompt, provider, device) -> str:
     if provider == "openvino":
         model = OvSummarizer(model_name, device)
     elif provider == "ipex":
-        model = IpexSummarizer(model_name, device)
+        model = IpexSummarizer(model_name, device.lower())
     else:
         print("Unknown summarization model")
         return None
@@ -208,7 +208,7 @@ def main():
         sum_prompt_filled = sum_prompt.format(transcript=transcript)
         device = config.models.summarizer.device if config.models.summarizer.device else "GPU"
         s_start = time.time()
-        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device.lower())
+        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device)
         s_end = time.time()
         try:
             with open(result_dir / sum_result_file, 'w', encoding='utf-8') as output_file:
