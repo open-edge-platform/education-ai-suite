@@ -3,9 +3,9 @@ import os
 import time
 from utils.config_loader import config 
 from monitoring.scripts.common.collect_cpu import start_cpu_monitoring
-from monitoring.scripts.wmi.collect_gpu import start_gpu_monitoring
+from monitoring.scripts.windows.collect_gpu import start_gpu_monitoring
 from monitoring.scripts.common.collect_memory import start_memory_monitoring
-from monitoring.scripts.wmi.collect_power import start_power_monitoring
+from monitoring.scripts.windows.collect_power import start_power_monitoring
 import logging
 import platform
 

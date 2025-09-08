@@ -1,7 +1,7 @@
-import logging, os, subprocess
+import logging, os
 from typing import Tuple
-import logging
 from utils.config_loader import config
+from utils.cli_utils import run_cli
 logger = logging.getLogger(__name__)
 
 def _ir_exists(output_dir: str) -> bool:
@@ -20,7 +20,7 @@ def _download_openvino_model(
     os.makedirs(output_dir, exist_ok=True)
 
     if not force and _ir_exists(output_dir):
-        logging.info(f"⚡ Using cached export at {output_dir}")
+        logger.info(f"⚡ Using cached export at {output_dir}")
         return True, output_dir
 
     cmd = [
@@ -31,18 +31,17 @@ def _download_openvino_model(
         output_dir,
     ]
 
-    logging.info(f"🚀 Exporting {model_name} → {output_dir} ({weight_format})")
-    try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        logging.debug(result.stdout.strip())
-        if result.stderr.strip():
-            logging.warning(result.stderr.strip())
-    except subprocess.CalledProcessError as e:
-        logging.error(f"❌ Export failed: {e.stderr or e}")
+    logger.info(f"🚀  Exporting {model_name} → {output_dir} ({weight_format})\n"
+                "⏳  Exporting model... This process may take some time depending on the model size. \n"
+                "⚠️  Please do not terminate the process.")
+
+    return_code = run_cli(cmd=cmd, log_fn=logger.info)
+    if return_code != 0:
+        logger.error(f"❌ Export failed: {return_code}")
         return False, output_dir
 
     success = _ir_exists(output_dir)
-    logging.info("✅ Export successful" if success else "❌ Export incomplete")
+    logger.info("✅ Export successful" if success else "❌ Export incomplete")
     return success, output_dir
 
 def ensure_model() -> str:

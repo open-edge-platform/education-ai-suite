@@ -2,6 +2,6 @@ from pydantic import BaseModel
 from typing import Optional
 
 class ProjectSettings(BaseModel):
-    name: Optional[str] = "smart-classroom"
-    location: Optional[str] = "storage/"
+    name: str
+    location: str
     microphone: Optional[str] = None
