@@ -73,6 +73,7 @@ class Summarizer(BaseSummarizer):
                         max_new_tokens=max_new_tokens,
                         temperature=self.temperature
                     )
+                    torch.xpu.empty_cache()
                     torch.xpu.synchronize()
                     generated_ids = generated_ids.cpu()
                     generated_ids = [
@@ -93,6 +94,9 @@ class Summarizer(BaseSummarizer):
                         temperature=self.temperature,
                         streamer=streamer
                     )
+
+                    torch.xpu.empty_cache()
+                    torch.xpu.synchronize()
                     
                     thread = threading.Thread(target=self.model.generate, kwargs=gen_kwargs)
                     thread.start()
