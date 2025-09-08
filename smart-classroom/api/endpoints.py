@@ -55,22 +55,18 @@ async def transcribe_audio(
             yield json.dumps(chunk_data) + "\n"
 
     response = StreamingResponse(stream_transcription(), media_type="application/json")
-    response.headers["x-session-id"] = pipeline.session_id
+    response.headers["X-Session-ID"] = pipeline.session_id
     return response
 
 
 @router.post("/summarize")
 def summarize_audio(request: SummaryRequest):
     pipeline = Pipeline(request.session_id)
+
     def event_stream():
-        try:
-            for token in pipeline.run_summarizer():
-                print("Yielding summary token:", token)
-                yield json.dumps({"token": token}) + "\n"
-            print("Summary stream finished")
-        except Exception as e:
-            print("Error in summarizer:", e)
-            yield json.dumps({"token": "[Summary error]"}) + "\n"
+        for token in pipeline.run_summarizer():
+            yield json.dumps({"token": token}) + "\n"
+
     return StreamingResponse(event_stream(), media_type="application/json")
 
 @router.get("/performance-metrics")
