@@ -16,17 +16,19 @@ interface SettingsFormProps {
 const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setProjectName }) => {
   const [selectedMicrophone, setSelectedMicrophone] = useState('');
   const [projectLocation, setProjectLocation] = useState('/live/stream');
+  const [nameError, setNameError] = useState<string | null>(null);
   const dirInputRef = React.useRef<HTMLInputElement>(null);
   const { t } = useTranslation();
 
   React.useEffect(() => {
     getSettings().then(s => {
       if (!s) return;
-      setProjectName(s.projectName);
-      setProjectLocation(s.projectLocation);
-      setSelectedMicrophone(s.microphone);
-    });
+      // setProjectName(s.projectName);
+      setProjectLocation(s.projectLocation || '/live/stream');
+      setSelectedMicrophone(s.microphone || '');
+    }).catch(() => {});
   }, [setProjectName]);
+
 
   const openDirectoryPicker = async () => {
     if ('showDirectoryPicker' in window) {
@@ -35,24 +37,40 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
         const dir = await window.showDirectoryPicker();
         setProjectLocation(dir.name || '/live/stream');
         return;
-      } catch { /* user cancelled */ }
+      } catch { }
     }
     dirInputRef.current?.click();
   };
 
   const handleSave = async () => {
-    const settings = { projectName, projectLocation, microphone: selectedMicrophone };
-    await saveSettings(settings);
-    onClose();
+    if (!projectName.trim()) { 
+      setNameError(t('errors.projectNameRequired'));
+      return;
+    }
+    try {
+      await saveSettings({ projectName, projectLocation, microphone: selectedMicrophone });
+      onClose();
+    } catch {
+    }
   };
 
+  const handleNameChange = (name: string) => { // NEW: clear error on change
+    setProjectName(name);
+    if (nameError) setNameError(null);
+  };
+  
   return (
     <div className="settings-form">
       <h2>{t('settings.title')}</h2>
       <div className="settings-body">
         <div>
           <label htmlFor="projectName">{t('settings.projectName')}</label>
-          <ProjectNameInput projectName={projectName} onChange={setProjectName} />
+          <ProjectNameInput projectName={projectName} onChange={handleNameChange} />
+          {nameError && (
+            <div style={{ color: '#c00', fontSize: 12, marginTop: 4 }}>
+              {nameError}
+            </div>
+          )}
         </div>
         <div>
           <label htmlFor="projectLocation">{t('settings.projectLocation')}</label>

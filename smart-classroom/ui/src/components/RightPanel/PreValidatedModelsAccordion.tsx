@@ -13,16 +13,12 @@ const PreValidatedModelsAccordion: React.FC = () => {
           <div className="accordion-content">{t('accordion.transcriptsModel')}</div>
           <select className="dropdown">
             <option value="whisper">{t('accordion.whisper')}</option>
-            <option value="model1">{t('accordion.model1')}</option>
-            <option value="model2">{t('accordion.model2')}</option>
           </select>
         </div>
         <div className="dropdown-section">
           <div className="accordion-content">{t('accordion.summaryModel')}</div>
           <select className="dropdown">
             <option value="gpt-4">{t('accordion.gpt-4')}</option>
-            <option value="model3">{t('accordion.model3')}</option>
-            <option value="model4">{t('accordion.model4')}</option>
           </select>
         </div>
       </div>

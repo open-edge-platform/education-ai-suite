@@ -1,19 +1,25 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface MicrophoneSelectProps {
   selectedMicrophone: string;
   onChange: (microphone: string) => void;
 }
 
-const MicrophoneSelect: React.FC<MicrophoneSelectProps> = ({ selectedMicrophone, onChange }) => {
+const MicrophoneSelect: React.FC<MicrophoneSelectProps> = ({
+  selectedMicrophone,
+  onChange
+}) => {
+  const { t } = useTranslation();
+  const defaultVal = selectedMicrophone || t('settings.ipMicrophone');
   return (
     <select
-      value={selectedMicrophone}
-      onChange={(e) => onChange(e.target.value)}
+      value={defaultVal}
+      onChange={e => onChange(e.target.value)}
       id="microphone"
+      disabled
     >
-      <option value="IP Microphone">IP Microphone</option>
-      <option value="Default Microphone">Default Microphone</option>
+      <option value={t('settings.ipMicrophone')!}>{t('settings.ipMicrophone')}</option>
     </select>
   );
 };

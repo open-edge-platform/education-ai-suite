@@ -5,9 +5,11 @@ export type StreamEvent =
 
 export interface StreamOptions {
   tokenDelayMs?: number;
-  startDelayMs?: number; // simulate backend prep/TTFT
+  startDelayMs?: number; 
   signal?: AbortSignal;
-}
+  onSessionId?: (id: string | null) => void; 
+  alreadyTokenized?: boolean; 
+};
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -26,10 +28,16 @@ export async function* simulateTranscriptStream(
   const startDelay = opts.startDelayMs ?? 0;
   if (startDelay > 0) await sleep(startDelay);
   for (const line of chunks) {
-    for (const tok of tokenize(line + ' ')) {
+    if (opts.alreadyTokenized) {
       if (opts.signal?.aborted) return;
-      yield { type: 'transcript', token: tok };
+      yield { type: 'transcript', token: line };
       await sleep(delay);
+    } else {
+      for (const tok of tokenize(line + ' ')) {
+        if (opts.signal?.aborted) return;
+        yield { type: 'transcript', token: tok };
+        await sleep(delay);
+      }
     }
   }
   yield { type: 'done' };
@@ -42,10 +50,18 @@ export async function* simulateSummaryStream(
   const delay = opts.tokenDelayMs ?? 38;
   const startDelay = opts.startDelayMs ?? 0;
   if (startDelay > 0) await sleep(startDelay);
-  for (const tok of tokenize(text)) {
-    if (opts.signal?.aborted) return;
-    yield { type: 'summary_token', token: tok };
-    await sleep(delay);
+  if (opts.alreadyTokenized) {
+    for (const tok of text.split(' ')) {
+      if (opts.signal?.aborted) return;
+      yield { type: 'summary_token', token: tok + ' ' };
+      await sleep(delay);
+    }
+  } else {
+    for (const tok of tokenize(text)) {
+      if (opts.signal?.aborted) return;
+      yield { type: 'summary_token', token: tok };
+      await sleep(delay);
+    }
   }
   yield { type: 'done' };
 }

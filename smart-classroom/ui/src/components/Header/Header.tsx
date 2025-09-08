@@ -7,17 +7,19 @@ import recordOFF from '../../assets/images/recording-off.svg';
 import sideRecordIcon from '../../assets/images/sideRecord.svg';
 import { constants } from '../../constants';
 import { useAppDispatch, useAppSelector } from '../../redux/hooks';
-import { resetFlow, startProcessing } from '../../redux/slices/uiSlice';
+import { resetFlow, startProcessing, setUploadedAudioPath } from '../../redux/slices/uiSlice';
 import { resetTranscript } from '../../redux/slices/transcriptSlice';
 import { resetSummary } from '../../redux/slices/summarySlice';
 import { useTranslation } from 'react-i18next';
-import LanguageSwitcher from '../LanguageSwitcher';
+import { uploadAudio } from '../../services/api';
+
+
 interface HeaderBarProps {
   projectName: string;
   setProjectName: (name: string) => void;
 }
 
-const HeaderBar: React.FC<HeaderBarProps> = ({ projectName /*, setProjectName*/ }) => {
+const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [notification, setNotification] = useState(constants.START_NOTIFICATION);
   const { t } = useTranslation();
@@ -29,7 +31,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName /*, setProjectName*/ 
   const summaryLoading = useAppSelector((s) => s.ui.summaryLoading);
   const transcriptStatus = useAppSelector((s) => s.transcript.status);
 
-  // Timer
   useEffect(() => {
     let interval: number | null = null;
     if (isRecording) {
@@ -40,7 +41,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName /*, setProjectName*/ 
     return () => { if (interval !== null) clearInterval(interval); };
   }, [isRecording, timer]);
 
-  // Notifications synced with stream phases
   useEffect(() => {
     if (summaryEnabled && summaryLoading) setNotification(t('notifications.generatingSummary'));
     else if (summaryEnabled && isBusy && !summaryLoading) setNotification(t('notifications.streamingSummary'));
@@ -50,18 +50,17 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName /*, setProjectName*/ 
     else setNotification(t('notifications.start'));
   }, [isBusy, summaryEnabled, summaryLoading, transcriptStatus, t]);
 
-  
-
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
+
   const handleRecordingToggle = () => {
     if (isBusy && !isRecording) return;
     const next = !isRecording;
     setIsRecording(next);
-  
+
     if (next) {
       setTimer(0);
       setNotification(t('notifications.recording'));
@@ -73,15 +72,22 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName /*, setProjectName*/ 
       dispatch(startProcessing());
     }
   };
-  
-  const handleFileUpload = (file: File) => {
+
+  const handleFileUpload = async (file: File) => {
     if (isBusy || isRecording) return;
     setNotification(t('notifications.uploading'));
     dispatch(resetFlow());
     dispatch(resetTranscript());
     dispatch(resetSummary());
     dispatch(startProcessing());
-    console.log('File Uploaded:', file.name);
+    try {
+      const result = await uploadAudio(file);
+      dispatch(setUploadedAudioPath(result.path)); // <-- Only this, no transcription here
+      console.log('File Uploaded:', file.name, 'Saved path:', result.path);
+    } catch (e) {
+      setNotification('Upload failed');
+      console.error('Upload failed', e);
+    }
   };
 
   return (
@@ -99,9 +105,10 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName /*, setProjectName*/ 
 
         <button
           className="text-button"
-          onClick={handleRecordingToggle}
-          disabled={isBusy && !isRecording}
-          title={isRecording ? t('header.stopRecording') : t('header.startRecording')}
+          onClick={(e) => { e.preventDefault(); }} 
+          disabled={true}
+          title="Recording disabled"
+          style={{ cursor: 'not-allowed', opacity: 0.6 }}
         >
           {isRecording ? t('header.stopRecording') : t('header.startRecording')}
         </button>

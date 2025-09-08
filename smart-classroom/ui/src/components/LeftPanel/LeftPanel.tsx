@@ -1,4 +1,3 @@
-import React from "react";
 import TranscriptsTab from "../Tabs/TranscriptsTab";
 import AISummaryTab from "../Tabs/AISummaryTab";
 import "../../assets/css/LeftPanel.css";
