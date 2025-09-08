@@ -1,20 +1,14 @@
 templ_sum_en = """\
-You are an expert teaching assistant. Given the following transcript of a lecture, generate a concise summary that captures the main points, key arguments, and important details. Avoid copying text verbatim and write the summary in your own words.
 
-Transcript:
 {transcript}
 
-Summary:
 """
 
 
 templ_sum_zh = """\
-你的任务是根据提供的原始课堂音频的转录文本，提炼出本节课的核心内容、知识点结构、讲解顺序，并用简洁清晰的语言进行总结。尤其注意不要捏造任何没有提及的知识点，保证知识点真实准确，避免任何冗余或误导性内容。
 
-原始课堂音频转录文本:
-"{transcript}"
+{transcript}
 
-总结：
 
 """
 
