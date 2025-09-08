@@ -39,6 +39,7 @@ class SummarizerComponent(PipelineComponent):
 
         self.summarizer = SummarizerComponent._model
         self.model_name = model_name
+        self.provider = provider
 
     def _get_message(self, input):
 
@@ -88,7 +89,7 @@ class SummarizerComponent(PipelineComponent):
             StorageManager.update_csv(
                 path=os.path.join(project_path, "performance_metrics.csv"),
                 new_data={
-                    "configuration.summarizer_model": self.model_name,
+                    "configuration.summarizer_model": f"{self.provider}/{self.model_name}",
                     "performance.summarizer_time": round(summarization_time, 4),
                     "performance.ttft": round(ttft, 4),
                     "performance.tps": round(tps, 4),
