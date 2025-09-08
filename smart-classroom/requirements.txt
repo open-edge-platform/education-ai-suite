@@ -2,19 +2,17 @@ fastapi==0.116.1
 pydantic==2.11.7
 PyYAML==6.0.2
 uvicorn==0.35.0
-python-multipart
-pydub
-openai-whisper
+python-multipart==0.0.20
+pydub==0.25.1
+openai-whisper==20250625
 fsspec>=2023.1.0,<=2025.3.0
 numpy>=1.26.4,<2
-wmi
-pywin32
-openvino
+wmi==1.5.1
+pywin32==311
+openvino==2025.2.0
 optimum[openvino]
-openvino-genai
+openvino-genai==2025.2.0.0
 funasr==1.2.7
-modelscope==1.28.2
---extra-index-url https://download.pytorch.org/whl/xpu
 torch==2.6.0+xpu
 torchaudio==2.6.0+xpu
-
+transformers==4.37.0

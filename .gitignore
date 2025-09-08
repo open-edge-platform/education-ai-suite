@@ -10,3 +10,6 @@ models/
 
 # Ignore chunks directory
 chunks/
+
+#Ignore logs
+monitoring/executionlogs/
