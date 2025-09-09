@@ -59,7 +59,8 @@ class Summarizer(BaseSummarizer):
             model_hub=model_hub
         )
         self.device = device
-        self.model = self.model.half().to(self.device)
+        self.model = self.model.to(self.device)
+        self.model = self.model.eval().to(self.device)
 
         self.temperature = temperature
 
