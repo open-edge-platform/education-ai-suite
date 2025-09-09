@@ -28,7 +28,7 @@ def get_audio_duration(audio_path):
         "ffprobe", "-v", "error", "-show_entries",
         "format=duration", "-of",
         "default=noprint_wrappers=1:nokey=1", audio_path
-    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
 
     return float(result.stdout.strip())
 
@@ -37,7 +37,7 @@ def detect_silences(audio_path):
         "ffmpeg", "-i", audio_path, "-af",
         f"silencedetect=noise={SILENCE_THRESH}dB:d={SILENCE_DURATION}",
         "-f", "null", "-"
-    ], stderr=subprocess.PIPE, text=True)
+    ], stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
 
     output = result.stderr
     silences = []
@@ -98,7 +98,7 @@ def chunk_audio_by_silence(audio_path):
             "-ss", str(current_time), "-to", str(end_time),
             "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-vn",
             chunk_path
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace")
 
         chunk_meta = {
             "chunk_path": chunk_path,
