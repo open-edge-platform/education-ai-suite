@@ -4,6 +4,7 @@ import os
 import json
 import time
 import sys
+import psutil
 from pathlib import Path
 from typing import Optional
 from pydub import AudioSegment
@@ -20,12 +21,43 @@ from components.llm.openvino.summarizer import Summarizer as OvSummarizer
 
 from utils.ensure_model import ensure_model
 from utils.config_loader import config
+from monitoring.monitor import start_monitoring, stop_monitoring, get_metrics
 
 from evaluation.template import templ_sum_en, templ_sum_zh, templ_score_en, templ_score_zh, sys_prompt_score_en, sys_prompt_score_zh
 
 
 JWT_token = "{your JWT token}"
 
+def set_process_affinity_to_cores(core_indices):
+    """
+    Set the current process affinity to specific CPU cores.
+
+    Args:
+        core_indices (list of int): List of CPU core indices to bind the process to.
+
+    Returns:
+        bool: True if successful, False otherwise.
+    """
+    try:
+        # Get the current process
+        process = psutil.Process(os.getpid())
+
+        # Set the process affinity
+        process.cpu_affinity(core_indices)
+
+        print("Successfully bound the process to CPU cores:", core_indices)
+        return True
+    except Exception as e:
+        print("Failed to bind the process. Error:", e)
+        return False
+
+def parse_core_indices(core_str):
+    """Parse a comma-separated string of core indices into a list of ints."""
+    try:
+        return [int(x) for x in core_str.split(",") if x.strip() != ""]
+    except Exception as e:
+        print(f"Failed to parse cpu_cores: {e}")
+        return []
 
 def get_message(input, language):
     system_prompt = config.models.summarizer.system_prompt.en if language=="en" else config.models.summarizer.system_prompt.zh
@@ -48,7 +80,11 @@ def transcribe(model_name: str, local_audio_path: str) -> str:
     else:
         print("Unknown transcription model")
         return None
-    return model.transcribe(local_audio_path, 0.0)
+    
+    start = time.time()
+    result = model.transcribe(local_audio_path, 0.0)
+    end = time.time()
+    return result, end-start
 
 def summarize(model_name: str, prompt, provider, device) -> str:
     """Generate a summary using the Summarizer model."""
@@ -62,10 +98,12 @@ def summarize(model_name: str, prompt, provider, device) -> str:
     prompt = model.tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
     result = ""
     num_tokens = 0
+    start = time.time()
     for response in model.generate(prompt):
         result += response
         num_tokens += 1
-    return result, num_tokens
+    end = time.time()
+    return result, num_tokens, end-start
 
 def evaluate(eval_model: str, prompt: str, request_url: str, language) -> str:
     """Evaluate the summary using an external API."""
@@ -109,6 +147,9 @@ def main():
     parser.add_argument("--skip_transcribe", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--skip_summarize", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--skip_evaluate", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--monitor_asr", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--metrics_logs", help="Directory to save monitoring logs", default="./logs")
+    parser.add_argument("--cpu_cores", type=str, default="", help="Comma-separated list of CPU core indices to bind (leave empty to not set affinity)")
     args = parser.parse_args()
 
     # Get asr_model from args or config
@@ -159,6 +200,16 @@ def main():
         print("Unknown language option")
         exit(0)
 
+    metrics_logs = args.metrics_logs
+    monitor_asr = args.monitor_asr
+
+    if args.cpu_cores.strip():
+        core_indices = parse_core_indices(args.cpu_cores)
+        if core_indices:
+            set_process_affinity_to_cores(core_indices)
+        else:
+            print("No valid CPU cores specified, skipping affinity setting.")
+
     request_url = args.request_url
     eval_model = args.eval_model
 
@@ -177,13 +228,17 @@ def main():
         result_dir = Path(args.result_dir)
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    t_start = t_end = s_start = s_end = e_start = e_end = 0
+    e_start = e_end = 0
 
     # transcribe
     if not skip_transcribe:
-        t_start = time.time()
-        transcript = transcribe(asr_model, str(audio_path))
-        t_end = time.time()
+        if monitor_asr:
+            start_monitoring(metrics_logs)
+            time.sleep(1)  # Give monitor a moment to start
+        transcript, asr_time_elapsed = transcribe(asr_model, str(audio_path))
+        if monitor_asr:
+            stop_monitoring()
+            time.sleep(1)  # Ensure logs are flushed
         try:
             with open(result_dir / transcript_file, 'w', encoding='utf-8') as output_file:
                 output_file.write(transcript)
@@ -207,9 +262,7 @@ def main():
                 sys.exit(1)
         sum_prompt_filled = sum_prompt.format(transcript=transcript)
         device = config.models.summarizer.device if config.models.summarizer.device else "GPU"
-        s_start = time.time()
-        summary, num_tokens = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device)
-        s_end = time.time()
+        summary, num_tokens, sum_gen_time = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device)
         try:
             with open(result_dir / sum_result_file, 'w', encoding='utf-8') as output_file:
                 output_file.write(summary)
@@ -260,12 +313,26 @@ def main():
     except Exception as e:
         print(f"Failed to get audio length: {e}")
 
-    if t_start and t_end:
-        print(f"Transcription time: {t_end-t_start:.2f} seconds")
-    if s_start and s_end:
-        print(f"Summarization time: {s_end-s_start:.2f} seconds")
+    if not skip_transcribe:
+        print(f"Transcription time: {asr_time_elapsed:.2f} seconds")
+        if monitor_asr:
+            # Read CPU utilization metrics
+            metrics = get_metrics(metrics_logs)
+            cpu_data = metrics.get("cpu_utilization", [])
+            cpu_utils = [row[1] for row in cpu_data if len(row) > 1]
+            if cpu_utils:
+                avg_cpu = sum(cpu_utils) / len(cpu_utils)
+            else:
+                avg_cpu = 0.0
+            
+            if total_audio_length and total_audio_length > 0:
+                rtf = asr_time_elapsed / total_audio_length
+                print(f"RTF (Real Time Factor): {rtf:.3f}")
+            print(f"CPU average utilization: {avg_cpu:.2f}%")
+    if not skip_summarize:
+        print(f"Summarization time: {sum_gen_time:.2f} seconds")
         print(f"Summarization output token number: {num_tokens}")
-    if e_start and e_end:
+    if not skip_evaluate:
         print(f"Evaluation time: {e_end-e_start:.2f} seconds")
 
 if __name__ == "__main__":
