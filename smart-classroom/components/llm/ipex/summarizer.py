@@ -60,6 +60,7 @@ class Summarizer(BaseSummarizer):
         )
         self.device = device
         self.model = self.model.to(self.device)
+        self.model = self.model.eval().to(self.device)
 
         self.temperature = temperature
 
