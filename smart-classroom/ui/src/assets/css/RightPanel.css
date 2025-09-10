@@ -10,10 +10,6 @@
   padding: 12px 8px; 
 }
 
-.configuration-metrics {
-  display: flex;
-  gap: 20px; 
-}
 
 .platform-configuration,
 .software-performance {
@@ -153,6 +149,67 @@ h3 {
   transform: scale(0.95);
 }
 
+.configuration-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-top: 1rem;
+  margin-left: 2rem;
+  margin-top: 1rem;
+  padding: 0.5rem 1;
+}
+
+
+.configuration-metrics h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+  color: #2d3748; 
+}
+
+
+.configuration-metrics p {
+  font-size: 0.9rem;
+  color: #4a5568;
+  margin: 0.2rem 0;
+  line-height: 1.4;
+}
+
+
+.accordion-subtitle {
+  font-size: 0.85rem;
+  color: #718096;
+  margin-bottom: 1rem;
+  font-style: italic;
+}
+
+
+.software-performance h3 {
+  margin-top: 1.2rem; 
+}
+
+.software-performance h3:first-of-type {
+  margin-top: 0; 
+}
+
+.configuration-metrics p {
+  font-size: 0.9rem;
+  color: #4a5568;
+  margin: 0.2rem 0;
+  line-height: 1.4;
+}
+
+.configuration-metrics p strong {
+  font-weight: 600;   
+  color: #2d3748;     
+  margin-right: 0.3rem;
+}
+@media (max-width: 768px) {
+  .configuration-metrics {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}
 @media (max-width: 768px) {
   .chart-row {
     flex-direction: column;

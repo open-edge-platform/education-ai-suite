@@ -1,58 +1,79 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Accordion from "../common/Accordion";
-import "../../assets/css/RightPanel.css"; 
-import { useTranslation } from 'react-i18next';
-import { getSettings } from '../../services/api';
+import "../../assets/css/RightPanel.css";
+import { useTranslation } from "react-i18next";
+import { useAppSelector } from "../../redux/hooks";
+import { getConfigurationMetrics, getPlatformInfo } from "../../services/api";
 
 const ConfigurationMetricsAccordion: React.FC = () => {
   const { t } = useTranslation();
-  const [configData] = useState<any>(null);
-  const didRunRef = useRef(false); // guard StrictMode double-invoke
+  const sessionId = useAppSelector((state) => state.ui.sessionId);
+  const summaryDone = useAppSelector(
+    (state) => !state.ui.aiProcessing && state.ui.summaryEnabled && !state.ui.summaryLoading
+  );
+
+  const [platformData, setPlatformData] = useState<any>(null);
+  const [performanceData, setPerformanceData] = useState<any>(null);
 
   useEffect(() => {
-    if (didRunRef.current) return;
-    didRunRef.current = true;
+    // Fetch platform + software configuration as soon as session is available
+    if (sessionId && !platformData) {
+      (async () => {
+        try {
+          const platformResp = await getPlatformInfo();
+          setPlatformData(platformResp);
+        } catch (err) {
+          console.error("Failed to fetch platform info:", err);
+        }
+      })();
+    }
+  }, [sessionId, platformData]);
 
-    (async () => {
-      try {
-        // Ensure first call is /project
-        await getSettings();
-// -        const data = await getConfigurationMetrics();
-// -        setConfigData(data);
-//+        // Defer calling /configuration-metrics; it will be triggered later in the flow
-      } catch {
-        // ignore (keep placeholder UI)
-      }
-    })();
-  }, []);
+  useEffect(() => {
+    // Fetch performance metrics only when summary is done
+    if (summaryDone && sessionId && !performanceData) {
+      (async () => {
+        try {
+          const configResp = await getConfigurationMetrics(sessionId);
+          setPerformanceData(configResp.performance);
+        } catch (err) {
+          console.error("Failed to fetch performance metrics:", err);
+        }
+      })();
+    }
+  }, [summaryDone, sessionId, performanceData]);
 
   return (
-    <Accordion title={t('accordion.configuration')}>
-      <div className="accordion-subtitle">{t('accordion.subtitle_configuration')}</div>
-      {configData ? (
-        <div className="configuration-metrics">
-          <div className="platform-configuration">
-            <h3>{t('accordion.platformConfiguration') || "Platform Configuration"}</h3>
-            <p>{t('accordion.processor') || "Processor"}: {configData.platform_configuration.processor}</p>
-            <p>{t('accordion.npu') || "NPU"}: {configData.platform_configuration.npu}</p>
-            <p>{t('accordion.igpu') || "iGPU"}: {configData.platform_configuration.igpu}</p>
-            <p>{t('accordion.memory') || "Memory"}: {configData.platform_configuration.memory}</p>
-            <p>{t('accordion.storage') || "Storage"}: {configData.platform_configuration.storage}</p>
-          </div>
-          <div className="software-performance">
-            <h3>{t('accordion.softwareConfiguration') || "Software Configuration"}</h3>
-            <p>{t('accordion.llm') || "LLM"}: {configData.software_configuration.llm}</p>
-            <p>{t('accordion.asr') || "ASR"}: {configData.software_configuration.asr}</p>
-            <h3>{t('accordion.performanceMetrics') || "Performance Metrics"}</h3>
-            <p>{t('accordion.ttft') || "TTFT"}: {configData.performance_metrics.ttft}</p>
-            <p>{t('accordion.tpot') || "TPOT"}: {configData.performance_metrics.tpot}</p>
-            <p>{t('accordion.totalTokensProcessed') || "Total tokens processed"}: {configData.performance_metrics.total_tokens_processed}</p>
-            <p>{t('accordion.timeToGenerateSummary') || "Time taken to generate summary"}: {configData.performance_metrics.time_to_generate_summary}</p>
-          </div>
+    <Accordion title={t("accordion.configuration")}>
+      <div className="accordion-subtitle">
+        {t("accordion.subtitle_configuration")}
+      </div>
+
+      <div className="configuration-metrics two-column">
+        {/* Platform configuration */}
+        <div className="platform-configuration">
+          <h3>{t("accordion.platformConfiguration") || "Platform Configuration"}</h3>
+          <p><strong>{t("accordion.processor") || "Processor"}:</strong> {platformData?.Processor || "-"}</p>
+          <p><strong>{t("accordion.npu") || "NPU"}:</strong> {platformData?.NPU || "-"}</p>
+          <p><strong>{t("accordion.igpu") || "iGPU"}:</strong> {platformData?.iGPU || "-"}</p>
+          <p><strong>{t("accordion.memory") || "Memory"}:</strong> {platformData?.Memory || "-"}</p>
+          <p><strong>{t("accordion.storage") || "Storage"}:</strong> {platformData?.Storage || "-"}</p>
         </div>
-      ) : (
-        <p className="accordion-content">{t('accordion.loadingConfiguration') || "Loading configuration data..."}</p>
-      )}
+
+        {/* Software configuration */}
+        <div className="software-performance">
+          <h3>{t("accordion.softwareConfiguration") || "Software Configuration"}</h3>
+          <p><strong>{t("accordion.llm") || "LLM"}:</strong> {platformData?.summarizer_model || "-"}</p>
+          <p><strong>{t("accordion.asr") || "ASR"}:</strong> {platformData?.asr_model || "-"}</p>
+
+          {/* Performance metrics */}
+          <h3>{t("accordion.performanceMetrics") || "Performance Metrics"}</h3>
+          <p><strong>{t("accordion.ttft") || "TTFT"}:</strong> {performanceData?.ttft || "-"}</p>
+          <p><strong>{t("accordion.tps") || "Tokens Per Second"}:</strong> {performanceData?.tps || "-"}</p>
+          <p><strong>{t("accordion.totalTokensProcessed") || "Total tokens processed"}:</strong> {performanceData?.total_tokens || "-"}</p>
+          <p><strong>{t("accordion.totalTimeTaken") || "Total Time Taken"}:</strong> {performanceData?.end_to_end_time || "-"}</p>
+        </div>
+      </div>
     </Accordion>
   );
 };

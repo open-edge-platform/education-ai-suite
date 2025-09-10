@@ -1,6 +1,7 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 
+
 export type Tab = 'transcripts' | 'summary';
 
 export interface UIState {
