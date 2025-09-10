@@ -9,6 +9,7 @@ import json, os
 from fastapi.responses import StreamingResponse
 from utils.runtime_config_loader import RuntimeConfig
 from utils.storage_manager import StorageManager
+from utils.platform_info import get_platform_and_model_info
 from dto.project_settings import ProjectSettings
 from monitoring.monitor import start_monitoring, stop_monitoring, get_metrics
 from utils.audio_util import save_audio_file
@@ -121,6 +122,15 @@ def get_metrics_endpoint(x_session_id: Optional[str] = Header(None)):
         return ""
     project_config = RuntimeConfig.get_section("Project")
     return get_metrics(os.path.join(project_config.get("location"), project_config.get("name"), x_session_id, "utilization_logs"))
+
+@router.get("/platform-info")
+def get_platform_info():
+    try:
+        info = get_platform_and_model_info()
+        return JSONResponse(content=info, status_code=200)
+    except Exception as e:
+        logger.error(f"Error fetching platform info: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.post("/stop-monitoring")
 def stop_monitoring_endpoint():

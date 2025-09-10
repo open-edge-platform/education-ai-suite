@@ -63,7 +63,7 @@ class SummarizerComponent(PipelineComponent):
         try:
             for token in self.summarizer.generate(prompt):
                 if first_token_time is None:
-                    first_token_time = time.time()
+                    first_token_time = time.perf_counter()
 
                 total_tokens += 1
                 StorageManager.save_async(os.path.join(project_path, "summary.md"), token, append=True)
@@ -92,10 +92,10 @@ class SummarizerComponent(PipelineComponent):
                 new_data={
                     "configuration.summarizer_model": f"{self.provider}/{self.model_name}",
                     "performance.summarizer_time": round(summarization_time, 4),
-                    "performance.ttft": round(ttft, 4),
+                    "performance.ttft": f"{round(ttft, 4)}s",
                     "performance.tps": round(tps, 4),
                     "performance.total_tokens": total_tokens,
-                    "performance.end_to_end_time": round(end_to_end_time, 4),
+                    "performance.end_to_end_time": f"{round(end_to_end_time, 4)}s",
                 }
             )
         
