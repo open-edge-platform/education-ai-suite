@@ -203,6 +203,17 @@ def main():
     metrics_logs = args.metrics_logs
     monitor_asr = args.monitor_asr
 
+    # Clear files in metrics_logs before running
+    if metrics_logs:
+        logs_path = Path(metrics_logs)
+        if logs_path.exists() and logs_path.is_dir():
+            for file in logs_path.iterdir():
+                if file.is_file():
+                    try:
+                        file.unlink()
+                    except Exception as e:
+                        print(f"Failed to remove log file {file}: {e}")
+
     if args.cpu_cores.strip():
         core_indices = parse_core_indices(args.cpu_cores)
         if core_indices:
