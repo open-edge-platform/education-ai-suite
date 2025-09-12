@@ -1,6 +1,5 @@
 import { typewriterStream } from '../utils/typewriterStream';
 import type { StreamEvent, StreamOptions } from './streamSimulator';
-
 export type ProjectConfig = { name: string; location: string; microphone: string };
 export type Settings = { projectName: string; projectLocation: string; microphone: string };
 export type SessionMode = 'record' | 'upload';
@@ -136,13 +135,6 @@ export async function* streamSummary(sessionId: string, opts: StreamOptions = {}
 }
 
 
-
-export async function getConfigurationMetrics(): Promise<any> {
-  const res = await fetch(`${BASE_URL}/configuration-metrics`);
-  if (!res.ok) throw new Error('Failed to fetch configuration metrics');
-  return res.json();
-}
-
 export async function getResourceMetrics(sessionId: string): Promise<any> {
   try {
     const res = await fetch(`${BASE_URL}/metrics`, {
@@ -178,5 +170,56 @@ export async function getResourceMetrics(sessionId: string): Promise<any> {
       memory: [],
       power: []
     };
+  }
+}
+
+export async function getConfigurationMetrics(sessionId: string): Promise<any> {
+  try {
+    const res = await fetch(`${BASE_URL}/performance-metrics`, {
+      method: "GET",
+      headers: {
+        "session_id": sessionId, 
+        "Accept": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`Performance metrics endpoint returned ${res.status}`);
+      return {
+        configuration: {},
+        performance: {},
+      };
+    }
+
+    const text = await res.text();
+    return text ? JSON.parse(text) : { configuration: {}, performance: {} };
+  } catch (error) {
+    console.warn("Failed to fetch performance metrics:", error);
+    return {
+      configuration: {},
+      performance: {},
+    };
+  }
+}
+
+export async function getPlatformInfo(): Promise<any> {
+  try {
+    const res = await fetch(`${BASE_URL}/platform-info`, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`Platform info endpoint returned ${res.status}`);
+      return {};
+    }
+
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
+  } catch (error) {
+    console.warn("Failed to fetch platform info:", error);
+    return {};
   }
 }

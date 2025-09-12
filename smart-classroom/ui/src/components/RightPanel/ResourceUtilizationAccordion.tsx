@@ -57,43 +57,44 @@ const ResourceUtilizationAccordion: React.FC = () => {
     }
   }, [sessionId]);
 
-  const gpuMetricsConfig: GPUMetricsConfig = {
-    shared_memory_mb: { 
-      index: 1, 
-      color: 'rgba(255, 99, 132, 1)', 
-      label: 'Shared Memory (MB)', 
-      yAxis: 'y1', 
-      shortLabel: 'Shared Mem' 
-    },
-    '3D_utilization_percent': { 
-      index: 2, 
-      color: 'rgba(54, 162, 235, 1)', 
-      label: '3D Utilization (%)', 
-      yAxis: 'y', 
-      shortLabel: '3D' 
-    },
-    VideoDecode_utilization_percent: { 
-      index: 3, 
-      color: 'rgba(255, 206, 86, 1)', 
-      label: 'Video Decode (%)', 
-      yAxis: 'y', 
-      shortLabel: 'Vid Dec' 
-    },
-    VideoProcessing_utilization_percent: { 
-      index: 4, 
-      color: 'rgba(75, 192, 192, 1)', 
-      label: 'Video Processing (%)', 
-      yAxis: 'y', 
-      shortLabel: 'Vid Proc' 
-    },
-    Compute_utilization_percent: { 
-      index: 5, 
-      color: 'rgba(153, 102, 255, 1)', 
-      label: 'Compute Utilization (%)', 
-      yAxis: 'y', 
-      shortLabel: 'Compute' 
-    },
-  };
+const gpuMetricsConfig: GPUMetricsConfig = {
+  shared_memory_mb: { 
+    index: 3, 
+    color: 'rgba(255, 99, 132, 1)', 
+    label: 'Shared Memory (MB)', 
+    yAxis: 'y1', 
+    shortLabel: 'Shared Mem' 
+  },
+  '3D_utilization_percent': { 
+    index: 4, 
+    color: 'rgba(54, 162, 235, 1)', 
+    label: '3D Utilization (%)', 
+    yAxis: 'y', 
+    shortLabel: '3D' 
+  },
+  VideoDecode_utilization_percent: { 
+    index: 6, 
+    color: 'rgba(255, 206, 86, 1)', 
+    label: 'Video Decode (%)', 
+    yAxis: 'y', 
+    shortLabel: 'Vid Dec' 
+  },
+  VideoProcessing_utilization_percent: { 
+    index: 7, 
+    color: 'rgba(75, 192, 192, 1)', 
+    label: 'Video Processing (%)', 
+    yAxis: 'y', 
+    shortLabel: 'Vid Proc' 
+  },
+  Compute_utilization_percent: { 
+    index: 9, 
+    color: 'rgba(153, 102, 255, 1)', 
+    label: 'Compute Utilization (%)', 
+    yAxis: 'y', 
+    shortLabel: 'Compute' 
+  },
+};
+
 
   const createChartData = (data: any[], metricConfigs: Record<string, GPUMetricConfig>) => {
     if (!data || data.length === 0) {
