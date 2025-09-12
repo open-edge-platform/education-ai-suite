@@ -37,7 +37,7 @@ By default, the project uses Whisper for transcription and OpenVINO-based Qwen m
 
 ```bash
 asr:
-  provider: openai            # Supported: openai, funasr
+  provider: openvino            # Supported: openvino, openai, funasr
   name: whisper-tiny          # Options: whisper-tiny, whisper-small, paraformer-zh etc.
   device: CPU                 # Whisper currently supports only CPU
   temperature: 0.0

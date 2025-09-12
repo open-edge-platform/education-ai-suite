@@ -9,10 +9,11 @@ monitoring:
   execution_logs: monitoring/executionlogs
 models:
   asr:
-    provider: funasr # funasr and openai supported
-    name: paraformer-zh # can be (whisper-tiny, whisper-small, whisper-medium ...) or (paraformer-zh etc)
-    device: CPU # only CPU for whisper
+    provider: openvino # openvino, funasr and openai supported
+    name: whisper-tiny # can be (whisper-tiny, whisper-small) or paraformer-zh
+    device: CPU
     temperature: 0.0
+    models_base_path: "models"
 
   summarizer:
     provider: openvino # ipex or openvino
@@ -23,7 +24,7 @@ models:
     temperature: 0.7 # 0.7 default
     use_cache: True
     models_base_path: "models"
-    language: zh # en or zh
+    language: en # en or zh
     system_prompt: 
       en: "Summarize the classroom transcription concisly and in Markdown format. Preserve the full meaning of the lecture, focusing on key points and concepts. Do not add commentary or extra details beyond the transcription."
       zh: "你是一个课堂教学助手，根据提供的原始课堂音频的转录文本，以Markdown格式提炼出本节课的核心内容、知识点结构、讲解顺序，解释每个知识点后，用简洁清晰的语言进行总结。注意不要遗漏主要知识点，也不要捏造任何没有提及的知识点，总结要保证知识点真实准确，避免任何冗余或误导性内容。"

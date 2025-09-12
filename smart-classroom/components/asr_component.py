@@ -4,7 +4,8 @@ import time
 from utils.config_loader import config
 from utils.storage_manager import StorageManager
 from utils.runtime_config_loader import RuntimeConfig
-from components.asr.openai.whisper import Whisper
+from components.asr.openai.whisper import Whisper as OA_Whisper
+from components.asr.openvino.whisper import Whisper as OV_Whisper
 from components.asr.funasr.paraformer import Paraformer
 import logging
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class ASRComponent(PipelineComponent):
     _model = None
     _config = None
 
-    def __init__(self, session_id, provider="openai", model_name="whisper-small", device="cpu", temperature=0.0):
+    def __init__(self, session_id, provider="openai", model_name="whisper-small", device="CPU", temperature=0.0):
 
         self.session_id = session_id
         self.temperature = temperature
@@ -28,7 +29,9 @@ class ASRComponent(PipelineComponent):
         # Reload only if config changed
         if ASRComponent._model is None or ASRComponent._config != config:
             if provider == "openai" and "whisper" in model_name:
-                ASRComponent._model = Whisper(model_name, device, None)
+                ASRComponent._model = OA_Whisper(model_name, device, None)
+            if provider == "openvino" and "whisper" in model_name:
+                ASRComponent._model = OV_Whisper(model_name, device, None)
             elif provider == "funasr" and "paraformer" in model_name:
                 ASRComponent._model = Paraformer(model_name, device, None)
             else:
