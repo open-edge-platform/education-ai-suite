@@ -86,12 +86,12 @@ def transcribe(model_name: str, local_audio_path: str) -> str:
     end = time.time()
     return result, end-start
 
-def summarize(model_name: str, prompt, provider, device) -> str:
+def summarize(model_name: str, prompt, provider, device, temperature) -> str:
     """Generate a summary using the Summarizer model."""
     if provider == "openvino":
-        model = OvSummarizer(model_name, device)
+        model = OvSummarizer(model_name, device, temperature=temperature)
     elif provider == "ipex":
-        model = IpexSummarizer(model_name, device.lower())
+        model = IpexSummarizer(model_name, device.lower(), temperature=temperature)
     else:
         print("Unknown summarization model")
         return None
@@ -203,6 +203,17 @@ def main():
     metrics_logs = args.metrics_logs
     monitor_asr = args.monitor_asr
 
+    # Clear files in metrics_logs before running
+    if metrics_logs:
+        logs_path = Path(metrics_logs)
+        if logs_path.exists() and logs_path.is_dir():
+            for file in logs_path.iterdir():
+                if file.is_file():
+                    try:
+                        file.unlink()
+                    except Exception as e:
+                        print(f"Failed to remove log file {file}: {e}")
+
     if args.cpu_cores.strip():
         core_indices = parse_core_indices(args.cpu_cores)
         if core_indices:
@@ -220,6 +231,8 @@ def main():
     skip_transcribe = args.skip_transcribe
     skip_summarize = args.skip_summarize
     skip_evaluate = args.skip_evaluate
+
+    temperature = config.models.summarizer.temperature
 
     audio_path = Path(args.audio_file)
     if args.result_dir is None:
@@ -262,7 +275,7 @@ def main():
                 sys.exit(1)
         sum_prompt_filled = sum_prompt.format(transcript=transcript)
         device = config.models.summarizer.device if config.models.summarizer.device else "GPU"
-        summary, num_tokens, sum_gen_time = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device)
+        summary, num_tokens, sum_gen_time = summarize(sum_model, get_message(sum_prompt_filled, language), sum_provider, device, temperature)
         try:
             with open(result_dir / sum_result_file, 'w', encoding='utf-8') as output_file:
                 output_file.write(summary)
