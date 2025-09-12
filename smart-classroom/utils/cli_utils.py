@@ -1,5 +1,7 @@
 import subprocess
 from typing import Callable, List
+import logging
+logger = logging.getLogger(__name__)
 
 def run_cli(cmd: List[str], log_fn: Callable[[str], None] = print) -> int:
     """
@@ -13,6 +15,7 @@ def run_cli(cmd: List[str], log_fn: Callable[[str], None] = print) -> int:
         The CLI process return code
     """
     try:
+        logger.info(f"Running: {cmd}")
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
