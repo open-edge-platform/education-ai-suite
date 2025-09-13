@@ -10,7 +10,7 @@ monitoring:
 models:
   asr:
     provider: openvino # openvino, funasr and openai supported
-    name: whisper-tiny # can be (whisper-tiny, whisper-small) or paraformer-zh
+    name: whisper-small # can be (whisper-base, whisper-small etc) or paraformer-zh
     device: CPU
     temperature: 0.0
     models_base_path: "models"
