@@ -7,9 +7,7 @@ class YieldingTextStreamer(ov_genai.StreamerBase):
         self.tokenizer = tokenizer
         self.skip_special_tokens = skip_special_tokens
         self._queue = queue.Queue()
-        self._finished = False
         self.total_tokens = 0
-
         self._token_cache = []
         self._print_len = 0
 
@@ -17,22 +15,14 @@ class YieldingTextStreamer(ov_genai.StreamerBase):
         self._token_cache.append(token_id)
         self.total_tokens += 1
 
-        # Decode full cache once
-        text = self.tokenizer.decode(
-            self._token_cache,
-            skip_special_tokens=self.skip_special_tokens,
-        )
+        text = self.tokenizer.decode(self._token_cache, skip_special_tokens=self.skip_special_tokens)
         new_text = text[self._print_len:]
-
         if not new_text:
-            return False  # nothing new yet
+            return False
 
-        # 1. Emit if safe by normal rules
         if self._is_safe_to_emit(new_text):
             self._queue.put(new_text)
             self._print_len = len(text)
-
-        # 2. Otherwise, check if this token starts with space
         else:
             last_token_text = self.tokenizer.decode([token_id], skip_special_tokens=True)
             if last_token_text.startswith(" "):
@@ -40,21 +30,14 @@ class YieldingTextStreamer(ov_genai.StreamerBase):
                 if prev_chunk:
                     self._queue.put(prev_chunk)
                     self._print_len += len(prev_chunk)
-                # keep space-leading token in cache for later
-
         return False
 
     def end(self):
         if self._token_cache:
-            text = self.tokenizer.decode(
-                self._token_cache,
-                skip_special_tokens=self.skip_special_tokens,
-            )
-            remaining = text[self._print_len :]
+            text = self.tokenizer.decode(self._token_cache, skip_special_tokens=self.skip_special_tokens)
+            remaining = text[self._print_len:]
             if remaining:
                 self._queue.put(remaining)
-
-        self._finished = True
         self._queue.put(None)
         self._token_cache.clear()
         self._print_len = 0
@@ -65,25 +48,16 @@ class YieldingTextStreamer(ov_genai.StreamerBase):
             if token is None:
                 break
             yield token
-
-    # ---------------- Helper methods ---------------- #
+        
     def _is_safe_to_emit(self, text: str) -> bool:
         last_char = text[-1]
         cp = ord(last_char)
-        return (
-            self._is_cjk(cp)
-            or last_char.isspace()
-            or last_char == "\n"
-        )
+        return self._is_cjk(cp) or last_char.isspace() or last_char == "\n"
 
-    def _is_cjk(self, cp: int) -> bool:
+    @staticmethod
+    def _is_cjk(cp: int) -> bool:
         return (
-            0x4E00 <= cp <= 0x9FFF
-            or 0x3400 <= cp <= 0x4DBF
-            or 0x20000 <= cp <= 0x2A6DF
-            or 0x2A700 <= cp <= 0x2B73F
-            or 0x2B740 <= cp <= 0x2B81F
-            or 0x2B820 <= cp <= 0x2CEAF
-            or 0xF900 <= cp <= 0xFAFF
-            or 0x2F800 <= cp <= 0x2FA1F
+            0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF or 0x20000 <= cp <= 0x2A6DF or
+            0x2A700 <= cp <= 0x2B73F or 0x2B740 <= cp <= 0x2B81F or 0x2B820 <= cp <= 0x2CEAF or
+            0xF900 <= cp <= 0xFAFF or 0x2F800 <= cp <= 0x2FA1F
         )
