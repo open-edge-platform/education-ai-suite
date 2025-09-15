@@ -60,16 +60,18 @@ class SummarizerComponent(PipelineComponent):
         start = time.perf_counter()
         first_token_time = None
         total_tokens = 0
+        streamer = None
         try:
-            for token in self.summarizer.generate(prompt):
+            streamer = self.summarizer.generate(prompt)
+            for token in streamer:
                 if first_token_time is None:
                     first_token_time = time.perf_counter()
 
-                total_tokens += 1
                 StorageManager.save_async(os.path.join(project_path, "summary.md"), token, append=True)
                 yield token
         finally:
             end = time.perf_counter()
+            total_tokens = streamer.total_tokens if streamer is not None else -1
             summarization_time = end - start
             ttft = (first_token_time - start) if first_token_time else -1
             tps = (total_tokens / summarization_time) if summarization_time > 0 else -1

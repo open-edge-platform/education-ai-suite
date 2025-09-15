@@ -38,4 +38,4 @@ class Summarizer(BaseSummarizer):
                 streamer.end()
 
         threading.Thread(target=run_generation(), daemon=True).start()
-        return streamer.stream()
+        return streamer
