@@ -8,79 +8,82 @@ class YieldingTextStreamer(ov_genai.StreamerBase):
         self.skip_special_tokens = skip_special_tokens
         self._queue = queue.Queue()
         self._finished = False
+        self.total_tokens = 0
 
-        # Hugging Face style incremental decoding
         self._token_cache = []
         self._print_len = 0
 
     def put(self, token_id) -> bool:
-        # Add token to cache
         self._token_cache.append(token_id)
+        self.total_tokens += 1
 
-        # Decode current cached tokens
-        text = self.tokenizer.decode(self._token_cache, skip_special_tokens=self.skip_special_tokens)
-
-        # Only get the newly decoded part since last emission
+        # Decode full cache once
+        text = self.tokenizer.decode(
+            self._token_cache,
+            skip_special_tokens=self.skip_special_tokens,
+        )
         new_text = text[self._print_len:]
 
-        # Hugging Face logic: emit if the last character is safe (space, newline, or CJK)
-        if new_text and self._is_safe_to_emit(new_text):
-            self._queue.put(new_text)
-            self._print_len += len(new_text)
+        if not new_text:
+            return False  # nothing new yet
 
-        return False  # continue generation
+        # 1. Emit if safe by normal rules
+        if self._is_safe_to_emit(new_text):
+            self._queue.put(new_text)
+            self._print_len = len(text)
+
+        # 2. Otherwise, check if this token starts with space
+        else:
+            last_token_text = self.tokenizer.decode([token_id], skip_special_tokens=True)
+            if last_token_text.startswith(" "):
+                prev_chunk = text[self._print_len : len(text) - len(last_token_text)]
+                if prev_chunk:
+                    self._queue.put(prev_chunk)
+                    self._print_len += len(prev_chunk)
+                # keep space-leading token in cache for later
+
+        return False
 
     def end(self):
-        # Flush any remaining text
         if self._token_cache:
-            text = self.tokenizer.decode(self._token_cache, skip_special_tokens=self.skip_special_tokens)
-            remaining_text = text[self._print_len:]
-            if remaining_text:
-                self._queue.put(remaining_text)
+            text = self.tokenizer.decode(
+                self._token_cache,
+                skip_special_tokens=self.skip_special_tokens,
+            )
+            remaining = text[self._print_len :]
+            if remaining:
+                self._queue.put(remaining)
 
-        # Signal completion
         self._finished = True
         self._queue.put(None)
-
-        # Reset internal state
-        self._token_cache = []
+        self._token_cache.clear()
         self._print_len = 0
 
-    def stream(self):
-        """Yield tokens as they are generated"""
+    def __iter__(self):
         while True:
             token = self._queue.get()
             if token is None:
                 break
             yield token
 
-    # ---------------- Hugging Face-inspired helper methods ---------------- #
+    # ---------------- Helper methods ---------------- #
     def _is_safe_to_emit(self, text: str) -> bool:
-        """
-        Returns True if the text can be safely emitted without cutting multi-byte CJK or UTF-8 characters.
-        Emit if last char is CJK, whitespace, or newline.
-        """
         last_char = text[-1]
         cp = ord(last_char)
-        if self._is_cjk(cp):
-            return True
-        if last_char.isspace() or last_char == "\n":
-            return True
-        # Otherwise wait for more tokens to form a complete word/char
-        return False
+        return (
+            self._is_cjk(cp)
+            or last_char.isspace()
+            or last_char == "\n"
+        )
 
     def _is_cjk(self, cp: int) -> bool:
-        """
-        Check if Unicode codepoint is Chinese/Japanese/Korean (CJK).
-        Adapted from Hugging Face TextStreamer.
-        """
         return (
-            (0x4E00 <= cp <= 0x9FFF)
-            or (0x3400 <= cp <= 0x4DBF)
-            or (0x20000 <= cp <= 0x2A6DF)
-            or (0x2A700 <= cp <= 0x2B73F)
-            or (0x2B740 <= cp <= 0x2B81F)
-            or (0x2B820 <= cp <= 0x2CEAF)
-            or (0xF900 <= cp <= 0xFAFF)
-            or (0x2F800 <= cp <= 0x2FA1F)
+            0x4E00 <= cp <= 0x9FFF
+            or 0x3400 <= cp <= 0x4DBF
+            or 0x20000 <= cp <= 0x2A6DF
+            or 0x2A700 <= cp <= 0x2B73F
+            or 0x2B740 <= cp <= 0x2B81F
+            or 0x2B820 <= cp <= 0x2CEAF
+            or 0xF900 <= cp <= 0xFAFF
+            or 0x2F800 <= cp <= 0x2FA1F
         )

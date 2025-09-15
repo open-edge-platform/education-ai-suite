@@ -95,7 +95,17 @@ class Summarizer(BaseSummarizer):
                     return None
             else:
                 try:
-                    streamer = TextIteratorStreamer(self.tokenizer, skip_special_tokens=True, skip_prompt=True)
+
+                    class CountingTextIteratorStreamer(TextIteratorStreamer):
+                        def __init__(self, tokenizer, skip_special_tokens=True, skip_prompt=True):
+                            super().__init__(tokenizer, skip_special_tokens=skip_special_tokens, skip_prompt=skip_prompt)
+                            self.total_tokens = 0
+
+                        def put(self, value):
+                            self.total_tokens += 1
+                            super().put(value)
+
+                    streamer = CountingTextIteratorStreamer(self.tokenizer, skip_special_tokens=True, skip_prompt=True)
                     gen_kwargs = dict(
                         input_ids=model_inputs.input_ids,
                         max_new_tokens=max_new_tokens,
