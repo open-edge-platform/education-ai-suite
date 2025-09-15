@@ -18,5 +18,24 @@ class Summarizer(BaseSummarizer):
 
     def generate(self, prompt):
         streamer = YieldingTextStreamer(self.tokenizer)
-        threading.Thread(target=lambda: self.model.generate(prompt, streamer=streamer, max_new_tokens=config.models.summarizer.max_new_tokens, temperature=self.temperature), daemon=True).start()
+
+        def run_generation():
+            try:
+                self.model.generate(
+                    prompt,
+                    streamer=streamer,
+                    max_new_tokens=config.models.summarizer.max_new_tokens,
+                    temperature=self.temperature,
+                )
+                
+            except Exception as e:
+                error_msg = "Summary generation failed. Please ensure sufficient free resources are available to run this process."
+                logger.error(f"Exception occured in summary generation: {str(e)}")
+                if "out of gpu resources" in str(e).lower():
+                    error_msg = "Summary generation failed. Insufficient GPU resources available to run this process."
+                streamer._queue.put(f"[ERROR]: {error_msg}")
+            finally:
+                streamer.end()
+
+        threading.Thread(target=run_generation(), daemon=True).start()
         return streamer.stream()
