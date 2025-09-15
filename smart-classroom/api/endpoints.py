@@ -66,7 +66,12 @@ def summarize_audio(request: SummaryRequest):
 
     def event_stream():
         for token in pipeline.run_summarizer():
-            yield json.dumps({"token": token}) + "\n"
+            if token.startswith("[ERROR]:"):
+                logger.error(f"Error while summarizing: {token}")
+                yield json.dumps({"token": "", "error": token}) + "\n"
+                break
+            else:
+                yield json.dumps({"token": token, "error": ""}) + "\n"
 
     return StreamingResponse(event_stream(), media_type="application/json")
 
