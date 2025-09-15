@@ -16,7 +16,6 @@ const ConfigurationMetricsAccordion: React.FC = () => {
   const [performanceData, setPerformanceData] = useState<any>(null);
 
   useEffect(() => {
-    // Fetch platform + software configuration as soon as session is available
     if (sessionId && !platformData) {
       (async () => {
         try {
@@ -29,9 +28,10 @@ const ConfigurationMetricsAccordion: React.FC = () => {
     }
   }, [sessionId, platformData]);
 
+
   useEffect(() => {
-    // Fetch performance metrics only when summary is done
-    if (summaryDone && sessionId && !performanceData) {
+    setPerformanceData(null);
+    if (summaryDone && sessionId) {
       (async () => {
         try {
           const configResp = await getConfigurationMetrics(sessionId);
@@ -41,7 +41,7 @@ const ConfigurationMetricsAccordion: React.FC = () => {
         }
       })();
     }
-  }, [summaryDone, sessionId, performanceData]);
+  }, [summaryDone, sessionId]);
 
   return (
     <Accordion title={t("accordion.configuration")}>

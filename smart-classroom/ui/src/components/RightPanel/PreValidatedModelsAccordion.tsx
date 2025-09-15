@@ -31,7 +31,7 @@ const PreValidatedModelsAccordion: React.FC = () => {
             {models.asr_model ? (
               <option value={models.asr_model}>{models.asr_model}</option>
             ) : (
-              <option>{t("accordion.loading")}</option>
+              <option>loading...</option>
             )}
           </select>
         </div>
@@ -41,7 +41,7 @@ const PreValidatedModelsAccordion: React.FC = () => {
             {models.summarizer_model ? (
               <option value={models.summarizer_model}>{models.summarizer_model}</option>
             ) : (
-              <option>{t("accordion.loading")}</option>
+              <option>loading...</option>
             )}
           </select>
         </div>
