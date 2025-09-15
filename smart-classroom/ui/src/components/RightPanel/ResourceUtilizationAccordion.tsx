@@ -14,22 +14,15 @@ interface GPUMetricConfig {
   index: number;
   color: string;
   label: string;
-  yAxis: 'y' | 'y1';
+  yAxis: 'y';
   shortLabel: string;
 }
 
 type GPUMetricsConfig = Record<GPUMetricKey, GPUMetricConfig>;
 
-// REMOVE this interface - we don't need props anymore
-// interface ResourceAccordionProps {
-//   sessionId?: string;
-// }
-
-// CHANGE: Remove props and get sessionId from Redux
 const ResourceUtilizationAccordion: React.FC = () => {
   const { t } = useTranslation();
   
-  // Get sessionId from Redux store instead of props
   const sessionId = useAppSelector(s => s.ui.sessionId);
   const resourceMetrics = useAppSelector(s => s.resource?.metrics);
   const lastUpdated = useAppSelector(s => s.resource?.lastUpdated);
@@ -41,14 +34,12 @@ const ResourceUtilizationAccordion: React.FC = () => {
     power: []
   });
 
-  // Update local state when Redux state changes
   useEffect(() => {
     if (resourceMetrics && lastUpdated) {
       setResourceData(resourceMetrics);
     }
   }, [resourceMetrics, lastUpdated]);
 
-  // Debug logging
   useEffect(() => {
     if (!sessionId) {
       console.log('No sessionId provided to ResourceUtilizationAccordion');
@@ -57,61 +48,58 @@ const ResourceUtilizationAccordion: React.FC = () => {
     }
   }, [sessionId]);
 
-const gpuMetricsConfig: GPUMetricsConfig = {
-  shared_memory_mb: { 
-    index: 3, 
-    color: 'rgba(255, 99, 132, 1)', 
-    label: 'Shared Memory (MB)', 
-    yAxis: 'y1', 
-    shortLabel: 'Shared Mem' 
-  },
-  '3D_utilization_percent': { 
-    index: 4, 
-    color: 'rgba(54, 162, 235, 1)', 
-    label: '3D Utilization (%)', 
-    yAxis: 'y', 
-    shortLabel: '3D' 
-  },
-  VideoDecode_utilization_percent: { 
-    index: 6, 
-    color: 'rgba(255, 206, 86, 1)', 
-    label: 'Video Decode (%)', 
-    yAxis: 'y', 
-    shortLabel: 'Vid Dec' 
-  },
-  VideoProcessing_utilization_percent: { 
-    index: 7, 
-    color: 'rgba(75, 192, 192, 1)', 
-    label: 'Video Processing (%)', 
-    yAxis: 'y', 
-    shortLabel: 'Vid Proc' 
-  },
-  Compute_utilization_percent: { 
-    index: 9, 
-    color: 'rgba(153, 102, 255, 1)', 
-    label: 'Compute Utilization (%)', 
-    yAxis: 'y', 
-    shortLabel: 'Compute' 
-  },
-};
-
+  const gpuMetricsConfig: GPUMetricsConfig = {
+    shared_memory_mb: { 
+      index: 3, 
+      color: 'rgba(255, 99, 132, 1)', 
+      label: 'Shared Memory (GB)', 
+      yAxis: 'y', 
+      shortLabel: 'Shared Mem' 
+    },
+    '3D_utilization_percent': { 
+      index: 4, 
+      color: 'rgba(54, 162, 235, 1)', 
+      label: '3D Utilization (%)', 
+      yAxis: 'y', 
+      shortLabel: '3D' 
+    },
+    VideoDecode_utilization_percent: { 
+      index: 6, 
+      color: 'rgba(255, 206, 86, 1)', 
+      label: 'Video Decode (%)', 
+      yAxis: 'y', 
+      shortLabel: 'Vid Dec' 
+    },
+    VideoProcessing_utilization_percent: { 
+      index: 7, 
+      color: 'rgba(75, 192, 192, 1)', 
+      label: 'Video Processing (%)', 
+      yAxis: 'y', 
+      shortLabel: 'Vid Proc' 
+    },
+    Compute_utilization_percent: { 
+      index: 9, 
+      color: 'rgba(153, 102, 255, 1)', 
+      label: 'Compute Utilization (%)', 
+      yAxis: 'y', 
+      shortLabel: 'Compute' 
+    },
+  };
 
   const createChartData = (data: any[], metricConfigs: Record<string, GPUMetricConfig>) => {
-    if (!data || data.length === 0) {
-      return { labels: [], datasets: [] };
-    }
+    if (!data || data.length === 0) return { labels: [], datasets: [] };
 
-    const labels = data.map((item: any) => {
-      if (item[0]) {
-        const date = new Date(item[0]);
-        return date.toLocaleTimeString();
-      }
-      return '';
-    });
+    const labels = data.map((item: any) => item[0] ? new Date(item[0]).toLocaleTimeString() : '');
 
     const datasets = Object.entries(metricConfigs).map(([key, config]) => ({
       label: config.shortLabel,
-      data: data.map((item: any) => item[config.index] || 0),
+      data: data.map((item: any) => {
+        let value = item[config.index] || 0;
+        if (key === 'shared_memory_mb') {
+          value = value / 1024; // Convert MB to GB
+        }
+        return value;
+      }),
       borderColor: config.color,
       backgroundColor: config.color.replace('1)', '0.2)'),
       fill: false,
@@ -122,17 +110,9 @@ const gpuMetricsConfig: GPUMetricsConfig = {
   };
 
   const createSimpleChartData = (data: any[], label: string, color: string) => {
-    if (!data || data.length === 0) {
-      return { labels: [], datasets: [] };
-    }
+    if (!data || data.length === 0) return { labels: [], datasets: [] };
 
-    const labels = data.map((item: any) => {
-      if (item[0]) {
-        const date = new Date(item[0]);
-        return date.toLocaleTimeString();
-      }
-      return '';
-    });
+    const labels = data.map((item: any) => item[0] ? new Date(item[0]).toLocaleTimeString() : '');
 
     return {
       labels,
@@ -155,16 +135,6 @@ const gpuMetricsConfig: GPUMetricsConfig = {
         display: true,
         position: 'left' as const,
         beginAtZero: true,
-        max: 100,
-      },
-      y1: {
-        type: 'linear' as const,
-        display: true,
-        position: 'right' as const,
-        beginAtZero: true,
-        grid: {
-          drawOnChartArea: false,
-        },
       },
     },
     plugins: {
@@ -178,17 +148,8 @@ const gpuMetricsConfig: GPUMetricsConfig = {
   const simpleChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
-    scales: {
-      y: {
-        beginAtZero: true,
-      },
-    },
-    plugins: {
-      legend: {
-        display: true,
-        position: 'top' as const,
-      },
-    },
+    scales: { y: { beginAtZero: true } },
+    plugins: { legend: { display: true, position: 'top' as const } },
   };
 
   return (
@@ -269,7 +230,6 @@ const gpuMetricsConfig: GPUMetricsConfig = {
         ) : (
           <div style={{ padding: '20px', textAlign: 'center' }}>
             <p>{t('accordion.noSessionActive') || "No active session. Upload an audio file and start transcription to begin monitoring."}</p>
-            {/* Debug info - remove in production */}
             <small style={{ color: '#666' }}>
               Session ID: {sessionId || 'Not set'}
             </small>
