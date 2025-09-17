@@ -56,7 +56,7 @@ def ensure_model():
         _download_openvino_model(f"openai/{config.models.asr.name}", output_dir, None)
 
 def get_model_path() -> str:
-    return os.path.join(config.models.summarizer.models_base_path, config.models.summarizer.provider, f"{config.models.summarizer.name.replace("/", "_")}_{config.models.summarizer.weight_format}")
+    return os.path.join(config.models.summarizer.models_base_path, config.models.summarizer.provider, f"{config.models.summarizer.name.replace('/', '_')}_{config.models.summarizer.weight_format}")
 
 def get_asr_model_path() -> str:
-    return os.path.join(config.models.asr.models_base_path, config.models.asr.provider, f"{config.models.asr.name.replace("/", "_")}")
+    return os.path.join(config.models.asr.models_base_path, config.models.asr.provider, f"{config.models.asr.name.replace('/', '_')}")
