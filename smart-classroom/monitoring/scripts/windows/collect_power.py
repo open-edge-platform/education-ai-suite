@@ -27,18 +27,8 @@ def cleanup_socwatch_outputs():
                         os.remove(file_path)
                     except Exception as e:
                         logger.error(f"Failed to remove {file_path}: {e}")
-            try:
-                shutil.rmtree(OUTPUT_DIR)
-                logger.info(f"Removed SoCWatch output directory: {OUTPUT_DIR}")
-            except Exception as e:
-                logger.error(f"Failed to remove directory {OUTPUT_DIR}: {e}")
-            try:
-                os.mkdir(OUTPUT_DIR)
-                os.chmod(OUTPUT_DIR, stat.S_IREAD | stat.S_IEXEC)
-                logger.info(f"Recreated {OUTPUT_DIR} as read-only")
-            except Exception as e:
-                logger.error(f"Failed to lock directory {OUTPUT_DIR}: {e}")
-
+                        return
+            logger.info("Removed SoCwatch output files")
     except Exception as e:
         logger.error(f"Error cleaning up SoCWatch output files: {e}")
 
