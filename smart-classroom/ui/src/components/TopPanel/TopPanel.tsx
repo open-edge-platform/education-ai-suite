@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
-import Menu from '../Menu/Menu';  
+import React, { useRef } from 'react';
 import '../../assets/css/TopPanel.css';
 import BrandSlot from '../../assets/images/BrandSlot.svg';
-import menu from '../../assets/images/menu.svg';
+import menu from '../../assets/images/settings.svg';
 import LanguageSwitcher from '../LanguageSwitcher';
+import SettingsModal from '../Menu/SettingsButton';
 import { useTranslation } from 'react-i18next';
 
 interface TopPanelProps {
@@ -14,31 +14,16 @@ interface TopPanelProps {
 }
 
 const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName, isSettingsOpen, setIsSettingsOpen }) => {
-  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const menuIconRef = useRef<HTMLImageElement>(null);
   const { t } = useTranslation();
-  const toggleMenu = () => {
-    setIsMenuOpen(!isMenuOpen);
+
+  const openSettings = () => {
+    setIsSettingsOpen(true);
   };
 
-  const handleClickOutside = (event: MouseEvent) => {
-    if (
-      menuRef.current &&
-      !menuRef.current.contains(event.target as Node) &&
-      menuIconRef.current &&
-      !menuIconRef.current.contains(event.target as Node)
-    ) {
-      setIsMenuOpen(false); 
-    }
+  const closeSettings = () => {
+    setIsSettingsOpen(false);
   };
-
-  useEffect(() => {
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
 
   return (
     <header className="top-panel">
@@ -47,25 +32,21 @@ const TopPanel: React.FC<TopPanelProps> = ({ projectName, setProjectName, isSett
         <span className="app-title">{t('header.title')}</span>
       </div>
       <div className="action-slot">
-      <LanguageSwitcher />
+        <LanguageSwitcher />
         <img
           src={menu}
           alt="Menu Icon"
           className="menu-icon"
-          onClick={toggleMenu}
+          onClick={openSettings}
           ref={menuIconRef}
         />
       </div>
-      {isMenuOpen && (
-        <Menu
-          ref={menuRef}
-          projectName={projectName}
-          setProjectName={setProjectName}
-          isSettingsOpen={isSettingsOpen}
-          setIsSettingsOpen={setIsSettingsOpen}
-          onRequestCloseMenu={() => setIsMenuOpen(false)} 
-        />
-      )}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={closeSettings}
+        projectName={projectName}
+        setProjectName={setProjectName}
+      />
     </header>
   );
 };

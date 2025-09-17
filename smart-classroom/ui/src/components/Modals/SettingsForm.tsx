@@ -3,7 +3,6 @@ import ProjectNameInput from '../Inputs/ProjectNameInput';
 import MicrophoneSelect from '../Inputs/MicrophoneSelect';
 import ProjectLocationInput from '../Inputs/ProjectLocationInput';
 import '../../assets/css/SettingsForm.css';
-import folderIcon from '../../assets/images/folder.svg';
 import { saveSettings, getSettings } from '../../services/api';
 import { useTranslation } from 'react-i18next';
 
@@ -15,32 +14,17 @@ interface SettingsFormProps {
 
 const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setProjectName }) => {
   const [selectedMicrophone, setSelectedMicrophone] = useState('');
-  const [projectLocation, setProjectLocation] = useState('/live/stream');
+  const [projectLocation, setProjectLocation] = useState('storage/');
   const [nameError, setNameError] = useState<string | null>(null);
-  const dirInputRef = React.useRef<HTMLInputElement>(null);
   const { t } = useTranslation();
 
   React.useEffect(() => {
     getSettings().then(s => {
       if (!s) return;
-      // setProjectName(s.projectName);
-      setProjectLocation(s.projectLocation || '/live/stream');
+      setProjectLocation(s.projectLocation || 'storage/');
       setSelectedMicrophone(s.microphone || '');
     }).catch(() => {});
   }, [setProjectName]);
-
-
-  const openDirectoryPicker = async () => {
-    if ('showDirectoryPicker' in window) {
-      try {
-        // @ts-expect-error: experimental API
-        const dir = await window.showDirectoryPicker();
-        setProjectLocation(dir.name || '/live/stream');
-        return;
-      } catch { }
-    }
-    dirInputRef.current?.click();
-  };
 
   const handleSave = async () => {
     if (!projectName.trim()) { 
@@ -50,11 +34,10 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
     try {
       await saveSettings({ projectName, projectLocation, microphone: selectedMicrophone });
       onClose();
-    } catch {
-    }
+    } catch {}
   };
 
-  const handleNameChange = (name: string) => { // NEW: clear error on change
+  const handleNameChange = (name: string) => { 
     setProjectName(name);
     if (nameError) setNameError(null);
   };
@@ -74,39 +57,17 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
         </div>
         <div>
           <label htmlFor="projectLocation">{t('settings.projectLocation')}</label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ProjectLocationInput projectLocation={projectLocation} onChange={setProjectLocation} />
-            <img
-              src={folderIcon}
-              alt={t('settings.projectLocation')}
-              className="upload-icon"
-              title={t('settings.projectLocation')}
-              onClick={openDirectoryPicker}
-              style={{ cursor: 'pointer' }}
-            />
-            <input
-              ref={dirInputRef}
-              type="file"
-              style={{ display: 'none' }}
-              // @ts-expect-error: non-standard Chromium attribute
-              webkitdirectory="true"
-              onChange={(e) => {
-                const anyFile = e.currentTarget.files?.[0];
-                if (anyFile) {
-                  const rel = anyFile.webkitRelativePath as string | undefined;
-                  if (rel) {
-                    const dir = rel.split('/')[0];
-                    setProjectLocation('/' + dir);
-                  }
-                }
-                e.currentTarget.value = '';
-              }}
-            />
-          </div>
+          <ProjectLocationInput 
+            projectLocation={projectLocation} 
+            onChange={setProjectLocation} 
+          />
         </div>
         <div>
           <label htmlFor="microphone">{t('settings.microphone')}</label>
-          <MicrophoneSelect selectedMicrophone={selectedMicrophone} onChange={setSelectedMicrophone} />
+          <MicrophoneSelect 
+            selectedMicrophone={selectedMicrophone} 
+            onChange={setSelectedMicrophone} 
+          />
         </div>
       </div>
       <div className="button-container">
