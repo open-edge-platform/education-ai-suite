@@ -10,7 +10,7 @@
     "copyright": "© 2025 智能教室示例应用"
   },
   "notifications": {
-    "start": "开始录音或上传音频文件以开始新会话",
+    "start": "上传音频文件以开始新会话",
     "stop": "停止录音以获取人工智能摘要",
     "recording": "正在录音…",
     "uploading": "正在上传转录…",

@@ -21,7 +21,7 @@
   font-weight: 500;
   color: #0071c5;
   background: none;
-  border: 1px solid #e6e7e8;
+  border: 3px solid #e6e7e8;
   border-radius: 4px;
   padding: 8px 16px;
   margin-right: 12px;
@@ -51,7 +51,7 @@
 .text-button:disabled {
   color: #bbbaba;
   background: #f9f6f6;
-  border: 1px solid #e6e7e8;
+  border: 3px solid #e6e7e8;
   cursor: not-allowed;
 }
 

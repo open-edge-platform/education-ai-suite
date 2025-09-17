@@ -10,7 +10,7 @@
       "copyright": "© 2025 Smart Classroom Sample App"
     },
     "notifications": {
-      "start": "Start recording or upload an audio file to begin a new session",
+      "start": "Upload an audio file to begin a new session",
       "stop": "Stop recording to get AI summary",
       "recording": "Recording…",
       "uploading": "Uploading transcript…",
