@@ -33,7 +33,7 @@ class ASRComponent(PipelineComponent):
             if provider == "openvino" and "whisper" in model_name:
                 ASRComponent._model = OV_Whisper(model_name, device, None)
             elif provider == "funasr" and "paraformer" in model_name:
-                ASRComponent._model = Paraformer(model_name, device, None)
+                ASRComponent._model = Paraformer(model_name, device.lower(), None)
             else:
                 raise ValueError(f"Unsupported ASR provider/model: {provider}/{model_name}")
             ASRComponent._config = config
