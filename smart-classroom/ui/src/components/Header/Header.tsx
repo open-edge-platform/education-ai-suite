@@ -113,23 +113,24 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
           {isRecording ? t('header.stopRecording') : t('header.startRecording')}
         </button>
 
-        <label
-          className="text-button"
-          style={{ opacity: isBusy || isRecording ? 0.6 : 1, cursor: isBusy || isRecording ? 'not-allowed' : 'pointer' }}
-        >
-          <input
-            type="file"
-            accept="audio/*"
-            style={{ display: 'none' }}
-            disabled={isBusy || isRecording}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleFileUpload(f);
-              e.currentTarget.value = '';
-            }}
-          />
-          {t('header.uploadFile')}
-        </label>
+    <label
+      className="upload-button"
+      style={{ opacity: isBusy || isRecording ? 0.6 : 1, cursor: isBusy || isRecording ? 'not-allowed' : 'pointer' }}
+    >
+      <input
+        type="file"
+        accept="audio/*"
+        style={{ display: 'none' }}
+        disabled={isBusy || isRecording}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFileUpload(f);
+          e.currentTarget.value = '';
+        }}
+      />
+      {t('header.uploadFile')}
+    </label>
+
       </div>
 
       <div className="navbar-center">

@@ -30,8 +30,8 @@
 }
 .navbar-left {
   display: flex;
-  align-items: center; /* Vertically center all children */
-  gap: 12px; /* Consistent spacing between items */
+  align-items: center; 
+  gap: 12px; 
 }
 .record-icon,
 .side-record-icon {
@@ -47,6 +47,40 @@
   color: #0054AE;
   vertical-align: middle;
 }
+
+
+.upload-button {
+  font-family: "IntelOne Text", var(--font-text), system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0071c5;
+  background: none;
+  border: 2px solid #82b6df; 
+  border-radius: 4px;
+  padding: 8px 16px;
+  margin-right: 12px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  display: inline-block;
+  text-align: center;
+}
+
+
+.upload-button:hover {
+  background: #0071c5;
+  color: #fff;
+  border-color: #6da5e0;
+}
+
+
+.upload-button:disabled,
+.upload-button[disabled] {
+  color: #bbbaba;
+  background: #f9f6f6;
+  border: 2px solid #e6e7e8;
+  cursor: not-allowed;
+}
+
 
 .text-button:disabled {
   color: #bbbaba;
