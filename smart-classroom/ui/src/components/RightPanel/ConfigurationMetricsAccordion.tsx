@@ -16,7 +16,7 @@ const ConfigurationMetricsAccordion: React.FC = () => {
   const [performanceData, setPerformanceData] = useState<any>(null);
 
   useEffect(() => {
-    if (sessionId && !platformData) {
+    if (!platformData) {
       (async () => {
         try {
           const platformResp = await getPlatformInfo();
@@ -26,7 +26,7 @@ const ConfigurationMetricsAccordion: React.FC = () => {
         }
       })();
     }
-  }, [sessionId, platformData]);
+  }, [platformData]);
 
 
   useEffect(() => {
