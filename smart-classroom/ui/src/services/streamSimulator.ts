@@ -1,6 +1,7 @@
 export type StreamEvent =
   | { type: 'transcript'; token: string }
   | { type: 'summary_token'; token: string }
+  | { type: 'error'; message: string }
   | { type: 'done' };
 
 export interface StreamOptions {

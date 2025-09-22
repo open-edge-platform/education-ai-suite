@@ -40,6 +40,10 @@ const uiSlice = createSlice({
       state.uploadedAudioPath = null;
       state.shouldStartSummary = false;
     },
+    processingFailed(state) {
+      state.aiProcessing = false;
+      state.summaryLoading = false;
+    },
     transcriptionComplete(state) {
       console.log('transcriptionComplete reducer called');
       state.summaryEnabled = true;
@@ -80,6 +84,7 @@ const uiSlice = createSlice({
 
 export const {
   startProcessing,
+  processingFailed,
   transcriptionComplete,
   clearSummaryStartRequest,
   setUploadedAudioPath,

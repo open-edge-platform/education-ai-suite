@@ -60,8 +60,17 @@ export async function uploadAudio(file: File): Promise<{ filename: string; messa
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${BASE_URL}/upload-audio`, { method: 'POST', body: form });
-  if (!res.ok) throw new Error('Failed to upload audio');
-  return await res.json();
+  let json: any = null;
+  try { json = await res.json(); } catch {}
+  if (!res.ok) {
+    const msg = json?.message || `Upload failed (${res.status})`;
+    throw new Error(msg);
+  }
+  return json;
+}
+
+function safeParse(line: string): any | null {
+  try { return JSON.parse(line); } catch { return null; }
 }
 export async function* streamTranscript(audioPath: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
   const res = await fetch(`${BASE_URL}/transcribe`, {
@@ -89,7 +98,6 @@ export async function* streamTranscript(audioPath: string, opts: StreamOptions =
     for (const line of lines) {
       if (!line.trim()) continue;
       const chunk = JSON.parse(line);
-      // Use typewriterStream for each chunk.text
       for await (const token of typewriterStream(chunk.text, opts.tokenDelayMs ?? 30, opts.signal)) {
         yield { type: 'transcript', token };
       }
