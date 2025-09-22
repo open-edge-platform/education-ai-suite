@@ -10,14 +10,7 @@
   box-shadow: none;
 }
 
-.summary-loading {
-  color: var(--color-gray-700);
-  font-size: 12px;
-  padding: 0.5rem 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.summary-loading { display: none; }
 
 .tab-spinner {
   width: 16px;

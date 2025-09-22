@@ -43,9 +43,15 @@ const AISummaryTab: React.FC = () => {
           if (ev.type === 'summary_token') {
             if (!sentFirst) { dispatch(firstSummaryToken()); sentFirst = true; }
             dispatch(appendSummary(ev.token));
+          } else if (ev.type === 'error') {
+            window.dispatchEvent(new CustomEvent('global-error', { detail: ev.message || 'Summary error' })); // NEW
+            dispatch(finishSummary());
+            dispatch(summaryDone());
+            break;
           } else if (ev.type === 'done') {
             dispatch(finishSummary());
             dispatch(summaryDone());
+            break;
           }
         }
       } catch (e:any) {
@@ -76,4 +82,3 @@ const AISummaryTab: React.FC = () => {
 };
 
 export default AISummaryTab;
-// ...existing code...
