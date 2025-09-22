@@ -7,7 +7,7 @@ import recordOFF from '../../assets/images/recording-off.svg';
 import sideRecordIcon from '../../assets/images/sideRecord.svg';
 import { constants } from '../../constants';
 import { useAppDispatch, useAppSelector } from '../../redux/hooks';
-import { resetFlow, startProcessing, setUploadedAudioPath } from '../../redux/slices/uiSlice';
+import { resetFlow, startProcessing, setUploadedAudioPath, processingFailed } from '../../redux/slices/uiSlice';
 import { resetTranscript } from '../../redux/slices/transcriptSlice';
 import { resetSummary } from '../../redux/slices/summarySlice';
 import { useTranslation } from 'react-i18next';
@@ -24,7 +24,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
   const [notification, setNotification] = useState(constants.START_NOTIFICATION);
   const { t } = useTranslation();
   const [timer, setTimer] = useState(0);
-
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const dispatch = useAppDispatch();
   const isBusy = useAppSelector((s) => s.ui.aiProcessing);
   const summaryEnabled = useAppSelector((s) => s.ui.summaryEnabled);
@@ -49,7 +49,15 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
     else if (!isBusy && summaryEnabled) setNotification(t('notifications.summaryReady'));
     else setNotification(t('notifications.start'));
   }, [isBusy, summaryEnabled, summaryLoading, transcriptStatus, t]);
-
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      setErrorMsg(detail || 'Error');
+    };
+    window.addEventListener('global-error', handler as EventListener);
+    return () => window.removeEventListener('global-error', handler as EventListener);
+  }, []);
+  const clearForNewOp = () => setErrorMsg(null);
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -75,6 +83,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
 
   const handleFileUpload = async (file: File) => {
     if (isBusy || isRecording) return;
+    clearForNewOp();
     setNotification(t('notifications.uploading'));
     dispatch(resetFlow());
     dispatch(resetTranscript());
@@ -82,11 +91,13 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
     dispatch(startProcessing());
     try {
       const result = await uploadAudio(file);
-      dispatch(setUploadedAudioPath(result.path)); // <-- Only this, no transcription here
+      dispatch(setUploadedAudioPath(result.path)); 
       console.log('File Uploaded:', file.name, 'Saved path:', result.path);
-    } catch (e) {
-      setNotification('Upload failed');
-      console.error('Upload failed', e);
+    } catch (e: any) {
+      const msg = e?.message || 'Upload failed';
+      setNotification(msg);
+      setErrorMsg(msg); // NEW
+      dispatch(processingFailed());
     }
   };
 
@@ -134,7 +145,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
       </div>
 
       <div className="navbar-center">
-        <NotificationsDisplay notification={notification} />
+        <NotificationsDisplay notification={notification} error={errorMsg} />
       </div>
 
       <div className="navbar-right">

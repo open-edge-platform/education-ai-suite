@@ -7,6 +7,7 @@
   background-color: #fff;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   color: #2B2C30;
+  align-items: justify;
 }
 
 h2 {
@@ -28,9 +29,9 @@ h2 {
   margin-bottom: 20px;
   width: 456px;
   padding-top: 29px;
-  padding-right: 39px;
+  padding-right: 40px;
   padding-bottom: 29px;
-  padding-left: 39px;
+  padding-left: 40px;
 }
 
 label {
@@ -54,7 +55,7 @@ select {
   color: #2B2C30;
   line-height: 16px;
   box-sizing: border-box;
-  background: #fff;
+  background: #f7f7f7;
 }
 
 .button-container {
@@ -85,7 +86,9 @@ select {
   cursor: not-allowed;
 }
 
-.upload-icon {
-  cursor: pointer;
-  margin-left: 10px;
+.settings-title-line {
+  border: none;          
+  height: 1.5px;           
+  background-color: #ccc; 
+  margin: 8px 0 16px;    
 }
