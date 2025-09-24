@@ -98,7 +98,6 @@ export async function* streamTranscript(audioPath: string, opts: StreamOptions =
     for (const line of lines) {
       if (!line.trim()) continue;
       const chunk = JSON.parse(line);
-      // Use typewriterStream for each chunk.text
       for await (const token of typewriterStream(chunk.text, opts.tokenDelayMs ?? 30, opts.signal)) {
         yield { type: 'transcript', token };
       }

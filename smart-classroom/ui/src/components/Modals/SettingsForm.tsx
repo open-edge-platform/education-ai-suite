@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ProjectNameInput from '../Inputs/ProjectNameInput';
 import MicrophoneSelect from '../Inputs/MicrophoneSelect';
 import ProjectLocationInput from '../Inputs/ProjectLocationInput';
@@ -18,16 +18,20 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
   const [nameError, setNameError] = useState<string | null>(null);
   const { t } = useTranslation();
 
-  React.useEffect(() => {
-    getSettings().then(s => {
-      if (!s) return;
-      setProjectLocation(s.projectLocation || 'storage/');
-      setSelectedMicrophone(s.microphone || '');
-    }).catch(() => {});
+  // Fetch settings on mount and set defaults
+  useEffect(() => {
+    getSettings()
+      .then(s => {
+        if (!s) return;
+        setProjectLocation(s.projectLocation || 'storage/');
+        setSelectedMicrophone(s.microphone || '');
+        if (s.projectName) setProjectName(s.projectName); // default project name from API
+      })
+      .catch(() => {});
   }, [setProjectName]);
 
   const handleSave = async () => {
-    if (!projectName.trim()) { 
+    if (!projectName.trim()) {
       setNameError(t('errors.projectNameRequired'));
       return;
     }
@@ -37,14 +41,15 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
     } catch {}
   };
 
-  const handleNameChange = (name: string) => { 
+  const handleNameChange = (name: string) => {
     setProjectName(name);
     if (nameError) setNameError(null);
   };
-  
+
   return (
     <div className="settings-form">
       <h2>{t('settings.title')}</h2>
+      <hr className="settings-title-line" />
       <div className="settings-body">
         <div>
           <label htmlFor="projectName">{t('settings.projectName')}</label>
@@ -57,16 +62,17 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
         </div>
         <div>
           <label htmlFor="projectLocation">{t('settings.projectLocation')}</label>
-          <ProjectLocationInput 
-            projectLocation={projectLocation} 
-            onChange={setProjectLocation} 
+          <ProjectLocationInput
+            projectLocation={projectLocation}
+            onChange={setProjectLocation}
+            placeholder=""
           />
         </div>
         <div>
           <label htmlFor="microphone">{t('settings.microphone')}</label>
-          <MicrophoneSelect 
-            selectedMicrophone={selectedMicrophone} 
-            onChange={setSelectedMicrophone} 
+          <MicrophoneSelect
+            selectedMicrophone={selectedMicrophone}
+            onChange={setSelectedMicrophone}
           />
         </div>
       </div>
