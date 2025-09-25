@@ -6,6 +6,7 @@ from monitoring.scripts.common.collect_cpu import start_cpu_monitoring
 from monitoring.scripts.windows.collect_gpu import start_gpu_monitoring
 from monitoring.scripts.common.collect_memory import start_memory_monitoring
 from monitoring.scripts.windows.collect_power import start_power_monitoring
+from monitoring.scripts.windows.collect_npu import start_npu_monitoring
 import logging
 import platform
 
@@ -19,7 +20,8 @@ collector_scripts = {
     "cpu_collector": start_cpu_monitoring,
     "gpu_collector": start_gpu_monitoring if os_name == "Windows" else None,
     "memory_collector": start_memory_monitoring,
-    "power_collector":start_power_monitoring if os_name == "Windows" else None
+    "power_collector":start_power_monitoring if os_name == "Windows" else None,
+    "npu_collector": start_npu_monitoring if os_name == "Windows" else None
 }
 
 def read_log_file(file_path, indices):
@@ -42,14 +44,16 @@ def monitor_logs(metrics_logs):
         "cpu_utilization": [],
         "gpu_utilization": [],
         "memory": [],
-        "power": []
+        "power": [],
+        "npu_utilization": []
     }
 
     log_files = {
         "cpu_utilization": (os.path.join(metrics_logs, "cpu_utilization.csv"), [1]),
         "gpu_utilization": (os.path.join(metrics_logs, "gpu_metrics.csv"), [1, 2, 3, 4, 5, 6,7,8,9]),
         "memory": (os.path.join(metrics_logs, "memory_metrics.csv"), [1, 2, 3,4]),
-        "power": (os.path.join(metrics_logs, "power_metrics.csv"), [1])
+        "power": (os.path.join(metrics_logs, "power_metrics.csv"), [1]),
+        "npu_utilization": (os.path.join(metrics_logs, "npu_metrics.csv"), [1])
     }
 
     for key, (file_path, indices) in log_files.items():
