@@ -12,7 +12,7 @@ import { resetTranscript } from '../../redux/slices/transcriptSlice';
 import { resetSummary } from '../../redux/slices/summarySlice';
 import { useTranslation } from 'react-i18next';
 import { uploadAudio } from '../../services/api';
-
+import Toast from '../common/Toast';
 
 interface HeaderBarProps {
   projectName: string;
@@ -20,6 +20,7 @@ interface HeaderBarProps {
 }
 
 const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
+  const [showToast, setShowToast] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [notification, setNotification] = useState(constants.START_NOTIFICATION);
   const { t } = useTranslation();
@@ -30,7 +31,20 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
   const summaryEnabled = useAppSelector((s) => s.ui.summaryEnabled);
   const summaryLoading = useAppSelector((s) => s.ui.summaryLoading);
   const transcriptStatus = useAppSelector((s) => s.transcript.status);
+  const sessionId = useAppSelector((state) => state.ui.sessionId);
+  const projectLocation = useAppSelector((state) => state.ui.projectLocation);
+  const handleSummaryComplete = () => {
+    setShowToast(true); 
+  };
+  const handleCopy = () => {
+    const location = `${projectLocation}/${projectName}/${sessionId}`;
+    navigator.clipboard.writeText(location);
+    alert('Copied to clipboard!');
+  };
 
+  const handleClose = () => {
+    setShowToast(false);
+  };
   useEffect(() => {
     let interval: number | null = null;
     if (isRecording) {
@@ -91,12 +105,13 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
     dispatch(startProcessing());
     try {
       const result = await uploadAudio(file);
-      dispatch(setUploadedAudioPath(result.path)); 
-      console.log('File Uploaded:', file.name, 'Saved path:', result.path);
+      dispatch(setUploadedAudioPath(result.path));
+      setNotification(t('notifications.uploadSuccess'));
+      setErrorMsg(null); // Clear any previous error
     } catch (e: any) {
-      const msg = e?.message || 'Upload failed';
-      setNotification(msg);
-      setErrorMsg(msg); // NEW
+      const msg = e?.response?.data?.message || 'Upload failed';
+      setNotification(''); // Clear the notification
+      setErrorMsg(msg); // Set error message for NotificationsDisplay
       dispatch(processingFailed());
     }
   };
@@ -151,6 +166,13 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName }) => {
       <div className="navbar-right">
         <ProjectNameDisplay projectName={projectName} />
       </div>
+      {showToast && (
+        <Toast
+          message={`Summary stored at: ${projectLocation}/${projectName}/${sessionId}`}
+          onClose={handleClose}
+          onCopy={handleCopy}
+        />
+      )}
     </div>
   );
 };

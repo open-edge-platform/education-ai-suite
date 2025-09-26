@@ -16,6 +16,11 @@ from utils.audio_util import save_audio_file
 import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
+router = APIRouter()
+
+@router.get("/health")
+def health():
+    return JSONResponse(content={"status": "ok"}, status_code=200)
 
 @router.post("/upload-audio")
 def upload_audio(file: UploadFile = File(...)):

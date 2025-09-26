@@ -1,5 +1,6 @@
 import React from 'react';
-import notificationicon from '../../assets/images/notification.svg';
+import notificationIcon from '../../assets/images/notification.svg';
+import attentionTriangleIcon from '../../assets/images/attention-triangle.svg'; // Import the error icon
 
 interface NotificationsDisplayProps {
   notification: string;
@@ -7,17 +8,17 @@ interface NotificationsDisplayProps {
 }
 
 const NotificationsDisplay: React.FC<NotificationsDisplayProps> = ({ notification, error }) => {
+  // Dynamically choose the icon based on whether it's an error
+  const icon = error ? attentionTriangleIcon : notificationIcon;
+
   return (
     <div className={`notifications-display ${error ? 'has-error' : ''}`}>
       <img
-        src={notificationicon}
-        alt="Notification Icon"
+        src={icon}
+        alt={error ? 'Error Icon' : 'Notification Icon'}
         className="notification-icon"
-        style={error ? { filter: 'hue-rotate(330deg) saturate(3)', opacity: 0.9 } : {}}
       />
-      <span style={error ? { color: '#c62828', fontWeight: 600 } : {}}>
-        {error || notification}
-      </span>
+      <span>{error || notification}</span>
     </div>
   );
 };

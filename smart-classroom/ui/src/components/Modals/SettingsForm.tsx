@@ -10,9 +10,10 @@ interface SettingsFormProps {
   onClose: () => void;
   projectName: string;
   setProjectName: (name: string) => void;
+  setCanClose: (canClose: () => boolean) => void; // Add setCanClose to props
 }
 
-const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setProjectName }) => {
+const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setProjectName, setCanClose }) => {
   const [selectedMicrophone, setSelectedMicrophone] = useState('');
   const [projectLocation, setProjectLocation] = useState('storage/');
   const [nameError, setNameError] = useState<string | null>(null);
@@ -30,22 +31,39 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
       .catch(() => {});
   }, [setProjectName]);
 
-  const handleSave = async () => {
+  // Validate project name
+  const validateProjectName = () => {
     if (!projectName.trim()) {
       setNameError(t('errors.projectNameRequired'));
+      return false;
+    }
+    return true;
+  };
+
+  // Pass validation logic to Modal
+  useEffect(() => {
+    setCanClose(validateProjectName); // Pass validation logic to Modal
+  }, [projectName, setCanClose]);
+
+  const handleSave = async () => {
+    if (!validateProjectName()) {
       return;
     }
     try {
       await saveSettings({ projectName, projectLocation, microphone: selectedMicrophone });
       onClose();
-    } catch {}
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+    }
   };
 
   const handleNameChange = (name: string) => {
     setProjectName(name);
     if (nameError) setNameError(null);
   };
-
+  const handleLocationChange = (location: string) => {
+    setProjectLocation(location);
+  };
   return (
     <div className="settings-form">
       <h2>{t('settings.title')}</h2>
@@ -64,7 +82,7 @@ const SettingsForm: React.FC<SettingsFormProps> = ({ onClose, projectName, setPr
           <label htmlFor="projectLocation">{t('settings.projectLocation')}</label>
           <ProjectLocationInput
             projectLocation={projectLocation}
-            onChange={setProjectLocation}
+            onChange={handleLocationChange}
             placeholder=""
           />
         </div>

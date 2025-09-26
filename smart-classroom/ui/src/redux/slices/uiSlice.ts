@@ -12,10 +12,13 @@ export interface UIState {
   autoSwitched: boolean;
   sessionId: string | null;
   uploadedAudioPath: string | null;
-  shouldStartSummary: boolean; // trigger to start summary once
+  shouldStartSummary: boolean;
+  backendAvailable: boolean; 
+  projectLocation: string;
 }
 
 const initialState: UIState = {
+  backendAvailable: true,
   aiProcessing: false,
   summaryEnabled: false,
   summaryLoading: false,
@@ -24,12 +27,16 @@ const initialState: UIState = {
   sessionId: null,
   uploadedAudioPath: null,
   shouldStartSummary: false,
+  projectLocation: 'storage/',
 };
 
 const uiSlice = createSlice({
   name: 'ui',
   initialState,
   reducers: {
+    setBackendAvailable(state, action: PayloadAction<boolean>) {
+      state.backendAvailable = action.payload;
+    },
     startProcessing(state) {
       state.aiProcessing = true;
       state.summaryEnabled = false;
@@ -76,6 +83,8 @@ const uiSlice = createSlice({
     setActiveTab(state, action: PayloadAction<Tab>) {
       state.activeTab = action.payload;
     },
+    setProjectLocation(state, action: PayloadAction<string>) { // Add reducer to update projectLocation
+      state.projectLocation = action.payload;},
     resetFlow() {
       return initialState;
     },
@@ -83,6 +92,7 @@ const uiSlice = createSlice({
 });
 
 export const {
+  setBackendAvailable,
   startProcessing,
   processingFailed,
   transcriptionComplete,
@@ -92,6 +102,7 @@ export const {
   firstSummaryToken,
   summaryDone,
   setActiveTab,
+  setProjectLocation,
   resetFlow,
 } = uiSlice.actions;
 
