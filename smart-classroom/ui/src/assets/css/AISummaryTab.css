@@ -27,41 +27,35 @@
 }
 
 .summary-content {
-  white-space: pre-wrap; 
-  line-height: 1.2;
+  white-space: pre-wrap;
+  line-height: 1;
   font-size: 14px;
+  word-wrap: break-word;
 }
-
-.summary-content h1,
-.summary-content h2,
-.summary-content h3,
-.summary-content p,
 .summary-content ul,
-.summary-content li {
-  margin: 0; 
-  padding: 0;
+.summary-content ol {
+  padding-left: 1.5rem;             
+  list-style-position: outside;   
+  margin: 0.4rem 0;
 }
-
+.summary-content li {
+  margin: 0.2rem 0;
+}
 .summary-content h1 {
   font-size: 18px;
   font-weight: 500;
+  margin-bottom: 0.2rem;
 }
-
 .summary-content h2 {
   font-size: 16px;
   font-weight: 400;
+  margin-bottom: 0.4rem;
 }
-
-.summary-content ul {
-  padding-left: 1.5rem; 
-  list-style-type: disc;
+.summary-content h3 {
+  font-size: 15px;
+  font-weight: 400;
+  margin-bottom: 0.3rem;
 }
-
-.summary-content li {
-  margin: 0; 
-}
-
-
 .summary-content strong,
 .summary-content b {
   font-weight: 700;
