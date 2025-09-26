@@ -10,10 +10,11 @@ monitoring:
 models:
   asr:
     provider: openvino # openvino, funasr and openai supported
-    name: whisper-tiny # can be (whisper-base, whisper-small etc) or paraformer-zh
+    name: whisper-tiny  # can be (whisper-base, whisper-small etc) or paraformer-zh
     device: CPU
     temperature: 0.0
     models_base_path: "models"
+    threads_limit: Null # applied only if > 0 (else defaults are used); value can be tuned based on CPU specifications
 
   summarizer:
     provider: openvino # ipex or openvino

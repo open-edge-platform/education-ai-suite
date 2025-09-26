@@ -8,10 +8,11 @@ from utils.ensure_model import get_asr_model_path
 logger = logging.getLogger(__name__)  
  
 class Whisper(BaseASR):
-   def __init__(self, model_name="whisper-small", device="CPU", revision=None):
+   def __init__(self, model_name="whisper-small", device="CPU", revision=None,threads_limit=None):
         logger.info(f"Loading Model: model name={model_name}, device={device}")
         self.model_path = get_asr_model_path()
-        self.model = ov_genai.WhisperPipeline(self.model_path, device=device)
+        config = {"INFERENCE_NUM_THREADS": str(threads_limit)} if threads_limit and threads_limit > 0 else {}
+        self.model = ov_genai.WhisperPipeline( self.model_path, device=device,config=config)
  
    def transcribe(self, audio_path: str, temperature: float) -> str:
           audio, sr = self._load_wav_mono_16k(audio_path)
