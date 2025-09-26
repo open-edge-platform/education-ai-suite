@@ -5,6 +5,7 @@ import threading
 import subprocess
 from datetime import datetime
 import logging
+from utils.config_loader import config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,9 +20,8 @@ def start_npu_monitoring(interval_seconds, stop_event, output_dir=None):
     mode = 'a' if os.path.exists(npu_file) else 'w'
 
     # Updated exe path relative to your project structure
-    exe_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "tools", "level-zero", "build", "npu_utilization.exe"
-    )
+    npu_relative_path = config.monitoring.npu_exe_path
+    exe_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", npu_relative_path))
     exe_path = os.path.abspath(exe_path)
 
     if not os.path.exists(exe_path):
