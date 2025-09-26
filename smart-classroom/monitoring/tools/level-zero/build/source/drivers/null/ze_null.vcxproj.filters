@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\drivers\null\ze_null.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\drivers\null\ze_nullddi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\drivers\null\zet_nullddi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\drivers\null\zes_nullddi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\drivers\null\ze_null.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\drivers\null\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{CA91EF84-511A-3FD1-A243-2B241251E4CC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{8A8E28ED-36FE-3F8C-8C5F-8FE92E044BA7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

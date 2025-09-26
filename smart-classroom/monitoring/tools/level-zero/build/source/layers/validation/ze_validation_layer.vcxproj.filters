@@ -1,0 +1,80 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\ze_validation_layer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\ze_valddi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\zet_valddi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\zes_valddi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\parameter_validation\ze_parameter_validation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\parameter_validation\zes_parameter_validation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\parameter_validation\zet_parameter_validation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\handle_lifetime_tracking\ze_handle_lifetime.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\handle_lifetime_tracking\zes_handle_lifetime.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\handle_lifetime_tracking\zet_handle_lifetime.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\ze_validation_layer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\parameter_validation\param_validation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\parameter_validation\ze_parameter_validation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\parameter_validation\zes_parameter_validation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\parameter_validation\zet_parameter_validation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\handle_lifetime_tracking\handle_lifetime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\handle_lifetime_tracking\ze_handle_lifetime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\handle_lifetime_tracking\zes_handle_lifetime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\handle_lifetime_tracking\zet_handle_lifetime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\source\layers\validation\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="C:\Users\intel\Desktop\eddd\education-ai-suite\smart-classroom\monitoring\tools\level-zero\build\source\layers\validation\ZeValidationLayerVersion.rc">
+      <Filter>Source Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{CA91EF84-511A-3FD1-A243-2B241251E4CC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{8A8E28ED-36FE-3F8C-8C5F-8FE92E044BA7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

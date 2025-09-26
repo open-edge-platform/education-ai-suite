@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include "ze_api.h"
 #include "zes_api.h"
 #include <windows.h>
