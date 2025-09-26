@@ -1,6 +1,7 @@
 from components.base_component import PipelineComponent
 import os
 import time
+import torch
 from utils.config_loader import config
 from utils.storage_manager import StorageManager
 from utils.runtime_config_loader import RuntimeConfig
@@ -11,7 +12,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 DELETE_CHUNK_AFTER_USE =  config.pipeline.delete_chunks_after_use
-
+THREADS_LIMIT = config.models.asr.threads_limit
 class ASRComponent(PipelineComponent):
 
     _model = None
@@ -23,6 +24,7 @@ class ASRComponent(PipelineComponent):
         self.temperature = temperature
         self.provider = provider
         self.model_name = model_name
+        self.threads_limit = THREADS_LIMIT
         provider, model_name = provider.lower(), model_name.lower()
         config = (provider, model_name, device)
 
@@ -31,7 +33,7 @@ class ASRComponent(PipelineComponent):
             if provider == "openai" and "whisper" in model_name:
                 ASRComponent._model = OA_Whisper(model_name, device, None)
             elif provider == "openvino" and "whisper" in model_name:
-                ASRComponent._model = OV_Whisper(model_name, device, None)
+                ASRComponent._model = OV_Whisper(model_name, device, None,self.threads_limit)
             elif provider == "funasr" and "paraformer" in model_name:
                 ASRComponent._model = Paraformer(model_name, device.lower(), None)
             else:
@@ -47,7 +49,11 @@ class ASRComponent(PipelineComponent):
         StorageManager.save(os.path.join(project_path, "transcription.txt"), "", append=False)
 
         start_time = time.perf_counter()
+        default_torch_threads = None
         try: 
+            if self.provider in ["openai", "funasr"] and self.threads_limit and self.threads_limit > 0:
+                default_torch_threads = torch.get_num_threads()
+                torch.set_num_threads(self.threads_limit)
 
             for chunk_data in input_generator:
                 chunk_path = chunk_data["chunk_path"]
@@ -63,7 +69,9 @@ class ASRComponent(PipelineComponent):
                     "text": transcribed_text
                 }
         finally:
-
+            if default_torch_threads is not None:
+                torch.set_num_threads(default_torch_threads)
+                
             end_time = time.perf_counter()
             transcription_time = end_time - start_time
 
