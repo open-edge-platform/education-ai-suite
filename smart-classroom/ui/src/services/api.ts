@@ -107,13 +107,11 @@ export async function uploadAudio(file: File): Promise<{ filename: string; messa
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${BASE_URL}/upload-audio`, { method: 'POST', body: form });
-  let json: any = null;
-  try { json = await res.json(); } catch {}
   if (!res.ok) {
-    const msg = json?.message || `Upload failed (${res.status})`;
-    throw new Error(msg);
-  }
-  return json;
+    const json = await res.json();
+    throw new Error(json.message || `Upload failed (${res.status})`);
+}
+return res.json();
 });
 }
 
