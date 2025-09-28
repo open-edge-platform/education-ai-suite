@@ -36,16 +36,16 @@ def upload_audio(file: UploadFile = File(...)):
             }
         )
     except HTTPException as he:
-    logger.error(f"HTTPException occurred: {he.detail}")
-    return JSONResponse(
-        status_code=he.status_code,
-        content={"status": "error", "message": he.detail}
-    )
+        logger.error(f"HTTPException occurred: {he.detail}")
+        return JSONResponse(
+            status_code=he.status_code,
+            content={"status": "error", "message": he.detail}
+        )
     except Exception as e:
-    logger.error(f"General exception occurred: {str(e)}")
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"status": "error", "message": "Failed to upload audio file"}
+        logger.error(f"General exception occurred: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"status": "error", "message": "Failed to upload audio file"}
     )
 
 
