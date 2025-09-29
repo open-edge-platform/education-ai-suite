@@ -8,71 +8,118 @@ export type StartSessionResponse = { sessionId: string };
 
 const env = (import.meta as any).env ?? {};
 const BASE_URL: string = env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+const HEALTH_TIMEOUT_MS = 2000;
 
+let isBackendHealthy = true; // Cache the backend health status
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ]);
+}
+
+export async function pingBackend(): Promise<boolean> {
+  try {
+    const res = await withTimeout(fetch(`${BASE_URL}/health`, { cache: 'no-store' }), HEALTH_TIMEOUT_MS);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.status === 'ok';
+  } catch {
+    return false;
+  }
+}
+
+async function ensureBackendHealth(): Promise<void> {
+  if (!isBackendHealthy) {
+    const isHealthy = await pingBackend();
+    if (!isHealthy) {
+      throw new Error('Backend is not healthy. Please try again later.');
+    }
+    isBackendHealthy = true; // Update the cached status
+  }
+}
+
+export async function safeApiCall<T>(apiCall: () => Promise<T>): Promise<T> {
+  await ensureBackendHealth(); // Ensure backend health before making the API call
+  return apiCall();
+}
 
 export async function getSettings(): Promise<Settings> {
-  const res = await fetch(`${BASE_URL}/project`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Failed to fetch project config: ${res.status}`);
-  const cfg = (await res.json()) as ProjectConfig;
-  return {
-    projectName: cfg.name ?? '',
-    projectLocation: cfg.location ?? '',
-    microphone: cfg.microphone ?? '',
-  };
+  return safeApiCall(async() => {
+    const res = await fetch(`${BASE_URL}/project`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Failed to fetch project config: ${res.status}`);
+    const cfg = (await res.json()) as ProjectConfig;
+    return {
+      projectName: cfg.name ?? '',
+      projectLocation: cfg.location ?? '',
+      microphone: cfg.microphone ?? '',
+    };
+  });
 }
 
 export async function saveSettings(settings: Settings): Promise<ProjectConfig> {
-  const payload: ProjectConfig = {
-    name: settings.projectName,
-    location: settings.projectLocation,
-    microphone: settings.microphone,
-  };
-  const res = await fetch(`${BASE_URL}/project`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+  return safeApiCall(async () =>{
+    const payload: ProjectConfig = {
+      name: settings.projectName,
+      location: settings.projectLocation,
+      microphone: settings.microphone,
+    };
+    const res = await fetch(`${BASE_URL}/project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Failed to save project config: ${res.status}`);
+    return (await res.json()) as ProjectConfig;
   });
-  if (!res.ok) throw new Error(`Failed to save project config: ${res.status}`);
-  return (await res.json()) as ProjectConfig;
+
 }
 
 // Compatibility aliases (use getSettings/saveSettings internally)
 export async function getProjectConfig(): Promise<ProjectConfig> {
-  const s = await getSettings();
-  return { name: s.projectName, location: s.projectLocation, microphone: s.microphone };
+  return safeApiCall(async () => {
+    const s = await getSettings();
+    return { name: s.projectName, location: s.projectLocation, microphone: s.microphone };
+  });
 }
+
 export async function updateProjectConfig(config: ProjectConfig): Promise<ProjectConfig> {
-  return saveSettings({ projectName: config.name, projectLocation: config.location, microphone: config.microphone });
+  return safeApiCall(async () => {
+    return saveSettings({ projectName: config.name, projectLocation: config.location, microphone: config.microphone });
+  });
 }
 
 
 export async function startSession(req: StartSessionRequest): Promise<StartSessionResponse> {
+  return safeApiCall(async () => {
   const res = await fetch(`${BASE_URL}/session/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   });
   if (!res.ok) throw new Error('Failed to start session');
-  return (await res.json()) as StartSessionResponse;
+  return (await res.json()) as StartSessionResponse;});
 }
 
 export async function uploadAudio(file: File): Promise<{ filename: string; message: string; path: string }> {
+  return safeApiCall(async () => {
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${BASE_URL}/upload-audio`, { method: 'POST', body: form });
-  let json: any = null;
-  try { json = await res.json(); } catch {}
   if (!res.ok) {
-    const msg = json?.message || `Upload failed (${res.status})`;
-    throw new Error(msg);
-  }
-  return json;
+    const json = await res.json();
+    throw new Error(json.message || `Upload failed (${res.status})`);
+}
+return res.json();
+});
 }
 
 function safeParse(line: string): any | null {
   try { return JSON.parse(line); } catch { return null; }
 }
 export async function* streamTranscript(audioPath: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
+  await ensureBackendHealth();
   const res = await fetch(`${BASE_URL}/transcribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -108,6 +155,7 @@ export async function* streamTranscript(audioPath: string, opts: StreamOptions =
 
 
 export async function* streamSummary(sessionId: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
+  await ensureBackendHealth();
   const res = await fetch(`${BASE_URL}/summarize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -143,8 +191,9 @@ export async function* streamSummary(sessionId: string, opts: StreamOptions = {}
 }
 
 
+
 export async function getResourceMetrics(sessionId: string): Promise<any> {
-  try {
+  return safeApiCall(async () => {
     const res = await fetch(`${BASE_URL}/metrics`, {
       method: 'GET',
       headers: { 
@@ -170,19 +219,11 @@ export async function getResourceMetrics(sessionId: string): Promise<any> {
       memory: [],
       power: []
     };
-  } catch (error) {
-    console.warn('Failed to fetch resource metrics:', error);
-    return {
-      cpu_utilization: [],
-      gpu_utilization: [],
-      memory: [],
-      power: []
-    };
-  }
+  });
 }
 
 export async function getConfigurationMetrics(sessionId: string): Promise<any> {
-  try {
+  return safeApiCall(async () => {
     const res = await fetch(`${BASE_URL}/performance-metrics`, {
       method: "GET",
       headers: {
@@ -201,17 +242,11 @@ export async function getConfigurationMetrics(sessionId: string): Promise<any> {
 
     const text = await res.text();
     return text ? JSON.parse(text) : { configuration: {}, performance: {} };
-  } catch (error) {
-    console.warn("Failed to fetch performance metrics:", error);
-    return {
-      configuration: {},
-      performance: {},
-    };
-  }
+  });
 }
 
 export async function getPlatformInfo(): Promise<any> {
-  try {
+  return safeApiCall(async () => {
     const res = await fetch(`${BASE_URL}/platform-info`, {
       method: "GET",
       headers: {
@@ -226,8 +261,5 @@ export async function getPlatformInfo(): Promise<any> {
 
     const text = await res.text();
     return text ? JSON.parse(text) : {};
-  } catch (error) {
-    console.warn("Failed to fetch platform info:", error);
-    return {};
-  }
+  } );
 }

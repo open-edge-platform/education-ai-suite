@@ -16,6 +16,11 @@ from utils.audio_util import save_audio_file
 import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
+router = APIRouter()
+
+@router.get("/health")
+def health():
+    return JSONResponse(content={"status": "ok"}, status_code=200)
 
 @router.post("/upload-audio")
 def upload_audio(file: UploadFile = File(...)):
@@ -32,18 +37,15 @@ def upload_audio(file: UploadFile = File(...)):
         )
     except HTTPException as he:
         logger.error(f"HTTPException occurred: {he.detail}")
-        status_code = he.status_code
         return JSONResponse(
             status_code=he.status_code,
             content={"status": "error", "message": he.detail}
         )
     except Exception as e:
         logger.error(f"General exception occurred: {str(e)}")
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-    
-    return JSONResponse(
-        status_code=status_code,
-        content={"status": "error", "message": "Failed to upload audio file"}
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"status": "error", "message": "Failed to upload audio file"}
     )
 
 
