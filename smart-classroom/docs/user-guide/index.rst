@@ -15,4 +15,5 @@ The main features are as follows:
 
    system-requirements
    get-started
+   release-notes
 
