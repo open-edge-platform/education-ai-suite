@@ -21,13 +21,13 @@ This page provides detailed hardware, software, platform requirements, and suppo
   - Runs on **CPU** (Whisper is CPU-centric)  
 - **FunASR (Paraformer)**  
   - Recommended for **Chinese transcription** (`paraformer-zh`)
-- ✅ Supports transcription of audio files up to 45 minutes
+-  Supports transcription of audio files up to 45 minutes
 
 ###  Summarization (LLMs)  
 - **Qwen Models (OpenVINO / IPEX)**  
   - `Qwen2.0-7B-Instruct`  
   -  `Qwen2.5-7B-Instruct`
-- 💡 Summarization supports up to 7,500 tokens (≈ 45 minutes of audio) on GPU
+-  Summarization supports up to 7,500 tokens (≈ 45 minutes of audio) on GPU
 
 ###  Supported Weight Formats  
 - **int8** → Recommended for lower-end CPUs (fast + efficient)  
