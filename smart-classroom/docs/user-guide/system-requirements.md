@@ -5,10 +5,10 @@ This page provides detailed hardware, software, platform requirements, and suppo
 ## Software and Hardware Requirements
 
 - **OS**: Windows 11
-- **Processor**: Intel® Meteor Lake (with integrated GPU support)
+- **Processor**: Intel® Core Ultra Series 1 (with integrated GPU support)
 - **Memory**: 32 GB RAM (minimum recommended)
 - **Storage**: At least 50 GB free (for models and logs)
-- **GPU/Accelerator**: Intel® iGPU (Meteor Lake, Arc GPU, or higher) for summarization acceleration
+- **GPU/Accelerator**: Intel® iGPU (Core Ultra Series 1, Arc GPU, or higher) for summarization acceleration
 - **Python**: 3.12 or above
 - **Node.js**: v18+ (for frontend)
 
