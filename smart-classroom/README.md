@@ -29,7 +29,7 @@ The goal is to transform raw classroom recordings into concise, structured summa
   - Runs on **CPU** (Whisper is CPU-centric)  
 - **FunASR (Paraformer)**  
   - Recommended for **Chinese transcription** (`paraformer-zh`)
-- ✅ Supports transcription of audio files up to 45 minutes
+- ✅ Supports transcription of audio files up to 45 minutes in mp3 and wav formats
 
 #### 🧠 Summarization (LLMs)  
 - **Qwen Models (OpenVINO / IPEX)**  
@@ -54,7 +54,22 @@ The goal is to transform raw classroom recordings into concise, structured summa
   Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html), and add the `ffmpeg/bin` folder to your system `PATH`.
 ---
 
-**b. Install Python dependencies**  
+**Run your shell with admin privileges before starting the application**
+
+**b. Clone Repository:**
+
+```bash
+  git clone --no-checkout https://github.com/open-edge-platform/edge-ai-suites.git
+  cd edge-ai-suites
+  git sparse-checkout init --cone
+  git sparse-checkout set education-ai-suite
+  git checkout
+  cd education-ai-suite
+```
+---
+
+**c. Install Python dependencies**
+
 It’s recommended to create a **dedicated Python virtual environment** for the base dependencies.
 
 ```bash
@@ -68,7 +83,8 @@ pip install --upgrade -r requirements.txt
 ```
 ---
 
-**c. [Optional] Create Python Venv for Ipex Based Summarizer**  
+
+**d. [Optional] Create Python Venv for Ipex Based Summarizer**  
 If you plan to use IPEX, create a separate virtual environment.
 
 ```bash
@@ -131,7 +147,6 @@ Run the backend:
 ```bash
 python main.py
 ```
-**To monitor power usage, run your shell with admin privileges before starting the application.**
 
 - Bring Up Frontend:
 ```bash
