@@ -83,7 +83,9 @@ class VideoAnalyticsPipelineService:
         """Setup GStreamer environment variables"""
         current_path = os.environ.get("GST_PLUGIN_PATH", "")
         os.environ["GST_PLUGIN_PATH"] = f"{self.plugin_path};{current_path}"
-        os.environ["GST_DEBUG"] = "GVA_common:2,gvaposturedetect:4,gvareid:4,gvaroifilter:4"
+        os.environ["GST_DEBUG"] = (
+            "GVA_common:2,gvaposturedetect:4,gvareid:4,gvaroifilter:4"
+        )
         os.environ["GST_PLUGIN_FEATURE_RANK"] = "d3d11h264dec:max,d3d11h265dec:max"
 
     def _get_model_path(self, model_key: str) -> str:
@@ -131,9 +133,7 @@ class VideoAnalyticsPipelineService:
         else:
             raise ValueError(f"Unknown input type: {input_type}")
 
-    def _get_rtsp_sink_elements(
-        self, rtsp_url: str, pipeline_name: str
-    ) -> List[str]:
+    def _get_rtsp_sink_elements(self, rtsp_url: str, pipeline_name: str) -> List[str]:
         """Get RTSP sink elements for pushing to RTSP server"""
         return [
             "mfh264enc",
@@ -146,7 +146,7 @@ class VideoAnalyticsPipelineService:
             "!",
             "rtspclientsink",
             f"location={rtsp_url}/{pipeline_name}",
-            "protocols=udp"
+            "protocols=udp",
         ]
 
     def _check_redistribute_latency(self, log_file: Path) -> bool:
@@ -313,7 +313,9 @@ class VideoAnalyticsPipelineService:
             self.logger.error(f"Failed to launch pipeline '{pipeline_name}': {e}")
             return False
 
-    def _build_pipeline_front(self, source: str, options: PipelineOptions, input_type: str) -> List[str]:
+    def _build_pipeline_front(
+        self, source: str, options: PipelineOptions, input_type: str
+    ) -> List[str]:
         """Build front camera pipeline (Pipeline 1)"""
         output_dir = Path(options.output_dir)
         output_dir.mkdir(exist_ok=True)
@@ -395,9 +397,7 @@ class VideoAnalyticsPipelineService:
             "!",
             "gvawatermark",
             "!",
-            *self._get_rtsp_sink_elements(
-                options.output_rtsp, "front_stream"
-            ),
+            *self._get_rtsp_sink_elements(options.output_rtsp, "front_stream"),
             # Branch 3: MobileNetv2 classification
             "t.",
             "!",
@@ -428,7 +428,9 @@ class VideoAnalyticsPipelineService:
         ]
         return pipeline
 
-    def _build_pipeline_back(self, source: str, options: PipelineOptions, input_type: str) -> List[str]:
+    def _build_pipeline_back(
+        self, source: str, options: PipelineOptions, input_type: str
+    ) -> List[str]:
         """Build back camera pipeline (Pipeline 2)"""
         output_dir = Path(options.output_dir)
         output_dir.mkdir(exist_ok=True)
@@ -474,9 +476,7 @@ class VideoAnalyticsPipelineService:
             f"file-path={output_dir.as_posix()}/back_resnet18.txt",
             "file-format=json-lines",
             "!",
-            *self._get_rtsp_sink_elements(
-                options.output_rtsp, "back_stream"
-            ),
+            *self._get_rtsp_sink_elements(options.output_rtsp, "back_stream"),
         ]
         return pipeline
 
@@ -512,9 +512,7 @@ class VideoAnalyticsPipelineService:
             "!",
             "gvawatermark",
             "!",
-            *self._get_rtsp_sink_elements(
-                options.output_rtsp, "content_stream"
-            ),
+            *self._get_rtsp_sink_elements(options.output_rtsp, "content_stream"),
         ]
         return pipeline
 
@@ -571,11 +569,17 @@ class VideoAnalyticsPipelineService:
 
             # Build pipeline based on name
             if pipeline_name == PipelineName.FRONT.value:
-                pipeline_elements = self._build_pipeline_front(source, options, input_type)
+                pipeline_elements = self._build_pipeline_front(
+                    source, options, input_type
+                )
             elif pipeline_name == PipelineName.BACK.value:
-                pipeline_elements = self._build_pipeline_back(source, options, input_type)
+                pipeline_elements = self._build_pipeline_back(
+                    source, options, input_type
+                )
             elif pipeline_name == PipelineName.CONTENT.value:
-                pipeline_elements = self._build_pipeline_content(source, options, input_type)
+                pipeline_elements = self._build_pipeline_content(
+                    source, options, input_type
+                )
             else:
                 raise ValueError(f"Unknown pipeline: {pipeline_name}")
 
@@ -607,17 +611,15 @@ class VideoAnalyticsPipelineService:
 
             # Save pipeline parameters for restart capability
             self.pipeline_params[pipeline_name] = {
-                'options': options,
-                'command': command
+                "options": options,
+                "command": command,
             }
 
             # Initialize retry count
             self.pipeline_retry_counts[pipeline_name] = 0
 
             # Launch pipeline
-            success = self._launch_pipeline_internal(
-                pipeline_name, options, command
-            )
+            success = self._launch_pipeline_internal(pipeline_name, options, command)
 
             if not success:
                 return False
@@ -630,12 +632,14 @@ class VideoAnalyticsPipelineService:
                 target=self._monitor_pipeline,
                 args=(pipeline_name,),
                 daemon=True,
-                name=f"monitor-{pipeline_name}"
+                name=f"monitor-{pipeline_name}",
             )
             monitor_thread.start()
             self.monitor_threads[pipeline_name] = monitor_thread
 
-            self.logger.info(f"Started monitoring thread for pipeline '{pipeline_name}'")
+            self.logger.info(
+                f"Started monitoring thread for pipeline '{pipeline_name}'"
+            )
 
             return True
 
@@ -736,7 +740,104 @@ class VideoAnalyticsPipelineService:
         process = self.pipelines[pipeline_name]
         return process.poll() is None
 
-    def monitor_pipeline(
+    async def monitor_pipeline_status(
+        self, check_interval: float = 2.0
+    ):
+        """
+        Monitor all pipeline processes status and yield status updates for streaming response
+
+        This async generator continuously monitors all pipeline process states and yields
+        combined status information. It does NOT restart the pipelines - that is handled by
+        the internal _monitor_pipeline thread.
+
+        Args:
+            check_interval: Seconds between status checks (default: 2.0)
+
+        Yields:
+            Dictionary with status information for all pipelines:
+            - pipelines: List of pipeline status dictionaries, each containing:
+                - pipeline_name: Name of the pipeline
+                - status: 'running', 'stopped_normal', 'stopped_error', or 'not_found'
+                - pid: Process ID (if running)
+                - message: Additional status message
+                - error: Error details (if stopped with error)
+
+        Note:
+            This is designed for streaming responses. The _monitor_pipeline thread
+            handles automatic restarts, so this function only reports status.
+        """
+        import asyncio
+
+        all_pipeline_names = ["front", "back", "content"]
+        self.logger.info(f"Starting status monitoring for all pipelines: {all_pipeline_names}")
+
+        try:
+            while True:
+                pipeline_statuses = []
+                all_stopped = True
+
+                for pipeline_name in all_pipeline_names:
+                    pipeline_name_lower = pipeline_name.lower()
+
+                    # Check if pipeline is registered
+                    if pipeline_name_lower not in self.pipelines:
+                        pipeline_statuses.append({
+                            "pipeline_name": pipeline_name,
+                            "status": "not_found",
+                            "message": f"Pipeline '{pipeline_name}' not found",
+                        })
+                        continue
+
+                    process = self.pipelines[pipeline_name_lower]
+                    return_code = process.poll()
+
+                    # Pipeline is running
+                    if return_code is None:
+                        all_stopped = False
+                        pipeline_statuses.append({
+                            "pipeline_name": pipeline_name,
+                            "status": "running",
+                            "pid": process.pid,
+                        })
+
+                    # Pipeline has stopped
+                    else:
+                        log_file = self.pipeline_logs.get(pipeline_name_lower)
+
+                        # Check if it was a normal exit
+                        if log_file and self._check_normal_exit(log_file):
+                            pipeline_statuses.append({
+                                "pipeline_name": pipeline_name,
+                                "status": "stopped_normal",
+                                "return_code": return_code,
+                                "message": "Pipeline exited normally (EOS received)",
+                            })
+                        else:
+                            # Check for errors in log
+                            error_msg = "Pipeline exited unexpectedly. Auto-restarting."
+
+                            pipeline_statuses.append({
+                                "pipeline_name": pipeline_name,
+                                "status": "stopped_error",
+                                "return_code": return_code,
+                                "message": error_msg,
+                            })
+
+                # Yield combined status
+                yield {"pipelines": pipeline_statuses}
+
+                await asyncio.sleep(check_interval)
+
+        except Exception as e:
+            self.logger.error(f"Error monitoring pipeline status: {e}")
+            yield {
+                "pipeline_name": pipeline_name,
+                "status": "error",
+                "error": str(e),
+                "message": "Monitoring error occurred",
+            }
+
+    def monitor_pipeline_result(
         self, pipeline_name: str, file_name: Optional[str] = None
     ) -> Generator[Dict, None, None]:
         """

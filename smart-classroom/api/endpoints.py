@@ -425,6 +425,37 @@ def stop_video_analytics_pipeline(
             logger.error(f"Error stopping video analytics pipelines: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/monitor-video-analytics-pipeline")
+async def monitor_video_analytics_pipeline_status(
+    x_session_id: Optional[str] = Header(None)
+):
+    """
+    Monitor all video analytics pipelines status with streaming response
+    
+    Args:
+        x_session_id: Session ID from header
+        
+    Returns:
+        Streaming response with all pipelines status updates
+    """
+    if not x_session_id:
+        raise HTTPException(
+            status_code=400, detail="Missing required header: x-session-id"
+        )
+
+    if x_session_id not in va_services:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No video analytics service found for session {x_session_id}",
+        )
+
+    service = va_services[x_session_id]
+
+    async def stream_status():
+        async for status_data in service.monitor_pipeline_status():
+            yield json.dumps(status_data) + "\n"
+
+    return StreamingResponse(stream_status(), media_type="application/json")
 
 @router.get("/class-statistics")
 def get_class_statistics(x_session_id: Optional[str] = Header(None)):
