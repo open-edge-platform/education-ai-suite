@@ -1,43 +1,54 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request, Body
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-import os
-import re
 import logging
-import json
-from tqdm import tqdm
-from pathlib import Path
-
-from pydantic import BaseModel
-from typing import Optional, Dict, Union
-
-import tempfile
-
-from content_search.minio_wrapper.minio_client import MinioStore
-from content_search.file_ingest_and_retrieve.indexer import Indexer
-from content_search.file_ingest_and_retrieve.retriever import ChromaRetriever
-from utils.config_loader import config
+import warnings
 
 logging.basicConfig(
     level=logging.INFO,
     format="[%(levelname)s] %(asctime)s.%(msecs)03d [%(name)s]: %(message)s",
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True,
 )
-logger = logging.getLogger("visual_data_service")
-
-# Suppress noisy third-party loggers
 for _noisy in [
     "unstructured", "unstructured_inference", "detectron2",
     "transformers", "urllib3", "httpx", "httpcore",
     "opentelemetry", "PIL", "chromadb", "llama_index",
     "multimodal_embedding_serving", "sentence_transformers",
-    "huggingface_hub", "filelock", "optimum", "transformers",
-    "pdfminer",
+    "huggingface_hub", "filelock", "optimum",
+    "pdfminer", "torch", "torch.jit", "timm",
 ]:
     logging.getLogger(_noisy).setLevel(logging.WARNING)
+warnings.filterwarnings("ignore", category=FutureWarning, module="timm")
+
+from fastapi import FastAPI, HTTPException, Body
+from fastapi.responses import JSONResponse
+import os
+
+from pydantic import BaseModel, field_validator
+from typing import Optional, Dict, Union
+
+import tempfile
+
+from content_search.providers.minio_wrapper.minio_client import MinioStore
+from content_search.providers.file_ingest_and_retrieve.indexer import Indexer
+from content_search.providers.file_ingest_and_retrieve.retriever import ChromaRetriever
+from utils.config_loader import config
+
+logger = logging.getLogger("visual_data_service")
+
+class _IngestRequestBase(BaseModel):
+    @field_validator('meta', check_fields=False)
+    @classmethod
+    def validate_meta_tags(cls, v: dict) -> dict:
+        if 'tags' in v:
+            tags = v['tags']
+            if not isinstance(tags, list):
+                raise ValueError("'tags' must be a list of strings.")
+            if not all(isinstance(t, str) for t in tags):
+                raise ValueError("All elements in 'tags' must be strings.")
+        return v
+
 
 class RetrievalRequest(BaseModel):
     query: Optional[str] = None
@@ -45,21 +56,21 @@ class RetrievalRequest(BaseModel):
     filter: Optional[Dict] = None
     max_num_results: int = 10
 
-class IngestMinioDirRequest(BaseModel):
+class IngestMinioDirRequest(_IngestRequestBase):
     bucket_name: str
     folder_path: str
     meta: dict = {}
     frame_extract_interval: int = 15
     do_detect_and_crop: bool = False
 
-class IngestMinioFileRequest(BaseModel):
+class IngestMinioFileRequest(_IngestRequestBase):
     bucket_name: str
     file_path: str
     meta: dict = {}
     frame_extract_interval: int = 15
     do_detect_and_crop: bool = False
 
-class IngestTextRequest(BaseModel):
+class IngestTextRequest(_IngestRequestBase):
     bucket_name: Optional[str] = None
     file_path: Optional[str] = None
     text: str
