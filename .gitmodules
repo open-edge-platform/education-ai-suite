@@ -1,0 +1,6 @@
+[submodule "ai-teaching-assistant/edge-ai-libraries"]
+	path = ai-teaching-assistant/edge-ai-libraries
+	url = https://github.com/open-edge-platform/edge-ai-libraries.git
+[submodule "ai-teaching-assistant/voice-enabled-interactions"]
+	path = ai-teaching-assistant/voice-enabled-interactions
+	url = https://github.com/intel-retail/voice-enabled-interactions.git
