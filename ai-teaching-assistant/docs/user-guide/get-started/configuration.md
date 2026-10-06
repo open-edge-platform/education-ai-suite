@@ -11,8 +11,8 @@ This guide documents where to change each type.
 ## 1. Launcher-Level Environment Variables
 
 The
-[.env](https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/ai-teaching-assistant/.env) file is loaded by
-[start_ata.ps1](https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/ai-teaching-assistant/start_ata.ps1)
+[.env](https://github.com/open-edge-platform/education-ai-suite/blob/main/ai-teaching-assistant/.env) file is loaded by
+[start_ata.ps1](https://github.com/open-edge-platform/education-ai-suite/blob/main/ai-teaching-assistant/start_ata.ps1)
 
 Typical variables:
 
@@ -71,11 +71,11 @@ The React UI sends stream session options through
 - `silence_threshold`
 
 Defaults are defined in
-[assistant-react-ui/src/config.ts](https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/ai-teaching-assistant/assistant-react-ui/src/config.ts)
+[assistant-react-ui/src/config.ts](https://github.com/open-edge-platform/education-ai-suite/blob/main/ai-teaching-assistant/assistant-react-ui/src/config.ts)
 
 ## UI Proxy Configuration
 
-The `ai-teaching-assistant ui` reverse-proxy routes are configured in [ata_ui_server.py](https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/ai-teaching-assistant/ata_ui_server.py).
+The `ai-teaching-assistant ui` reverse-proxy routes are configured in [ata_ui_server.py](https://github.com/open-edge-platform/education-ai-suite/blob/main/ai-teaching-assistant/ata_ui_server.py).
 
 Below are environment variables for proxy:
 
