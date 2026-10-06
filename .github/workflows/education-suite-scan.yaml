@@ -16,7 +16,7 @@ on:
     branches:
       - main
     paths:
-      - 'education-ai-suite/**'
+      - '**'
 
 jobs:
    
@@ -37,7 +37,7 @@ jobs:
           scan-scope: "all"  
           severity: "HIGH,CRITICAL" 
           format: "json"
-          scan_target: "education-ai-suite/"
+          scan_target: "."
           report_suffix: "-fs-education-ai-suite-trivy"
 
       - name: Run trivy Scan - education-suite (SPDX SBOM)
@@ -46,7 +46,7 @@ jobs:
         with:
           scan_type: "fs"  
           scan-scope: "all"
-          scan_target: "education-ai-suite/"  
+          scan_target: "."
           severity: "HIGH,CRITICAL"  
           format: "spdx-json"
           scanners: "vuln"
@@ -75,7 +75,7 @@ jobs:
           scan-scope: "all"  
           output-format: "txt" 
           fail-on-findings: "false"
-          paths: "education-ai-suite/smart-classroom"
+          paths: "smart-classroom"
           report_suffix: "-bandit-education-ai-suite"
 
       - name: Upload Report
