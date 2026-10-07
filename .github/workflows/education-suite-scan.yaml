@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
       
       - name: Run Trivy Filesystem Scan
-        uses: open-edge-platform/orch-ci/.github/actions/security/trivy@a416220a0f87725196093a638e0186286ac4a953
+        uses: open-edge-platform/orch-ci/.github/actions/security/trivy@aecadde81d72ac3e3ef5a52277539600621d3cb8
         id: trivy-fs
         with:
           scan_type: "fs"  
@@ -41,7 +41,7 @@ jobs:
           report_suffix: "-fs-education-ai-suite-trivy"
 
       - name: Run trivy Scan - education-suite (SPDX SBOM)
-        uses: open-edge-platform/orch-ci/.github/actions/security/trivy@a416220a0f87725196093a638e0186286ac4a953
+        uses: open-edge-platform/orch-ci/.github/actions/security/trivy@aecadde81d72ac3e3ef5a52277539600621d3cb8
         id: videosummary-frontend-spdx
         with:
           scan_type: "fs"  
@@ -54,7 +54,7 @@ jobs:
           generate_sbom: "true"
            
       - name: Upload Report
-        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: trivy-report-video-summary
           path: security-results/trivy*
@@ -69,7 +69,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Bandit Scan
-        uses: open-edge-platform/orch-ci/.github/actions/security/bandit@27276444a9bcf247a27369406686b689933bd1ff
+        uses: open-edge-platform/orch-ci/.github/actions/security/bandit@aecadde81d72ac3e3ef5a52277539600621d3cb8
         id: bandit
         with:
           scan-scope: "all"  
@@ -79,7 +79,7 @@ jobs:
           report_suffix: "-bandit-education-ai-suite"
 
       - name: Upload Report
-        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: bandit-education-ai-suite
           path: bandit-report-*.txt    
