@@ -38,7 +38,6 @@ curl http://127.0.0.1:9000/health
 ### 2. text-to-speech (Port 8011)
 
 ```powershell
-
 cd edge-ai-libraries\microservices\text-to-speech
 .\venv\Scripts\python.exe main.py
 ```
