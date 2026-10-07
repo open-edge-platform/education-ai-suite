@@ -344,7 +344,7 @@ python grading_service.py
 > The backend and Content Search terminals stay busy serving requests.
 
 ```bash
-cd <path-to>\edge-ai-suites\education-ai-suite\smart-classroom\ui
+cd <path-to>\education-ai-suite\smart-classroom\ui
 npm install
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
@@ -356,7 +356,7 @@ This is an additive layer: it connects to the same backend services,
 so those must be running as in the previous steps.
 
 ```bash
-cd <path-to>\edge-ai-suites\education-ai-suite\smart-classroom\ui
+cd <path-to>\education-ai-suite\smart-classroom\ui
 npm install
 
 # Development: opens the desktop window and starts the dev server on 5173
