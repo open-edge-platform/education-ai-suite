@@ -430,7 +430,7 @@ If you changed the port, adjust the URL accordingly.
   1. Delete the models directory:
 
      ```text
-     edge-ai-suites/education-ai-suite/smart-classroom/models
+     education-ai-suite/smart-classroom/models
      ```
 
   2. Rerun only Step 1, option D. If the virtual environment already exists, rerun the required pip commands.
@@ -445,7 +445,7 @@ If you changed the port, adjust the URL accordingly.
   Either openvino_tokenizer.xml was not provided or it was not loaded correctly. Tokenizer::encode is not available
   ```
 
-  Delete the models folder from `edge-ai-suites/education-ai-suite/smart-classroom/models` and try again.
+  Delete the models folder from `education-ai-suite/smart-classroom/models` and try again.
 
 - If you see below error while running dls setup script,
 
