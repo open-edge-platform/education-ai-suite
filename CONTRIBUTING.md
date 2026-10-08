@@ -1,7 +1,6 @@
+# Education AI Suite Contributor Guide
 
-# Edge-AI-Suites Contributor Guide
-
-The following are guidelines for contributing to the Edge AI Suites project, including the code of conduct, submitting issues, and contributing code.
+The following are guidelines for contributing to the Education AI Suite, including the code of conduct, submitting issues, and contributing code.
 
 ## Table of Contents
 
@@ -33,19 +32,18 @@ applications.
 ```
 
 Note that you do not need to clone the entire repository. You can clone just the portion you
-are interested with. To see how ti do it, check out the
+are interested with. To see how to do it, check out the
 [Contributing to Open Edge Platform](https://docs.openedgeplatform.intel.com/canonical/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning)
 article.
-
 
 ## How to Contribute
 
 ### Contribute Code Changes
 
-If you want to help improve Edge AI Suites, choose one of the issues reported in [`GitHub Issues`](https://github.com/open-edge-platform/education-ai-suite/issues) and create a [`Pull Request`](https://github.com/open-edge-platform/education-ai-suite/pulls) to address it.
+If you want to help improve the Education AI Suite, choose one of the issues reported in [`GitHub Issues`](https://github.com/open-edge-platform/education-ai-suite/issues) and create a [`Pull Request`](https://github.com/open-edge-platform/education-ai-suite/pulls) to address it.
 
 > [!NOTE]
-> Please check that the change hasn't been implemented before you start working on it.
+> Please check that the change has not been implemented before you start working on it.
 
 ### Improve Documentation
 
@@ -69,12 +67,12 @@ understand and resolve the issue quickly:
 
 Intel welcomes suggestions for new features and improvements. Follow these steps to make a suggestion:
 
-- Check if there's already a similar suggestion in [`Github Issues`](https://github.com/open-edge-platform/education-ai-suite/issues).
+-- Check if there is already a similar suggestion in [`Github Issues`](https://github.com/open-edge-platform/education-ai-suite/issues).
 - If not, open a new issue and provide the following information:
-   - A clear and descriptive title
-   - A detailed description of the enhancement
-   - Use cases and benefits
-   - Any additional context or references
+  - A clear and descriptive title
+  - A detailed description of the enhancement
+  - Use cases and benefits
+  - Any additional context or references
 
 ### Submit Pull Requests
 
@@ -93,6 +91,7 @@ You can expect a merge once your changes are validated with automatic tests and 
 ### Coding Standards
 
 Consistently following coding standards helps maintain readability and quality. Adhere to the following conventions:
+
 - Language-specific style guides
 - Properly formatted code with tools like `Prettier` and `ESLint`
 - Meaningful variable and function names
@@ -101,6 +100,7 @@ Consistently following coding standards helps maintain readability and quality. 
 ### Commit Messages and Pull Requests
 
 Clear and informative commit messages make it easier to understand the history of the project. Follow these guidelines:
+
 - Use the present tense (e.g., "Add feature" not "Added feature")
 - Capitalize the first letter
 - Keep the message concise, ideally under 50 characters
@@ -111,6 +111,7 @@ pull request.
 ### Testing
 
 Thorough testing is crucial to maintain project stability. Ensure that you:
+
 - Write unit tests for new and existing code
 - Use testing frameworks and tools
 - Run tests locally before submitting a pull request
