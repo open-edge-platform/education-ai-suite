@@ -429,7 +429,7 @@ Write-Host "------------------------------" -ForegroundColor Green
 Write-Host ""
 
 $systemRequirementsDocPath = Join-Path $PSScriptRoot "docs\user-guide\get-started\system-requirements.md"
-$systemRequirementsDocUrl = "https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/smart-classroom/docs/user-guide/get-started/system-requirements.md#software-and-hardware-requirements"
+$systemRequirementsDocUrl = "https://github.com/open-edge-platform/education-ai-suite/blob/main/smart-classroom/docs/user-guide/get-started/system-requirements.md#software-and-hardware-requirements"
 
 function Show-SystemRequirementsFromDoc {
     param(
@@ -1674,7 +1674,7 @@ Write-Host ""
 if ($diarizationWasEnabled -and (Test-DiarizationNeedsHfToken -Content $configContent) -and -not (Test-HfTokenSet -Content $configContent)) {
     Write-Host "  [WARNING] Diarization is enabled but hf_token is None. It needs to be filled in." -ForegroundColor Red
     Write-Host "            See the setup guide:" -ForegroundColor Red
-    Write-Host "            https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/smart-classroom/docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional" -ForegroundColor Red
+    Write-Host "            https://github.com/open-edge-platform/education-ai-suite/blob/main/smart-classroom/docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional" -ForegroundColor Red
     Write-Host ""
 }
 
@@ -1957,7 +1957,7 @@ if ($diarizationIsEnabled -and $diarizationNeedsHfToken) {
         Write-Host "  [ATTENTION] Before Speaker Diarization will work, you must request model access and create an access token on" -ForegroundColor Yellow
         Write-Host "    https://huggingface.co/$diarizationModelName " -ForegroundColor Yellow
         Write-Host "  More details can be found in the setup guide:" -ForegroundColor Yellow
-        Write-Host "    https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/smart-classroom/docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional" -ForegroundColor Yellow
+        Write-Host "    https://github.com/open-edge-platform/education-ai-suite/blob/main/smart-classroom/docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional" -ForegroundColor Yellow
         Write-Host ""
         if (-not $Silent) {
             Read-Host "  Press Enter once you have submitted/been granted the access request"

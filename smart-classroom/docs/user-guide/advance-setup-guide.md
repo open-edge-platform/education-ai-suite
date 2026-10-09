@@ -27,10 +27,8 @@ If you want to clone a specific release branch, replace `main` with the desired 
 To learn more on partial cloning, check the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
 
 ```bash
-  git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/edge-ai-suites.git
-  cd edge-ai-suites
-  git sparse-checkout set education-ai-suite
-  cd education-ai-suite
+git clone --filter=blob:none --branch main https://github.com/open-edge-platform/education-ai-suite.git
+cd education-ai-suite/smart-classroom
 ```
 
 ### D. Install Python dependencies
@@ -346,7 +344,7 @@ python grading_service.py
 > The backend and Content Search terminals stay busy serving requests.
 
 ```bash
-cd <path-to>\edge-ai-suites\education-ai-suite\smart-classroom\ui
+cd <path-to>\education-ai-suite\smart-classroom\ui
 npm install
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
@@ -358,7 +356,7 @@ This is an additive layer: it connects to the same backend services,
 so those must be running as in the previous steps.
 
 ```bash
-cd <path-to>\edge-ai-suites\education-ai-suite\smart-classroom\ui
+cd <path-to>\education-ai-suite\smart-classroom\ui
 npm install
 
 # Development: opens the desktop window and starts the dev server on 5173
@@ -432,7 +430,7 @@ If you changed the port, adjust the URL accordingly.
   1. Delete the models directory:
 
      ```text
-     edge-ai-suites/education-ai-suite/smart-classroom/models
+     education-ai-suite/smart-classroom/models
      ```
 
   2. Rerun only Step 1, option D. If the virtual environment already exists, rerun the required pip commands.
@@ -447,7 +445,7 @@ If you changed the port, adjust the URL accordingly.
   Either openvino_tokenizer.xml was not provided or it was not loaded correctly. Tokenizer::encode is not available
   ```
 
-  Delete the models folder from `edge-ai-suites/education-ai-suite/smart-classroom/models` and try again.
+  Delete the models folder from `education-ai-suite/smart-classroom/models` and try again.
 
 - If you see below error while running dls setup script,
 

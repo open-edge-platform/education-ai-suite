@@ -2,10 +2,10 @@
 
 <!--hide_directive
 <div class="component_card_widget">
-  <a class="icon_github" href="https://github.com/open-edge-platform/edge-ai-suites/tree/main/education-ai-suite/ai-teaching-assistant">
+  <a class="icon_github" href="https://github.com/open-edge-platform/education-ai-suite/tree/main/ai-teaching-assistant">
      GitHub
   </a>
-  <a class="icon_document" href="https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/ai-teaching-assistant/README.md">
+  <a class="icon_document" href="https://github.com/open-edge-platform/education-ai-suite/blob/main/ai-teaching-assistant/README.md">
      Readme
   </a>
 </div>
@@ -49,10 +49,10 @@ For full setup steps, use [Get Started](./get-started.md).
 High-level flow:
 
 ```powershell
-git clone --filter=blob:none --sparse https://github.com/open-edge-platform/edge-ai-suites.git -b main;
-cd edge-ai-suites;
-git sparse-checkout set education-ai-suite/ai-teaching-assistant;
-cd education-ai-suite/ai-teaching-assistant;
+git clone --filter=blob:none --sparse -b main https://github.com/open-edge-platform/education-ai-suite.git;
+cd education-ai-suite;
+git sparse-checkout set ai-teaching-assistant;
+cd ai-teaching-assistant;
 .\setup_windows.ps1;
 .\start_ata.ps1
 ```
