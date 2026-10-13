@@ -1,7 +1,5 @@
 # Smart Classroom VLM/LLM Serving Design
 
-**Status:** Proposed design for stakeholder review. New model/accelerator combinations require qualification before release.
-
 ## 1. Key Features and Compatibility
 
 The upgrade expands model choice without changing how classroom applications access inference.
@@ -36,8 +34,6 @@ A source checkpoint is not runtime-ready IR. Each accelerated profile must provi
 Separate startup preparation from request handling. A shared helper prepares files once; the model owner loads and warms them before serving classroom requests.
 
 ![Startup and request flow for existing and new models](assets/vlm-llm-serving-overview.svg)
-
-The diagram uses a fixed **16:9 canvas, 1600 x 900**, matching a widescreen PowerPoint slide (13.333 x 7.5 inches). Its SVG format scales without losing clarity; preserve the aspect ratio when inserting it into a slide.
 
 Model upgrades do not require a new deployment topology. The owner may be the application, a supervised worker or an independently operated server. Workers reuse prepared artifacts on restart. External clients do not download or manage the server's model files; the server reports its actual model and acceleration state.
 
@@ -139,8 +135,6 @@ Resolve defaults before download, then validate the complete target/method/sourc
 
 First-run profiles use website sources. `draft_source: local` requires a non-empty `draft_model` directory and a null `draft_revision`; it validates existing IR and never silently downloads a replacement when missing. Resolve relative local directories from the Smart Classroom root. `draft_source: target` is valid only with MTP and requires null `draft_model` and `draft_revision`. A source override or revision cannot bypass compatibility checks, enable arbitrary URLs or execute repository code. The manifest records resolved settings and actual artifact versions, including defaults.
 
-**Do not add duplicate controls.** Automatic preparation still needs no `download` block. Target revisions, conversion recipes and dependency pins remain managed by the catalog. A `serving` block is not required to change models. Preserve feature flags, ASR/OCR/embedding settings, `content_search.vlm` and `grading.provider.vlm_provider`. Keep `models.model_hub` for target source selection; `draft_source` explicitly selects only the drafter source. Quote `"off"` and `"on"` in YAML to avoid boolean coercion. Older configurations and mode-only speculative configurations remain valid through defaults.
-
 Tool definitions and selection are per-request API fields (`tools`, `tool_choice`, `parallel_tool_calls`), not new YAML settings or a separate service. Record tool/template capability in the model profile so unsupported requests fail before streaming; no `enable_tool_call` configuration flag is needed.
 
 ## 5. Model Preparation
@@ -204,5 +198,3 @@ Health reports the target, tool-call capability, requested/effective method, dra
 | Performance | Repeated plain/accelerated comparisons: answer quality, time to first token, tokens/s, end-to-end p50/p95 latency and peak memory. Separate download/conversion/compile time from inference. |
 
 Qualify the three new model/precision combinations on ARL and PTL with plain and paired DFlash/DFlash2 decoding: twelve configurations, plus older-model regression coverage. Include tool-call round trips in every tool-capable combination. Add a separate MTP case for every target/precision/platform that advertises a qualified bundled head; do not infer MTP support from DFlash2 results. CPU qualification is separate. Record artifact/runtime/driver versions and workload settings; a model name alone is not evidence of compatibility.
-
-**Stakeholder approval:** retain existing defaults, require port-8000 tool-call qualification for the new Qwen profiles, make acceleration opt-in, and promote each method/profile only after agreed quality, latency and memory thresholds pass. Publish tested artifacts, conversion recipes and runtime versions before declaring DFlash2 or MTP support; no universal speedup is promised.
