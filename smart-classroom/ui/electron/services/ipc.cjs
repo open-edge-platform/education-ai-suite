@@ -75,14 +75,25 @@ function register({ manager, logs, setup, getWindow }) {
   // Dry run for the settings screen, so it can gate Save before the write is
   // attempted. apply() re-checks; this is convenience, not the enforcement.
   handle('config:validate', (changes) => config.validate(changes));
-  handle('config:apply', (changes) => config.apply(changes));
+  handle('config:apply', (changes) => {
+    const result = config.apply(changes);
+    // A feature toggle can add or drop setup steps (grading's environment and
+    // model); check the new ones now rather than leave them at "Not checked".
+    setup.checkNewlyEnabled().catch(() => { });
+    return result;
+  });
   handle('config:reveal', () => {
     shell.showItemInFolder(paths.configFile());
     return paths.configFile();
   });
 
   // Setup steps are named by id only; the runner owns every command line.
-  handle('setup:list', () => ({ sections: setup.sections(), steps: setup.snapshot() }));
+  handle('setup:list', () => {
+    // config.yaml is hand-editable too, so a feature may have been switched on
+    // behind the app's back. Results arrive through setup:changed.
+    setup.checkNewlyEnabled().catch(() => { });
+    return { sections: setup.sections(), steps: setup.snapshot() };
+  });
   handle('setup:check', () => setup.checkAll());
   handle('setup:run', async (stepId, actionId) => {
     // Validates both ids and throws before anything runs.
