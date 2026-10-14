@@ -1,6 +1,6 @@
 # Context Bench Design
 
-**Status:** Design for porting the referenced `context_bench` tool into this checkout. The contracts below describe the intended implementation; reference behavior and required porting changes are distinguished explicitly. Local model/runtime qualification and performance results remain pending.
+**Status:** Implementation design for `smart-classroom/components/context_bench/`. Reference behavior and required porting changes are distinguished below; local qualification and performance results remain pending.
 
 Companion document: [vlm-llm-serving-design.md](vlm-llm-serving-design.md).
 
@@ -20,11 +20,11 @@ Implement `context_bench` as an offline, text-only OpenVINO LLM benchmarking too
 
 Porting references are pinned to commit `8e73a032443f8be6d0cd273c353d79c94c0a7c7a`: [source](https://github.com/tingjiec/edge-ai-suites/tree/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/components/llm/context_bench), [design analysis](https://github.com/tingjiec/edge-ai-suites/blob/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/docs/dev-guide/context-bench/context_bench_design.md), and [usage guide](https://github.com/tingjiec/edge-ai-suites/blob/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/docs/dev-guide/context-bench/context_bench_guide.md). Use the pinned code/YAML to resolve stale reference prose; historical timings are not qualification results for this port.
 
-The design analysis explains module responsibilities and measurement rationale; the user guide supplies CLI workflows and report interpretation. The executable contracts are in `benchmark.py`, `trial_runner.py`, `context_builder.py`, `metrics.py`, the task/scoring modules and model-specific YAML. Do not copy historical defaults from prose when the pinned code or configuration differs.
+The source URL intentionally retains the upstream directory layout. Local package paths and commands below use the new location; the module responsibilities remain unchanged.
 
 ### Required Porting Changes
 
-Retain the reference's profile matrices, spawned trials, one load per case, full-budget warmup, optional accuracy suites and median-based comparisons. The following differences are intentional requirements for this port, not features claimed for the reference:
+Retain the reference's benchmark methods. The following are deliberate porting changes, not existing upstream features:
 
 | Area | Reference behavior | Required port behavior |
 | --- | --- | --- |
@@ -52,7 +52,9 @@ Capacity-search/bisection, synthetic dry-run PASS results, automatic production 
 
 ### Module Boundaries
 
-Implement the package under `smart-classroom/components/llm/context_bench/` and tests under `smart-classroom/components/tests/`. This document defines the port; the referenced user guide defines the usage workflows to retain. Keep runtime imports lazy so configuration inspection and pure unit tests need neither OpenVINO nor model files.
+Keep all benchmark modules, model-specific YAML and PowerShell launchers in `smart-classroom/components/context_bench/`; tests remain in `smart-classroom/components/tests/`. Use `components.context_bench` for absolute imports and module entry points, or package-relative imports internally. Keep inference imports lazy and the package initializer lightweight so planning and pure tests need no OpenVINO or model files.
+
+When adapting the reference, update package imports, test imports, launcher commands and path-derived defaults together. From a module in this package, the Smart Classroom root is `Path(__file__).resolve().parents[2]`; from a colocated PowerShell launcher it is two directories above `$PSScriptRoot`. Resolve the default `config_qwen3.6_35b.yaml` beside the module, not from the caller's directory. Keep the backend environment at the root's existing sibling `smartclassroom/`; moving this package must not change model, cache or result locations.
 
 | Module | Responsibility and implementation entry points |
 | --- | --- |
@@ -65,7 +67,7 @@ Implement the package under `smart-classroom/components/llm/context_bench/` and 
 | `accuracy.py` | Build probe sets, dispatch scoring, group results and pair generated answers with the selected baseline. Score in the parent after child exit, outside resource sampling. |
 | `wwb_adapter.py` | Optional, version-qualified who_what_benchmark semantic-similarity adapter. Missing package/model or unsupported result shape makes only similarity unavailable. |
 | `dflash_draft_head.py` | Optional explicit preparation utility for a derived draft with its own quantized output head. Never run it implicitly inside a timed benchmark or overwrite serving artifacts. |
-| Model-specific YAML and PowerShell launchers | Keep benchmark settings separate from application YAML. Provide model/precision profiles and the existing `run_benchmark.ps1` / `setup_env.ps1` entry-point pattern. |
+| Model-specific YAML and PowerShell launchers | Keep benchmark settings separate from application YAML. Colocate `run_benchmark.ps1` and `setup_env.ps1` with the package; forward arguments and Python exit status. Setup installs reviewed pinned dependencies explicitly, never during planning/trials or by weakening TLS/execution policy. |
 
 ### Control Flow
 
@@ -88,7 +90,7 @@ flowchart TD
   Reports -->|next case| Preflight
 ```
 
-Run cases serially; profiles never share a live pipeline. A failed case leaves earlier evidence intact, and another case may start only after owned-child cleanup is confirmed. Parent-side scoring and report generation remain outside inference memory windows; optional semantic scoring waits until all inference cases finish.
+Run cases serially; profiles never share a live pipeline. Detailed synchronization and cleanup rules are in Section 5, and scoring boundaries in Section 6.
 
 ## 3. Configuration and CLI Contract
 
@@ -125,7 +127,7 @@ Normalize either speculative section to `{enabled, strategy, model, num_assistan
 
 ### Example Configuration
 
-This reduced Qwen3.6 example is the parser/plan acceptance fixture. Paths identify already-prepared artifacts; 59 GiB is an example GPU budget, not a portable default. It deliberately differs from the pinned configuration: two profiles instead of the full k sweep, the stock rather than derived-int4-head draft, a zero-second gap for sustained load, an 80% RAM budget and reduced accuracy suites with optional similarity disabled. `record_text` is a port addition. None of these settings imply measured performance.
+The following parser/plan fixture uses two profiles, a stock draft, sustained load (zero gap), an 80% RAM budget and reduced accuracy suites without semantic similarity. Paths identify prepared artifacts; the 59 GiB GPU budget is machine-specific. Section 10 lists the full reference matrices. These example settings are not performance results.
 
 ```yaml
 model:
@@ -189,7 +191,7 @@ accuracy:
 
 ### Plan Inspection and CLI
 
-`--list-profiles` prints the validated configuration plan, redacted model locations, requested pipeline mode, budgets and iteration/probe counts. Apply Section 9's path policy to this output too. Mark artifact-dependent cache sizing and token counts as unresolved; planning cannot certify runtime support or memory feasibility. It must not import inference dependencies, download, load models or create result files. The example has **14 throughput cases**: two profiles times seven context/task pairs (three standalone and four at 8K). With `--accuracy`, it has two 8K cases of ten probes each. An empty filtered matrix is a configuration error.
+`--list-profiles` prints settings, redacted model locations, requested pipeline mode, budgets and case/probe counts without inference imports, downloads or file creation. Artifact-dependent cache/token values remain unresolved; apply Section 9's path policy. The example yields **14 throughput cases** (two profiles times seven context/task pairs) or **two accuracy cases of ten probes** at 8K. An empty filtered matrix is a configuration error.
 
 Preserve CLI options `--config`, `--models`, `--contexts`, `--profiles`, `--device`, `--weight-format`, `--output-tokens`, `--warmup`, `--iterations`, `--iteration-gap`, `--throughput-task`, `--output-dir`, the property overrides, candidate-count aliases, `--accuracy`, `--accuracy-suites`, `--accuracy-tasks`, `--accuracy-depths` and `--accuracy-samples`. A weight-format override changes the label and derived path, not IR in an explicit `model_dirs` directory; validate its actual precision.
 
@@ -211,7 +213,7 @@ Read model architecture from `config.json`, including nested `text_config` for V
 | Hybrid DFlash scheduler | Use one live sequence for the supplied profiles. Require sufficient linear-attention rows: `num_linear_attention_blocks >= max_num_seqs + k + 1`; 17 covers the reference sweep through k=15. Keep the same scheduler reservation on the plain baseline. |
 | All speculative cases | Target/draft use the same CPU/GPU device and a paged scheduler with `max_num_batched_tokens >= k + 1` for positive integer k. Use greedy generation, one returned sequence, static `assistant_confidence_threshold = 0.0`, prefix caching disabled and a qualified runtime API. No sampling, fallback or mechanism substitution. |
 
-The reference calls `ov_genai.draft_model(draft_directory, device)` for both mechanisms: MTP uses the target directory, DFlash the external draft directory. Keep this dispatch in `_load_pipeline`. DFlash2 is **not implemented by the referenced DFlash adapter**; add it only after the separate exporter/runtime qualification required by the serving design's [model profiles](vlm-llm-serving-design.md#2-model-profiles) and [generation policy](vlm-llm-serving-design.md#6-generation-and-failure-policy), not by relabeling a DFlash case.
+Keep draft dispatch in `_load_pipeline`: `ov_genai.draft_model(draft_directory, device)` uses the target directory for MTP and the external directory for DFlash. The reference has no DFlash2 adapter; its separate exporter/runtime qualification follows the serving design's [model profiles](vlm-llm-serving-design.md#2-model-profiles) and [generation policy](vlm-llm-serving-design.md#6-generation-and-failure-policy).
 
 ### Artifact Safety
 
@@ -270,7 +272,7 @@ Domain prompts are representative fixtures, not the complete HumanEval, GSM8K or
 
 For positive-context throughput, construct a synthetic transcript and measure the complete native chat-template rendering, including task overhead and generation prefix. Adjust the filler budget and re-render/tokenize for at most five correction passes. Require `configured_tokens == HF_tokens == OpenVINO_tokens`; fail if exact sizing cannot converge. Reuse the final prompt across iterations. For `LLMPipeline`, pass the counted `TokenizedInputs`; for `VLMPipeline`, pass the validated string with automatic chat templating disabled. Each candidate prompt receives one template application, not a template nested inside another.
 
-Context zero is a sentinel, not a zero-token request: run `code`, `math` and `chat` using their standalone framing, require HF/OpenVINO counts to agree, and report the actual positive input length. Skip summary tasks and all accuracy suites at zero. At positive context, domain tasks follow the transcript. Keep task/prompt hashes in comparisons: changing the task changes draft acceptance and makes a different workload.
+At context zero, apply the workload table's standalone/skip rules and skip accuracy suites. Require HF/OpenVINO counts to agree and report the actual positive prompt length. At positive context, domain tasks follow the transcript. Record task/prompt hashes so different workloads cannot be treated as matched measurements.
 
 Only `classroom_summary` may read application settings: resolve language, summary mode and the template through `load_prompt("summarizer", language, mode)`, then freeze the request and its hashes. Match the current summarizer's request/thinking policy without instantiating its component or ModelManager; do not copy the branch's legacy inline prompt layout or `/no_think` convention. Use synthetic transcript content and fail if the requested template cannot be resolved.
 
@@ -289,9 +291,9 @@ Unlike throughput, probes allow at most **16 tokens** deviation from the request
 
 ### Scoring and Interpretation
 
-Pair fidelity by model/artifact, context, prompt hash, suite/task/depth/sample and seed, independent of case order; update idempotently when the baseline completes. A missing/failed baseline leaves fidelity unavailable. Use SQuAD-style article removal only for retrieval scoring; lexical overlap must preserve articles. Use model tokens for divergence or label a word fallback explicitly, without comparing the two units. Run optional WWB scoring after all inference cases so its retained resources cannot affect later measurements; missing WWB disables only similarity.
+Pair fidelity by model/artifact, context, prompt hash, suite/task/depth/sample and seed, independent of case order; update idempotently when the baseline completes. A missing/failed baseline leaves fidelity unavailable. Use SQuAD-style article removal only for retrieval scoring; lexical overlap must preserve articles. Use model tokens for divergence or label a word fallback explicitly, without comparing the two units. Run optional WWB scoring after all inference cases so its retained resources cannot affect later measurements; missing WWB disables only similarity. Optional package/model acquisition belongs to explicit setup, not scoring.
 
-These synthetic retrieval scores are not published RULER dataset scores, and similarity to a baseline is not absolute classroom-summary quality. Generated code is benchmark output, never executed. Throughput success alone is not accuracy success; fidelity self-comparison is a sanity check, not evidence of model quality.
+Synthetic retrieval scores are not published RULER dataset scores. Fidelity measures drift from the baseline, not absolute summary quality; a self-comparison is only a sanity check.
 
 ## 7. Iteration Metrics and Comparison Rules
 
@@ -416,14 +418,14 @@ Choose status in this order: explicit runtime/artifact failure; no measured outp
 | Qwen3.8-27B | INT8; `paged_min` versus MTP k=1/2/3/4/6; 8K context; default `summary_2s`; 64-token ceiling; default zero gap. | Provide separately identified INT4/INT8 artifacts where required by the serving design. Do not infer DFlash2 support from MTP. |
 | Qwen3.5-9B | No dedicated configuration in this pinned directory. | Add INT4/INT8 plain benchmark profiles; speculative support requires independent qualification. |
 
-Both pinned model configurations use one warmup and three measured iterations; the reduced Section 3 fixture is deliberately not a copy of either full matrix. A precision override cannot convert existing IR. Serving qualification remains governed by the companion [model profiles](vlm-llm-serving-design.md#2-model-profiles).
+Both pinned configurations use one warmup and three measured iterations. Serving qualification follows the companion [model profiles](vlm-llm-serving-design.md#2-model-profiles).
 
 ### Implementation Order
 
-1. Port the pure settings/profile/prompt/metrics/scoring modules and five existing test families from the pinned reference. Keep public module entry points; isolate inference/WWB imports. Add the configuration and record contracts above before running models.
+1. Port the pure modules and five test families into the Section 2 layout. Update imports and launchers to `components.context_bench`, and verify root/config/environment path resolution before loading models.
 2. Port the plain child runner and parent sampler/supervisor. Implement lifecycle, null-metric, coverage, structured-output and exit-code corrections first; validate them with fake queues, clocks, samplers and processes.
 3. Add the model/precision configurations listed above with explicit artifact identities and qualified runtime dependencies.
-4. Add qualified MTP/DFlash adapters and explicit derived-artifact preparation. Keep Qwen3.5 plain unless a separate speculative profile is qualified. Do not port DFlash2 as working functionality from a source that lacks it.
+4. Add MTP/DFlash adapters and derived-artifact preparation under the Section 4 compatibility and safety rules.
 5. Add parent-side accuracy and optional WWB scoring, text-policy controls, launcher/docs, then run short hardware smoke tests before repeated and long-context matrices. Do not change the main application or its defaults as part of the benchmark port.
 
 ### Hardware-Independent Tests
@@ -433,23 +435,22 @@ Both pinned model configurations use one warmup and three measured iterations; t
 | `test_context_bench_context_builder.py` | No double templating; bounded correction passes and final-prompt reuse; exact positive-context equality; standalone context zero; too-small budget/non-convergence; VLM runtime-count mismatch; multi-insert placement and 16-token probe tolerance. |
 | `test_context_bench_kv_estimate.py` | Hybrid/full-attention counting, nested VLM config, malformed metadata, quantized KV overhead, per-sequence/verification reservations, MTP and external-draft contributions, fixed-pool preflight, infeasible/unknown auto budget and no implicit backend change. |
 | `test_context_bench_metrics.py` | Unit conversion, valid per-field runtime fallback, null/non-finite handling, EOS with zero/one/many tokens, warmup exclusion, nearest-rank percentiles, median TPOT reciprocal, AL excluding prefill, steady-pass minimums, matched-baseline filtering and missing-telemetry ranking. |
-| `test_context_bench_trial_lifecycle.py` | One load/final prompt per throughput case; full-budget warmup; fresh request state; milestone resets; event deduplication; ready/recorded acknowledgements; missing acknowledgement; delayed parent/checkpoint; partial records; terminal-result/exit race; timeout/Ctrl-C cleanup; native exit codes; sampler synchronization; atomic evidence and exit propagation. |
+| `test_context_bench_trial_lifecycle.py` | Package imports and root/config/environment resolution from the new location; CLI/launcher argument forwarding; one load/final prompt per case; full-budget warmup; fresh request state; milestone resets; event deduplication and acknowledgements; delayed parent/checkpoint; partial records; terminal-result/exit race; timeout/Ctrl-C cleanup; sampler synchronization; atomic evidence and exit propagation. |
 | `test_context_bench_accuracy.py` | Seed determinism, task/option validation, exact probe counts, truth surviving filler truncation, scorer golden cases and article handling, baseline-last ordering, prompt-hash mismatch, skipped-probe denominators, truncation flags, missing optional WWB, no generated-code execution and text redaction. |
 
 Use deterministic fixtures: 101 input tokens, five output tokens, 0.3-second generation and matched-source 100-ms TTFT yield 50-ms fallback TPOT, 20 decode tok/s, 1010 prefill tok/s and approximately 353.333 e2e tok/s. For 45 output tokens and 14 target passes, AL is `44/13`, not `45/14`. Assert the Section 3 example's case/probe counts and that planning performs no inference, service startup, downloads, remote execution or artifact writes.
 
 ### Acceptance Workflow
 
-After the port exists, use the following progression from the Smart Classroom root in the prepared benchmark environment. The smoke command checks execution only; the repeated run is the initial performance comparison, and accuracy is a separate mode.
+After the port exists, run from `smart-classroom/` in the prepared benchmark environment. The steps below cover pure tests, planning, an execution smoke test, a repeated throughput comparison and accuracy. The PowerShell entry point is `./components/context_bench/run_benchmark.ps1`, which forwards the same CLI arguments.
 
 ```powershell
 python -m unittest discover -s components/tests -p "test_context_bench_*.py"
-python -m components.llm.context_bench.benchmark --config components/llm/context_bench/config_qwen3.6_35b.yaml --list-profiles
-python -m components.llm.context_bench.benchmark --config components/llm/context_bench/config_qwen3.6_35b.yaml --profiles paged_min dflash_k7 --contexts 8000 --throughput-task math --warmup 0 --iterations 1
-python -m components.llm.context_bench.benchmark --config components/llm/context_bench/config_qwen3.6_35b.yaml --profiles paged_min dflash_k7 --contexts 8000 --throughput-task math --warmup 1 --iterations 3 --iteration-gap 0
-python -m components.llm.context_bench.benchmark --config components/llm/context_bench/config_qwen3.6_35b.yaml --profiles paged_min dflash_k7 --contexts 8000 --accuracy --accuracy-tasks niah_single fact_sheet --accuracy-depths 0.5 --accuracy-samples 1
+$benchmarkConfig = 'components/context_bench/config_qwen3.6_35b.yaml'
+python -m components.context_bench.benchmark --config $benchmarkConfig --list-profiles
+python -m components.context_bench.benchmark --config $benchmarkConfig --profiles paged_min dflash_k7 --contexts 8000 --throughput-task math --warmup 0 --iterations 1
+python -m components.context_bench.benchmark --config $benchmarkConfig --profiles paged_min dflash_k7 --contexts 8000 --throughput-task math --warmup 1 --iterations 3 --iteration-gap 0
+python -m components.context_bench.benchmark --config $benchmarkConfig --profiles paged_min dflash_k7 --contexts 8000 --accuracy --accuracy-tasks niah_single fact_sheet --accuracy-depths 0.5 --accuracy-samples 1
 ```
 
-After smoke tests, restore at least one warmup and three measured iterations, run matched profiles across the intended context/task/precision/platform matrix, and collect separate sustained and gap-based results. For p95 qualification use enough repetitions to satisfy Section 7, not the three-sample initial comparison. Hardware acceptance also verifies artifact hashes unchanged, no orphan child processes, complete evidence after interruption, budget telemetry present and accuracy/output differences reviewed. Run on a dedicated evaluation host; memory-pressure benchmarks can affect the whole GPU/OS.
-
-The launcher forwards arguments and exit status; setup installs reviewed pinned dependencies explicitly, never during planning/trials or by weakening TLS/execution policy. Optional WWB package/model acquisition belongs to setup, not scoring.
+Expand to the intended context/task/precision/platform matrix, separating sustained and gap-based runs; p95 qualification follows Section 7. Verify unchanged artifact hashes, no orphan children, interruption-safe evidence, budget telemetry and reviewed output/accuracy differences. Use a dedicated evaluation host because memory pressure can affect the whole GPU/OS.
