@@ -1,8 +1,10 @@
 # Smart Classroom VLM/LLM Serving Design
 
+**Status:** Implementation design. Unless explicitly identified as existing behavior, the features and contracts below are requirements, not claims of implemented or qualified support. Model/runtime qualification and performance results remain pending.
+
 ## 1. Key Features and Compatibility
 
-The upgrade expands model choice without changing how classroom applications access inference.
+This design covers shared model serving, speculative decoding, timing instrumentation and offline benchmarking while preserving classroom inference interfaces.
 
 | Key feature | Stakeholder benefit |
 | --- | --- |
@@ -13,11 +15,11 @@ The upgrade expands model choice without changing how classroom applications acc
 | **Backward compatibility** | Retain older models and configuration, the port-8000 API, `/v1/chat/completions`, and the shared classroom generation interface. |
 | **Controlled activation** | Warm-up before readiness, visible acceleration status and safe failure handling before release. |
 | **Workflow and model timing statistics** | Attribute processing time to ASR, VA, OCR, Summary, Mindmap and other stages, then compare individual model calls by model, precision, device and effective decoding method. |
-| **Standalone `context_bench` benchmarking** | Compare model/runtime profiles using repeatable TTFT, TPOT, throughput and memory measurements, with optional retrieval-accuracy and generation-fidelity checks, without changing production settings. See [Chapter 8](#8-context-bench-implementation-design) for the implementation design and acceptance tests. |
+| **Standalone `context_bench` benchmarking** | Compare model/runtime profiles using repeatable time to first token (TTFT), time per output token after the first (TPOT), throughput and memory measurements, with optional retrieval-accuracy and generation-fidelity checks. See [Section 8](#8-context-bench-implementation-design). |
 
-**Older models remain supported**, including Qwen3-VL-8B-Instruct and Qwen3.5-9B. Preserve supported providers, model IDs, precisions, local paths and generation behavior. No configuration migration or default model replacement is required; speculation remains off unless enabled. A model without a qualified drafter can continue through plain generation. Software setup is a prerequisite, but manual model downloads or exports are not.
+**Preserve existing model support**, including Qwen3-VL-8B-Instruct and Qwen3.5-9B, with unchanged providers, model IDs, precisions, local paths and generation behavior. No configuration migration or default model replacement is required; speculation remains off unless enabled. A model without a qualified accelerator continues through plain generation. Qualified serving profiles prepare missing artifacts automatically after software setup; the offline benchmark consumes prepared artifacts.
 
-Keep one target per serving instance. Generating tool calls and consuming tool results are in scope; executing tools remains the client/controller's responsibility. Multi-model routing, UI redesign and NPU support are outside scope. Compatibility is a release requirement, not a claim that untested model/runtime combinations already work.
+Keep one target per serving instance. Generating tool calls and consuming tool results are in scope; executing tools remains the client/controller's responsibility. Multi-model routing, UI redesign and NPU text-generation support are outside scope; existing NPU use by other classroom components is unchanged.
 
 ## 2. Model Profiles
 
@@ -65,7 +67,7 @@ Validate request schemas, names, selection options and model capabilities before
 
 **Reuse the current configuration structure and add an optional `models.text_gen.speculative` block.** Keep activation policy (`mode`) separate from decoding mechanism (`method`) and draft-model identity/source. The target remains selected by `vlm_name` and `weight_format`; no existing keys are renamed and no new top-level blocks are needed.
 
-The example below retains every existing `models.text_gen` setting and its current value from [../../../config.yaml](../../../config.yaml), except for deliberately selecting Qwen3.8 and adding optional DFlash2. These speculative fields define the proposed contract, not settings already supported by the loader. Merge this subtree into the existing configuration, not replace the whole file. Omitting `speculative` preserves plain generation.
+The example uses the structure of [../../../config.yaml](../../../config.yaml), selects Qwen3.8 INT4 and adds the proposed DFlash2 settings. It is an illustrative profile, not a snapshot of every installation's values. Preserve existing generation, admission, chunking and segmentation settings when merging it. Omitting `speculative` preserves plain generation.
 
 ```yaml
 models:
@@ -100,10 +102,10 @@ models:
       topics_max: 25
 ```
 
-| Configuration item | Upgrade behavior |
+| Configuration item | Required behavior |
 | --- | --- |
 | Existing `provider`, `vlm_name`, `device`, `weight_format` | Keep names and meanings. For the new models use `provider: vlm`; select a listed model/precision combination. Keep an older installation's selection unless the operator changes it. |
-| Existing `max_new_tokens`, `concurrency`, `queue_max` | Retain the configured generation and admission limits; the shown values remain 5120, 1 and 8. A larger model does not automatically increase these limits. |
+| Existing `max_new_tokens`, `concurrency`, `queue_max` | Retain the installation's generation and admission limits; 5120, 1 and 8 are example values. A larger model does not automatically increase these limits. |
 | Existing `chunking` and `segmentation` | Preserve the nested structure and configured values. Validate context and memory budgets for the selected model; change tuning only when measurements justify it. |
 | New optional `speculative` block | Select activation policy, method and draft artifacts without changing target or workflow settings. Defaults and validation are defined below. |
 
@@ -138,7 +140,7 @@ speculative:
 
 Resolve defaults before download, then validate the complete target/method/source/revision combination against artifact metadata and the supported profile. An explicit method is never changed to another method on failure; `mode: auto` may fall back only to plain generation. Unknown methods, contradictory sources, mismatched drafters and out-of-range tuning fail validation rather than triggering fallback. In `"off"`, ignore dormant speculative fields and prepare only the target.
 
-First-run profiles use website sources. `draft_source: local` requires a non-empty `draft_model` directory and a null `draft_revision`; it validates existing IR and never silently downloads a replacement when missing. Resolve relative local directories from the Smart Classroom root. `draft_source: target` is valid only with MTP and requires null `draft_model` and `draft_revision`. A source override or revision cannot bypass compatibility checks, enable arbitrary URLs or execute repository code. The manifest records resolved settings and actual artifact versions, including defaults.
+First-run downloads use the catalog's pinned Hub sources. `draft_source: local` requires a non-empty `draft_model` directory and a null `draft_revision`; it validates existing IR and never silently downloads a replacement when missing. Resolve relative local directories from the Smart Classroom root. `draft_source: target` is valid only with MTP and requires null `draft_model` and `draft_revision`. A source override or revision cannot bypass compatibility checks, enable arbitrary URLs or execute repository code. The manifest records resolved settings and actual artifact versions, including defaults.
 
 Tool definitions and selection are per-request API fields (`tools`, `tool_choice`, `parallel_tool_calls`), not new YAML settings or a separate service. Record tool/template capability in the model profile so unsupported requests fail before streaming; no `enable_tool_call` configuration flag is needed.
 
@@ -192,7 +194,7 @@ Health reports the target, tool-call capability, requested/effective method, dra
 
 ## 7. Processing-Time Statistics
 
-Collect statistics at two levels: **workflow-stage elapsed time** for the classroom experience and **individual model-call time** for inference cost. These are nested measurements, not interchangeable values. This section defines the required reporting coverage; it does not claim that every timer is implemented. Qualification results for this checkout remain **pending measurement**; historical observations in the Section 8 reference are not measurements of this implementation.
+Collect statistics at two levels: **workflow-stage elapsed time** for the classroom experience and **individual model-call time** for inference cost. These are nested measurements, not interchangeable values. Existing timing sources are identified under Collection and Reporting; the remaining coverage requires implementation.
 
 ### Workflow Stages
 
@@ -226,17 +228,9 @@ Time each invocation at the model owner, retaining its parent stage and an opaqu
 | Speculative decoding | Requested/effective method and fallback status; target verification time, drafter or bundled-head time and accepted/proposed tokens when exposed by the runtime. These are subphases of the call, not extra workflow stages. |
 | Startup | Download, conversion, model load/compile and warm-up times recorded separately from warm-request latency. |
 
-For generation, define decode throughput as output tokens after the first token divided by seconds from first to last generated token; report it as unavailable when fewer than two tokens or no valid timestamps are available. Keep model TTFT distinct from client-visible TTFT, which also includes request preparation, queueing, transport and earlier map calls. Record durations locally within each process; do not subtract monotonic timestamps from different processes or hosts.
+Use the generation metric definitions and source/boundary rules in Section 8.7. Keep model TTFT distinct from client-visible TTFT, which also includes request preparation, queueing, transport and earlier map calls. Record durations locally within each process; do not subtract monotonic timestamps from different processes or hosts.
 
-Use the following comparison matrix for the text-generation profiles. Expand each row by ARL/PTL, workload and effective method; include the existing installed model as the backward-compatibility baseline. Other ASR, VA, OCR, embedding and reranker models use the same per-call statistics with their actual configured identities.
-
-| Target model | Precision | Decoding cases | Required timing summary per case | Measurement status |
-| --- | --- | --- | --- | --- |
-| `Qwen/Qwen3.5-9B` | INT4 | Plain | Call latency mean/p50/p95, TTFT, decode tokens/s | Pending |
-| `Qwen/Qwen3.5-9B` | INT8 | Plain | Call latency mean/p50/p95, TTFT, decode tokens/s | Pending |
-| `Qwen/Qwen3.6-35B-A3B` | INT4 | Plain; qualified DFlash | Call latency mean/p50/p95, TTFT, decode tokens/s | Pending |
-| `Qwen/Qwen3.8-27B` | INT4 | Plain; qualified DFlash2 | Call latency mean/p50/p95, TTFT, decode tokens/s | Pending |
-| `Qwen/Qwen3.8-27B` | INT8 | Plain; qualified DFlash2 | Call latency mean/p50/p95, TTFT, decode tokens/s | Pending |
+For every model/precision in Section 2, report call-latency mean/p50/p95, TTFT and decode throughput across the platform/method matrix in Section 9. Include the installed model as the compatibility baseline. ASR, VA, OCR, embedding and reranker models use the applicable per-call statistics with their actual configured identities.
 
 ### Collection and Reporting
 
@@ -254,23 +248,23 @@ Compare repeated warm runs using the same fixed inputs, prompt templates, token 
 
 Implement `context_bench` as an offline, text-only OpenVINO LLM benchmarking tool. It answers whether a model can process a specified context within configured memory budgets, which runtime profile provides the best measured latency, and, optionally, how that profile affects retrieval accuracy and generation fidelity. It must not load the classroom application, start services, modify application configuration or automatically select production defaults. It benchmarks individual model calls; it does not replace the workflow-stage instrumentation in Section 7 or certify image handling and tool calling.
 
-Use the supplied [implementation directory](https://github.com/tingjiec/edge-ai-suites/tree/validate-qwen3.6/education-ai-suite/smart-classroom/components/llm/context_bench) and [documentation directory](https://github.com/tingjiec/edge-ai-suites/tree/validate-qwen3.6/education-ai-suite/smart-classroom/docs/dev-guide/context-bench) as the porting reference. The reviewed snapshot is commit `8e73a032443f8be6d0cd273c353d79c94c0a7c7a`: [source](https://github.com/tingjiec/edge-ai-suites/tree/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/components/llm/context_bench), [design analysis](https://github.com/tingjiec/edge-ai-suites/blob/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/docs/dev-guide/context-bench/context_bench_design.md), and [usage guide](https://github.com/tingjiec/edge-ai-suites/blob/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/docs/dev-guide/context-bench/context_bench_guide.md). Resolve conflicting reference prose using that snapshot's executable code and configuration. Historical timings are workload-specific observations, not acceptance thresholds for this implementation.
+Porting references are pinned to commit `8e73a032443f8be6d0cd273c353d79c94c0a7c7a`: [source](https://github.com/tingjiec/edge-ai-suites/tree/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/components/llm/context_bench), [design analysis](https://github.com/tingjiec/edge-ai-suites/blob/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/docs/dev-guide/context-bench/context_bench_design.md), and [usage guide](https://github.com/tingjiec/edge-ai-suites/blob/8e73a032443f8be6d0cd273c353d79c94c0a7c7a/education-ai-suite/smart-classroom/docs/dev-guide/context-bench/context_bench_guide.md). Use the pinned code/YAML to resolve stale reference prose; historical timings are not qualification results for this port.
 
-**Reference behavior to retain:** named profile matrices, spawned trial isolation, one load per case, excluded warmup, repeated measurements, exact-length throughput prompts, optional accuracy probes, parent-side memory sampling/scoring, and incremental reporting. **Required integration changes** are explicitly identified below; they are not claims about features already available in this checkout. Do not reintroduce the older capacity-search/bisection tool or a dry-run mode that produces synthetic PASS results.
+This section is the implementation contract. It retains the reference's profile matrix, isolated trials and scoring methods, with required changes for input validation, artifact safety, measurement synchronization, durable evidence and failure reporting. Capacity-search/bisection and synthetic dry-run PASS results are outside scope.
 
 ### 8.2 Modules and Ownership
 
-Place the tool under `smart-classroom/components/llm/context_bench/`, its guides under `smart-classroom/docs/dev-guide/context-bench/`, and hardware-independent tests alongside the existing component tests. These are implementation destinations, not files added by this documentation change. Preserve the reference's small modules and lazy imports so configuration inspection and unit tests need neither OpenVINO nor model files.
+Implementation destinations are `smart-classroom/components/llm/context_bench/`, `smart-classroom/docs/dev-guide/context-bench/`, and the existing component test directory. Keep runtime imports lazy so configuration inspection and pure unit tests need neither OpenVINO nor model files.
 
 | Module | Responsibility and implementation entry points |
 | --- | --- |
 | `benchmark.py` | CLI/config validation (`_parse_args`, `_load_settings`, `_resolve_profiles`), case planning, IR/cache preflight, sequential subprocess supervision, memory sampling, status evaluation, baseline matching and `write_report`. Own all run-level state and output files. |
-| `trial_runner.py` | `run_case` loads the tokenizer/pipeline once, chooses throughput or accuracy execution, emits progress/results, and exits the child. Keep `_load_pipeline`, `prepare_pipeline_input`, `generation_config`, `read_perf_metrics`, `validate_mtp` and error classification independently testable. The reference's `mtp` argument is an internal normalized speculative descriptor for both MTP and DFlash. |
+| `trial_runner.py` | `run_case` loads once, runs throughput iterations or accuracy probes, emits progress/results, and exits the child. Keep `_load_pipeline`, `prepare_pipeline_input`, `generation_config`, `read_perf_metrics`, `validate_mtp` and error classification independently testable. |
 | `context_builder.py` | Render native chat templates, size synthetic transcript prompts, place accuracy inserts and count the actual inference input. Keep prompt construction outside measured generation. |
 | `metrics.py` | Build iteration records, normalize units, compute throughput/speculative statistics and aggregate measured iterations. No runtime loading, report I/O or scoring dependencies. |
 | `tasks.py` | Define `ProbeSpec`, task registry, deterministic planted values, questions and per-probe output budgets. |
 | `scoring.py` | Pure scoring functions for retrieval, lexical overlap and token divergence; no model inference. |
-| `accuracy.py` | Build probe sets, dispatch scoring, group results and pair generated answers with the selected baseline. Scoring runs in the parent after the timed call. |
+| `accuracy.py` | Build probe sets, dispatch scoring, group results and pair generated answers with the selected baseline. Score in the parent after child exit, outside resource sampling. |
 | `wwb_adapter.py` | Optional, version-qualified who_what_benchmark semantic-similarity adapter. Missing package/model or unsupported result shape makes only similarity unavailable. |
 | `dflash_draft_head.py` | Optional explicit preparation utility for a derived draft with its own quantized output head. Never run it implicitly inside a timed benchmark or overwrite serving artifacts. |
 | Model-specific YAML and PowerShell launchers | Keep benchmark settings separate from application YAML. Provide model/precision profiles and the existing `run_benchmark.ps1` / `setup_env.ps1` entry-point pattern. |
@@ -279,7 +273,7 @@ The parent plans one throughput case per `(model, precision, device, context, ta
 
 ### 8.3 Configuration and CLI Contract
 
-Load benchmark YAML with a safe parser into plain mappings, validate it, apply CLI overrides, then freeze a resolved settings snapshot before creating any child. Avoid importing an application configuration singleton merely to parse benchmark YAML. Precedence is **CLI override > selected benchmark YAML > documented tool default**. Resolve relative config arguments from the caller's directory, and model/cache/output paths from the Smart Classroom root; the launcher sets that working directory. Never write resolved values back to either YAML file.
+Load benchmark YAML with a safe parser into plain mappings, apply CLI overrides, validate, and freeze the settings before creating any child. Do not import an application configuration singleton to parse benchmark YAML. Precedence is **CLI override > selected benchmark YAML > documented tool default**. Resolve a relative `--config` against the caller's directory before the launcher changes to the Smart Classroom root; resolve model/cache/output paths from that root. Never write resolved values back to YAML.
 
 | Section/key | Type and resolution rules |
 | --- | --- |
@@ -295,14 +289,14 @@ Load benchmark YAML with a safe parser into plain mappings, validate it, apply C
 | `benchmark.cache_dir`, `output_dir` | Optional compiled-blob cache directory, default null; required output base directory. A cache must not enable prompt-prefix reuse. Record whether compiled artifacts were already cached. |
 | `profiles` | Required non-empty list; each entry accepts only `name`, `ov`, `scheduler`, `mtp`, `dflash`. Names are unique non-empty strings; `ov` and `scheduler` are mappings. Reject misplaced `cache_size` at profile level. |
 | `profile.ov` | OpenVINO/GenAI property mapping, preserved without speculative settings leaking into plugin properties. Unknown runtime properties produce `unsupported`, not silent removal. |
-| `profile.scheduler` | Absent/empty selects stateful generation; a non-empty resolved mapping selects paged/continuous-batching generation. Require explicit positive `max_num_batched_tokens`, `max_num_seqs`, and boolean `enable_prefix_caching: false` on supplied paged profiles. |
+| `profile.scheduler` | Absent/empty selects stateful generation; a non-empty resolved mapping selects paged/continuous-batching generation. Every paged profile, including CLI overrides, requires positive integer `max_num_batched_tokens`, `max_num_seqs`, and boolean `enable_prefix_caching: false`. |
 | `profile.mtp` | Mapping with only `enabled`, `num_assistant_tokens`, `device`; a non-empty mapping implies enabled unless explicitly false. Preserve boolean shorthand only when an enabled profile receives its candidate count from the CLI. |
 | `profile.dflash` | Mapping with only `enabled`, `model`, `num_assistant_tokens`, `device`; `model` is a required local draft IR directory when enabled. A profile cannot contain both `mtp` and `dflash`. |
 | `accuracy` | Read only with `--accuracy`; accept `suites`, `baseline_profile`, integer `seed`, optional `embedding_model`, and the `retrieval`/`generation` mappings described in Section 8.6. Require an included baseline profile for generation-fidelity comparisons. |
 | `speculative_reference` | Optional display-only metadata: `source`, positive `num_assistant_tokens`, and per-task `dataset`, positive `acceptance_length`, `speedup`, optional `throughput`. Published numbers never affect status or ranking. |
 | `benchmark.record_text` | **Integration addition**, boolean, default false. Opt-in persistence of synthetic generated answers for offline rescoring/fork inspection; never enable for private classroom material. Scores and timings are retained regardless. |
 
-**Required validation additions:** reject unknown benchmark/model keys and unknown task-option keys, non-finite numbers, malformed mappings and wrong scalar types rather than relying on Python truthiness. Preserve exact override semantics: `--pipeline-config KEY=VALUE` merges string values into every selected profile's `ov`; `--scheduler-config KEY=VALUE` converts only recognized boolean/numeric scalar values. `KEY=` removes a property. Validate the resulting configuration again. Warn if an override changes a stateful profile to paged; never silently restore a removed prefix-caching safeguard.
+Reject unknown benchmark/model keys and task-option keys, non-finite numbers, malformed mappings and wrong scalar types. `--pipeline-config KEY=VALUE` merges string values into each selected profile's `ov`; `--scheduler-config KEY=VALUE` converts recognized boolean/numeric scalar values. `KEY=` removes a property. Validate after overrides: removing a required property is an error, not permission to restore it silently. Warn when an override changes the pipeline mode.
 
 Normalize either speculative section to `{enabled, strategy, model, num_assistant_tokens, device}` inside the resolved profile, retaining the reference's internal `mtp` field name for the port. Disabled means `enabled: false` and null remaining fields; enabled `strategy` is `mtp` or `dflash`. `--mtp-tokens K` and its alias `--assistant-tokens K` change only already-enabled profiles, including DFlash, and must leave plain baselines plain. Benchmark profile settings are deliberately separate from the production `models.text_gen.speculative` policy: a requested accelerated case either runs that mechanism or reports failure, **never falls back to plain and keeps the accelerated label**.
 
@@ -368,9 +362,9 @@ accuracy:
       fact_sheet: {num_facts: 6}
 ```
 
-`--list-profiles` prints the fully resolved matrix, model directories, effective pipeline mode, budgets, iteration plan and probe counts, then exits without importing inference dependencies, downloading, loading models or creating result files. The example plans **14 throughput cases**: two profiles times three standalone tasks plus four 8K tasks. With `--accuracy` it plans two 8K cases of ten probes each; context zero is excluded. An empty post-filter matrix is a configuration error, not a successful empty benchmark.
+`--list-profiles` prints the validated configuration plan, redacted model locations, requested pipeline mode, budgets and iteration/probe counts. Apply Section 8.9's path policy to this output too. Mark artifact-dependent cache sizing and token counts as unresolved; planning cannot certify runtime support or memory feasibility. It must not import inference dependencies, download, load models or create result files. The example has **14 throughput cases**: two profiles times seven context/task pairs (three standalone and four at 8K). With `--accuracy`, it has two 8K cases of ten probes each. An empty filtered matrix is a configuration error.
 
-Preserve CLI options `--config`, `--models`, `--contexts`, `--profiles`, `--device`, `--weight-format`, `--output-tokens`, `--warmup`, `--iterations`, `--iteration-gap`, `--throughput-task`, `--output-dir`, the property overrides, candidate-count aliases, `--accuracy`, and `--accuracy-suites/tasks/depths/samples`. `--weight-format` changes a label and derived path, not the contents of an explicitly configured directory: require `model_dirs` to identify the matching IR and report its actual precision.
+Preserve CLI options `--config`, `--models`, `--contexts`, `--profiles`, `--device`, `--weight-format`, `--output-tokens`, `--warmup`, `--iterations`, `--iteration-gap`, `--throughput-task`, `--output-dir`, the property overrides, candidate-count aliases, `--accuracy`, `--accuracy-suites`, `--accuracy-tasks`, `--accuracy-depths` and `--accuracy-samples`. A weight-format override changes the label and derived path, not IR in an explicit `model_dirs` directory; validate its actual precision.
 
 ### 8.4 Artifact and Runtime Preflight
 
@@ -381,25 +375,25 @@ Read model architecture from `config.json`, including nested `text_config` for V
 | Case | Checks before loading |
 | --- | --- |
 | Plain | No external drafter or bundled head is passed to the constructor; fresh generation config has zero assistant tokens. Stateful profiles do not instantiate a scheduler. |
-| MTP | Both `openvino_mtp_model.xml` and its BIN exist in the target directory; CPU/GPU target and draft use the same device; paged scheduler and `ATTENTION_BACKEND: PA` are required. Candidate count is a positive integer and `max_num_batched_tokens >= k + 1`. |
+| MTP | Both `openvino_mtp_model.xml` and its BIN exist in the target directory; `ATTENTION_BACKEND: PA` is required for the qualified Qwen MTP path. |
 | DFlash | External draft graph/weights/config exist; target hidden-state outputs/locators and draft vocabulary match the qualified export. `dflash_config.target_layer_ids` is a non-empty list of unique non-negative integers within the target depth. With trained `block_size`, require `k <= block_size - 1`. |
 | Hybrid DFlash scheduler | Use one live sequence for the supplied profiles. Require sufficient linear-attention rows: `num_linear_attention_blocks >= max_num_seqs + k + 1`; 17 covers the reference sweep through k=15. Keep the same scheduler reservation on the plain baseline. |
-| All speculative cases | Greedy generation, one returned sequence, static `assistant_confidence_threshold = 0.0`, prefix caching disabled and a qualified runtime API. Reject unsupported combinations; no sampling or mechanism substitution. |
+| All speculative cases | Target/draft use the same CPU/GPU device and a paged scheduler with `max_num_batched_tokens >= k + 1` for positive integer k. Use greedy generation, one returned sequence, static `assistant_confidence_threshold = 0.0`, prefix caching disabled and a qualified runtime API. No sampling, fallback or mechanism substitution. |
 
 The reference calls `ov_genai.draft_model(draft_directory, device)` for both mechanisms: MTP uses the target directory, DFlash the external draft directory. Keep this dispatch in `_load_pipeline`. DFlash2 is **not implemented by the referenced DFlash adapter**; add it only after the separate exporter/runtime qualification required by Sections 2 and 6, not by relabeling a DFlash case.
 
-**Required artifact-safety changes:** load local tokenizer data without `trust_remote_code`; do not print export instructions that enable remote code by default. The reference can backfill `hidden_states_decoder_layers` directly into target XML. Move that operation into explicit preparation on a separate derived artifact directory, using structured IR/XML APIs, complete validation and recorded source/output hashes. Likewise, `dflash_draft_head` must create a new directory tied to the exact target export, refuse an existing output and leave source files unchanged. Both operations are outside benchmark timing. Missing required metadata during benchmarking is an actionable preflight failure.
+Load tokenizer data with `local_files_only=True` and `trust_remote_code=False`; never enable remote code in preparation hints. Unlike the reference's in-place metadata backfill, prepare `hidden_states_decoder_layers` and any `dflash_draft_head` transformation explicitly in a new artifact directory, using structured IR/XML APIs and source/output hashes. Refuse an existing output and leave serving artifacts unchanged. Missing metadata during benchmarking is a preflight failure, not a trigger to repair files.
 
 ### 8.5 Execution and Child-Process Protocol
 
 The resolved case is immutable, serializable data, not a model object. Keep runtime imports inside the child and use `multiprocessing.get_context("spawn")` on all supported platforms. Follow the order below:
 
-1. Resolve/filter the entire run, validate profiles/probes, inspect local IR metadata and preflight fixed cache sizes across every context before the first load for that model. Create a unique run directory and an incomplete evidence snapshot.
+1. Validate/filter the run and create an incomplete evidence snapshot. Before a model's first load, preflight all its cases using local IR metadata and cache estimates. Invalid configuration ends the run before loading; an artifact/capacity failure is recorded for each affected case without discarding other cases.
 2. For each `(model, context, task, profile)`, resolve any automatic cache size, validate the effective mode again, start the parent sampler and spawn one child. Record the pre-case memory baseline.
 3. In the child, validate the case, load the local tokenizer and pipeline once, emit `loaded`, then build/validate the prompt. Record load and prompt-preparation durations separately from generation.
-4. Run warmup and measured iterations on the same prompt and pipeline, resetting request state between calls. Use a fresh greedy `GenerationConfig`; set `apply_chat_template = false` because the prompt was already rendered. Warmup uses the full output ceiling, not the older four-token shortcut. Respect EOS in both warmup and measurements.
-5. For a measured iteration, perform the configured idle gap first, emit `iteration_start`, then time `generate` through completion. Emit `prefilled` once on its first streamed token, followed by the completed iteration record. The streamer never truncates output to accelerate a case.
-6. In accuracy mode, use the same child lifecycle but one prompt/output budget per probe. Warmup is unscored; `benchmark.iterations` does not multiply the probe set. The parent scores each completed probe and updates cross-profile comparisons when its baseline is available.
+4. Run warmup and measured iterations on the same prompt/pipeline with fresh request state and greedy `GenerationConfig`. Disable the pipeline's second chat-template application. Warmup uses the full decode ceiling; all calls respect EOS.
+5. Before a measured call, perform the idle gap, send `iteration_start` and wait for the parent's acknowledgement that the memory window is open. Time `generate` through completion; emit `prefilled` at the first streamed token, then the completed record. Wait for acknowledgement that the parent has closed the window and checkpointed before starting the next iteration. Neither acknowledgement wait belongs to generation time.
+6. Accuracy uses one prompt/output budget per probe; warmup is unscored and `benchmark.iterations` does not multiply probes. Retain responses during the case, then score after child exit and sampler shutdown to avoid adding scoring resources to inference measurements.
 7. Send `done`, flush the result queue with `close` and `join_thread`, flush diagnostic streams, then use the reference's child-only `_post_and_exit` path to avoid unsafe native pipeline destructors. The parent joins the child before starting another case and checkpoints the result even on interruption.
 
 | Event | Required payload beyond `event` and case ID | Parent action |
@@ -407,23 +401,25 @@ The resolved case is immutable, serializable data, not a model object. Keep runt
 | `device` | Optional driver memory total and capability diagnostics | Save descriptive metadata; do not replace the configured budget. |
 | `loaded` | `load_time_s` | Mark load success and snapshot post-load memory while the child is alive. |
 | `prompt` | Configured, HF and OpenVINO token counts; prompt hash | Mark `prompt_built`; save prompt identity without prompt content. |
-| `iteration_start` | Unique iteration/probe index, `warmup` | Reset the iteration memory window; never reset case-wide peaks. |
+| `iteration_start` | Unique iteration/probe index, `warmup` | Reset the iteration memory window and acknowledge readiness; never reset case-wide peaks. |
 | `prefilled` | Matching iteration/probe index | Mark first-token completion so a later failure is attributed to decode. |
-| `iteration` | Throughput iteration record | Attach parent memory-window statistics, retain the raw sample and checkpoint. |
-| `probe` | Iteration record plus `suite`, `task`, `depth`, `sample`, generated answer | Score against the parent-held truth; persist answer only under the text policy. |
+| `iteration` | Throughput iteration record | Close the window, attach its statistics, checkpoint and acknowledge completion. |
+| `probe` | Iteration record plus `suite`, `task`, `depth`, `sample`, generated answer | Close the window, retain/checkpoint under the text policy and acknowledge; score after child exit. |
 | `done` | `load_ok`, last stage, accumulated records and optional classified error | Merge by record identity, avoiding duplication of already-streamed events; finalize the case. |
 
-The reference's completed milestones are `start`, `loaded`, `prompt_built`, `prefilled`, `decoded`; failure attribution is respectively load, prompt construction, prefill, decode, decode. **Integration correction:** reset the per-iteration milestone before every generate, including warmup, so a later prefill timeout cannot inherit a prior iteration's `decoded` marker. Accuracy warmup must emit the same progress milestones. Track completed iterations separately from the active iteration.
+Use a separate parent-to-child control channel for acknowledgements containing case ID, iteration ID and `ready` or `recorded`. Bound acknowledgement waits by `timeout_sec`; a broken channel aborts the owned case. This synchronization is an addition to the reference's one-way events. Sampled memory windows include IPC/sampling delay around generation and must not be labeled kernel-only measurements.
+
+Completed milestones are `start`, `loaded`, `prompt_built`, `prefilled`, `decoded`; failure attribution is respectively load, prompt construction, prefill, decode, decode. Reset to `loaded` before building each probe and `prompt_built` before each generate, including warmup. Keep active iteration/phase separate from completed counts, so a later prefill failure cannot inherit `decoded` from an earlier call. Track acknowledgement/reporting failures as orchestration failures.
 
 Reset the progress deadline only for valid events from the active case. Timeout means no progress for `timeout_sec`, including potentially load, prompt building, prefill, decode or an intentional gap; it does not establish a hardware context ceiling. On normal `done`, allow a bounded join before termination. On timeout/Ctrl-C, terminate only the owned child, join, escalate to kill if needed, and refuse another case if process death cannot be confirmed. Drain already-queued results for a bounded interval before declaring `crashed`; keep partial iterations and last-stage evidence. Use `try/finally` for sampler, queue and process cleanup. Native crashes remain isolated from Python report state, but a subprocess does not protect the host from driver resets or system-wide memory exhaustion.
 
 ### 8.6 Prompt Construction and Accuracy
 
-For positive-context throughput, render the selected tokenizer's native chat template once, including its generation prefix, and measure the complete rendered prompt. Subtract template/task overhead from the filler budget, construct a synthetic classroom transcript and correct the full-prompt token delta for at most five passes. Require `configured_tokens == HF_tokens == OpenVINO_tokens`; fail prompt construction if exact sizing cannot converge. For `LLMPipeline`, pass the counted `TokenizedInputs`; for `VLMPipeline`, pass the validated string without applying the template again.
+For positive-context throughput, construct a synthetic transcript and measure the complete native chat-template rendering, including task overhead and generation prefix. Adjust the filler budget and re-render/tokenize for at most five correction passes. Require `configured_tokens == HF_tokens == OpenVINO_tokens`; fail if exact sizing cannot converge. Reuse the final prompt across iterations. For `LLMPipeline`, pass the counted `TokenizedInputs`; for `VLMPipeline`, pass the validated string with automatic chat templating disabled. Each candidate prompt receives one template application, not a template nested inside another.
 
 Context zero is a sentinel, not a zero-token request: run `code`, `math` and `chat` using their standalone framing, require HF/OpenVINO counts to agree, and report the actual positive input length. Skip summary tasks and all accuracy suites at zero. At positive context, domain tasks follow the transcript. Keep task/prompt hashes in comparisons: changing the task changes draft acceptance and makes a different workload.
 
-The optional `classroom_summary` task is a **read-only exception to standalone configuration**: resolve only the application's language, summary mode and prompt template, then freeze that request before the matrix starts. The branch reads a legacy inline prompt tree. For this checkout, use the current `load_prompt("summarizer", language, mode)` convention and reproduce the current summarizer's request/thinking policy without instantiating its component or ModelManager. Do not copy a legacy `/no_think` convention blindly. Record template/config hashes, and fail clearly if the requested prompt cannot be resolved. Other tasks must not depend on application configuration or real transcripts.
+Only `classroom_summary` may read application settings: resolve language, summary mode and the template through `load_prompt("summarizer", language, mode)`, then freeze the request and its hashes. Match the current summarizer's request/thinking policy without instantiating its component or ModelManager; do not copy the branch's legacy inline prompt layout or `/no_think` convention. Use synthetic transcript content and fail if the requested template cannot be resolved.
 
 | Accuracy suite | Tasks and scoring contract |
 | --- | --- |
@@ -436,17 +432,17 @@ Reuse `ProbeSpec` and the reference's task/scoring functions. Derive planted val
 
 Unlike throughput, probes allow at most **16 tokens** deviation from the requested context for each tokenizer count; record both actual counts. An individual prompt-build failure creates an explicit skipped-probe record and processing continues; inference failure ends that child case. If the first probe cannot provide warmup, use the first buildable probe; if none can be built, report `no_output`. Report planned/completed/skipped counts and score denominators so missing probes cannot inflate an apparent accuracy pass. Honor each probe's decode ceiling and mark a reached ceiling as potentially truncated when the runtime cannot identify the finish reason.
 
-Keep scoring out of timed generation. Pair fidelity results by model/artifact, context, prompt hash, suite/task/depth/sample and seed, not profile completion order; recompute idempotently after each case. Missing or failed baselines yield unavailable fidelity, not zero or a replacement baseline. Normalize only retrieval metrics with SQuAD-style article removal; ROUGE/chrF and lexical fallback must preserve articles. Use the model tokenizer for token divergence; label a reference-compatible word fallback explicitly and never compare word-unit values with token-unit values. Missing WWB must not disable other scores, and optional semantic scoring must run after all inference cases or release its resources before the next memory baseline.
+Pair fidelity by model/artifact, context, prompt hash, suite/task/depth/sample and seed, independent of case order; update idempotently when the baseline completes. A missing/failed baseline leaves fidelity unavailable. Use SQuAD-style article removal only for retrieval scoring; lexical overlap must preserve articles. Use model tokens for divergence or label a word fallback explicitly, without comparing the two units. Run optional WWB scoring after all inference cases so its retained resources cannot affect later measurements; missing WWB disables only similarity.
 
 These synthetic retrieval scores are not published RULER dataset scores, and similarity to a baseline is not absolute classroom-summary quality. Generated code is benchmark output, never executed. Throughput success alone is not accuracy success; fidelity self-comparison is a sanity check, not evidence of model quality.
 
 ### 8.7 Iteration Metrics and Comparison Rules
 
-Retain the reference field names so existing metric consumers can be ported directly. Use milliseconds for latency, seconds for generation/load duration, tokens/second for throughput and GiB (`bytes / 1024^3`) for memory. Capture unrounded values for calculation and round only for presentation. Prefer each valid finite field from `DecodedResults.perf_metrics` independently; use streamer/wall-clock fallback only for compatible boundaries and record the source of each metric. **Integration correction:** unavailable tokenization, TTFT, TPOT and throughput values are null, not the reference's zero placeholders.
+Retain reference field names. Use ms for latency, seconds for generation/load duration, tokens/s for throughput and GiB (`bytes / 1024^3`) for memory. Calculate from unrounded values and round for display. Prefer valid finite runtime metrics; retain wall generation duration and streamer TTFT separately for fallback and record each field's source. Never subtract a wall-clock TTFT from a runtime duration: use a matched pair of runtime measurements or a matched pair of wall measurements. Unavailable values are null, not zero.
 
 | Field | Definition |
 | --- | --- |
-| `input_size`, `output_size` | Actual consumed/generated token counts, preferring runtime counters. Keep configured context and pre-call tokenizer counts separately. If VLM retokenization differs, report it and group comparisons by actual input count; do not claim an exact-context result. |
+| `input_size`, `output_size` | Actual consumed/generated counts, preferring runtime counters. Preserve configured and pre-call counts separately. A runtime input-count mismatch invalidates exact-context certification (`measurement_error`); retain the observed timings for diagnosis. |
 | `generation_time` | `get_generate_duration()` converted from milliseconds to seconds, or elapsed time around `generate`. Excludes model load, external prompt construction, idle gap and scoring. |
 | `first_token_latency` | Runtime `get_ttft()` or first streamer callback elapsed time, in ms. The derived prefill rate is a TTFT-based proxy, not an isolated kernel measurement. |
 | `other_tokens_avg_latency` | Runtime `get_tpot()`; otherwise `(1000 * generation_time - first_token_latency) / (output_size - 1)` only for compatible clock boundaries, positive decode duration and more than one output token. |
@@ -457,12 +453,12 @@ Retain the reference field names so existing metric consumers can be ported dire
 | `e2e_throughput` | `(input_size + output_size) / generation_time`; includes input work and must not be presented as output-token throughput. |
 | `verification_steps`, `tokens_per_step` | Steps from the qualified runtime counter or guarded `raw_metrics.m_new_token_times` compatibility path. Acceptance length (AL) is `(output_size - 1) / (verification_steps - 1)`, excluding prefill; unavailable unless both exceed one. Plain generation should yield 1.00 when counts are available. |
 | `mtp_draft_tokens`, `mtp_accepted_tokens`, `mtp_rejected_tokens`, `mtp_acceptance_rate` | Legacy names shared by MTP/DFlash. Prefer valid runtime counters/rate; DFlash may require `get_num_draft_processed_tokens()` when its draft count is zero. Derive rejected count as drafted minus accepted only for consistent counts. |
-| `mtp_acceptance_estimated` | True only for a separately labeled `(AL - 1) / k` estimate when measured acceptance is unavailable. Never present this estimate as a runtime count or use it as a correctness threshold. Retain null when even a qualified estimate cannot be formed. |
+| `mtp_acceptance_estimated` | Boolean: true only when the rate uses a qualified `(AL - 1) / k` estimate instead of measured acceptance. Label the estimate and never use it as a correctness threshold; if neither source is available, the rate is null and this flag is false. |
 | `mtp_draft_to_main_ratio` | Runtime draft/target inference-duration ratio. May include target prefill; not a per-decode-pass cost or an image-encoding speedup. |
 | `first_decode_ms`, `steady_pass_ms`, `steady_tpot` | Use matching runtime per-pass duration/committed-token arrays. Convert raw microseconds to ms; exclude prefill, report the first decode pass separately, then median remaining pass duration and remaining total duration / committed tokens. Require at least two remaining passes. |
 | `output_sha256`, `output_consistent` | Hash each generated answer; repeated-prompt hashes determine determinism. Different accuracy probes are not repeated-prompt trials, so their combined consistency is unavailable. |
 
-Exclude every `warmup: true` record from timing aggregates. For each homogeneous case, retain sample count, median/p50, min/max and the Section 7 mean/total/p95 statistics; use nearest-rank p95 on sorted valid samples, and label fewer than 20 samples as insufficient for a stable tail estimate. Null values do not enter the denominator. Compute aggregate decode throughput from aggregate median TPOT, not the mean of reciprocals. A one-token EOS answer is a valid generated answer but has no TPOT and cannot enter the decode leaderboard.
+Exclude warmup from timing aggregates. Per homogeneous case, retain valid count, median/p50, min/max and Section 7's mean, total duration and p95; use nearest-rank p95 on sorted samples. Fewer than 20 samples must carry a small-sample warning; 20 is a minimum reporting gate, not a guarantee of statistical stability. Nulls do not enter denominators. Compute aggregate decode throughput from median TPOT, not mean reciprocal TPOT. A one-token EOS answer is valid output but has no decode-latency ranking.
 
 Rank only complete, budget-measured `ok` cases with valid timing, using median TPOT ascending then TTFT ascending; print a separate fastest-TTFT result. Match speculative/plain pairs on target artifact/precision, actual prompt hash/count, device/platform/runtime, task, generation ceiling/greedy settings, warmup/iteration/gap plan and **fully resolved** `ov`/scheduler mappings. The draft mechanism/count is the changed variable. A stateful or differently quantized row is not the DFlash baseline. If auto sizing produces different scheduler settings, mark the comparison confounded and require an explicitly matched-pool rerun for isolated speculative speedup.
 
@@ -479,12 +475,12 @@ The configured budget governs status, while `gpu_budget_driver_gb` is descriptiv
 Cache sizing remains a preflight estimate, not capacity certification:
 
 1. Compute growing KV bytes per token as `2 * full_attention_layers * kv_heads * (head_dim * element_bytes + quantization_overhead_per_row)`. Read top-level or `text_config` architecture; an inconsistent `layer_types` list yields unknown, not an underestimate. Use the actual supported KV precision and its quantization metadata.
-2. Add fixed linear-attention state from unique IR state variables, multiplied by reserved sequence/linear-attention rows. Include decode growth up to the output ceiling, qualified MTP-head KV and DFlash state/verification reservations. The reference's target-context-only estimate is insufficient for long output or an unqualified external draft; unknown contributions must be reported explicitly.
-3. `scheduler.cache_size` has three distinct forms: omitted means runtime-managed, a positive whole GiB value is fixed, and `auto` requests estimation. Validate every fixed pool against the known persistent requirement before loading. A stateful profile has no bounded scheduler pool.
-4. For known demand, the reference heuristic is `needed = max(2, 1.3 * estimated_cache_gib) * pool_factor`; `ceiling = floor(gpu_budget_gib - weight_gib - 8)`; choose an integer pool between 2 GiB and that ceiling. Account for external draft weights. The reference's factor 2 for speculative pools is empirical, not a general MTP/DFlash rule; pin it only to profiles with evidence.
-5. **Integration correction:** if the ceiling cannot fit the required pool, reject the planned case rather than silently clamp below demand and call it valid. If architecture, reservations or a CPU memory-budget mapping are unknown, report estimation unavailable and require an explicit/runtime-managed pool instead of guessing. Never let removal of an unresolved `auto` key silently change the requested pipeline mode.
+2. Add fixed linear-attention state from unique IR state variables, multiplied by reserved sequence/linear-attention rows. Include decode growth up to the output ceiling, qualified MTP-head KV and DFlash state/verification reservations. For context zero, use the actual standalone prompt length, never zero tokens. If that length or any required state contribution is unknown at preflight, report the estimate as unavailable rather than a lower bound sufficient for pool sizing.
+3. `scheduler.cache_size` has three forms: omitted means runtime-managed, a positive integer GiB value is fixed, and `auto` requests estimation. Validate every fixed pool before loading. A stateful profile has no scheduler pool.
+4. For qualified known demand, adapt the reference heuristic: `needed = max(2, 1.3 * estimated_cache_gib) * pool_factor`, `pool = ceil(needed)`, `ceiling = floor(gpu_memory_budget_gb - target_and_draft_weight_gib - 8)`. Require `pool <= ceiling`; do not silently clamp below demand. The factor 2 used by the reference for speculative pools is empirical and must be qualified per profile, not assumed universal.
+5. Record an impossible estimated pool as a case `error` in preflight, distinct from a measured memory-limit violation. For unknown architecture/reservations or CPU `auto`, require an explicit or runtime-managed pool. Never silently remove `auto` and change the requested pipeline mode.
 
-Do not treat passing an estimated cache check as passing the measured peak-memory budgets. Keep fixed/cache-auto/runtime-managed configurations distinct in reports and compare the actual resolved settings.
+Record pool provenance (fixed, auto or runtime-managed). Passing preflight does not establish measured memory-budget compliance.
 
 ### 8.9 Result Schema, Persistence and Status
 
@@ -498,11 +494,11 @@ Use versioned serializable mappings for IPC and persisted evidence; validate req
 | Probe | Iteration fields plus suite/task/depth/sample, deterministic fixture identity, status/skip reason, per-metric scores and scoring unit/version. Answer/truth text persistence follows `record_text`; transient answers are needed for scoring even when it is false. |
 | Error | Stable category, completed milestone, active phase and sanitized explanation; raw native exit code when relevant. No credentials, private paths or prompt/answer excerpts in default diagnostics. |
 
-Preserve the reference's `report.txt` as the single human-readable report and print the same rendered lines to the terminal. **Required integration addition:** write `results.json` as the machine-readable source of truth, including raw samples and provenance required by Section 7. The pinned reference writes only the text report and retains richer records in memory; it does not provide durable complete answers for offline rescoring.
+Write `results.json` as the authoritative evidence record with Section 7's raw samples and provenance; render `report.txt` and the terminal summary from the same snapshot. JSON persistence is an addition to the reference's text-only output.
 
 Keep absolute artifact/cache paths in process memory only. In exported settings and diagnostics, use component-relative paths for component-owned files and opaque artifact IDs plus content hashes for external locations; omit user names, host names and credentials. Represent unavailable hardware/driver metadata as unknown rather than a guessed device name. The runner still uses the original resolved paths internally; redaction must not change which artifacts are loaded.
 
-Create `<output_dir>/<UTC-timestamp>-<unique-suffix>/` exclusively to avoid same-second collisions. Initialize incomplete results before the first trial; checkpoint after each completed iteration/probe and case, and again in the run's `finally`. Write JSON and report through temporary files and atomic replacement; JSON is authoritative if report rendering fails, and both carry the same run ID/revision. Default text redaction applies to both sinks. `record_text: true` permits full synthetic answers in JSON and bounded escaped previews in the report; mark omitted/truncated previews clearly. Offline fidelity rescoring requires recorded answers, matching fixture/tokenizer versions and the baseline; otherwise only stored scores/timing can be reaggregated.
+Create `<output_dir>/<UTC-timestamp>-<unique-suffix>/` exclusively. Checkpoint incomplete JSON before trials, after each completed record/case and in `finally`; render the report after each case and final scoring. Use temporary files and atomic replacement, with run ID/revision in both outputs so a stale report is detectable. `record_text: true` permits full synthetic answers in JSON and labeled, bounded escaped previews in the report. Otherwise persist scores/hashes only. Offline rescoring requires recorded answers, fixture/tokenizer versions and a baseline; without them only stored metrics can be reaggregated.
 
 Report sections are: run metadata and completion/coverage; speed/resources per model/context/task; TPOT and TTFT winners; matched speculative-window sweeps and output-consistency warnings; retrieval per-task/depth tables and baseline deltas; generation fidelity/coverage; probe status/detail; failures and unavailable telemetry. Show all failed/budget-exceeded rows and their measured values without ranking them. Published reference results are a separately labeled comparison, never mixed into local samples. Do not silently auto-delete previous runs; keep each run bounded by the validated plan and configured output-token ceilings and make retention an operator choice.
 
@@ -521,7 +517,7 @@ Report sections are: run metadata and completion/coverage; speed/resources per m
 
 Choose status in this order: explicit runtime/artifact failure; no measured output; incomplete coverage; unavailable required measurement; GPU budget exceeded; host budget exceeded; otherwise `ok`. Preserve additional flags when more than one condition applies. Quality scores remain separate from execution status. `completed` means the planned matrix was processed, not that every case passed.
 
-**CLI exit contract, an integration addition:** 0 for a valid plan-only invocation or a completed run with all required cases `ok`; 1 for completed runs containing failed/partial/unqualified cases or for orchestration/output-write failure; 2 for invalid arguments/configuration or missing required environment dependencies; 130 for Ctrl-C after best-effort checkpoint and child cleanup. Accuracy thresholds are not implicit exit-code gates. The reference does not make case failures a reliable nonzero CLI exit, so implement and test this deliberately; PowerShell must propagate the Python exit code.
+**CLI exit contract (addition to the reference):** 0 for valid planning or a completed run with all required cases `ok`; 1 for failed/partial/unqualified cases or orchestration/output-write failure; 2 for invalid arguments/configuration or missing required dependencies; 130 for Ctrl-C after checkpoint and child cleanup. Accuracy scores are not implicit exit gates. Propagate the Python exit code through PowerShell.
 
 ### 8.10 Implementation Sequence and Verification
 
@@ -533,15 +529,15 @@ Choose status in this order: explicit runtime/artifact failure; no measured outp
 
 | Test family | Required checks |
 | --- | --- |
-| `test_context_bench_context_builder.py` | Template counted once; exact positive-context equality; standalone context zero; too-small budget/non-convergence; VLM runtime-count mismatch; multi-insert depth placement and the 16-token probe tolerance. |
+| `test_context_bench_context_builder.py` | No double templating; bounded correction passes and final-prompt reuse; exact positive-context equality; standalone context zero; too-small budget/non-convergence; VLM runtime-count mismatch; multi-insert placement and 16-token probe tolerance. |
 | `test_context_bench_kv_estimate.py` | Hybrid/full-attention counting, nested VLM config, malformed metadata, quantized KV overhead, per-sequence/verification reservations, MTP and external-draft contributions, fixed-pool preflight, infeasible/unknown auto budget and no implicit backend change. |
 | `test_context_bench_metrics.py` | Unit conversion, valid per-field runtime fallback, null/non-finite handling, EOS with zero/one/many tokens, warmup exclusion, nearest-rank percentiles, median TPOT reciprocal, AL excluding prefill, steady-pass minimums, matched-baseline filtering and missing-telemetry ranking. |
-| `test_context_bench_trial_lifecycle.py` | Load once/build once for throughput; full-budget warmup; fresh request state; iteration milestones reset; event ordering/deduplication; partial records; terminal-result/exit race; timeout/Ctrl-C cleanup; native exit codes; blocked child; sampler-window synchronization; atomic checkpoints and CLI/launcher exit propagation. |
+| `test_context_bench_trial_lifecycle.py` | One load/final prompt per throughput case; full-budget warmup; fresh request state; milestone resets; event deduplication; ready/recorded acknowledgements; missing acknowledgement; delayed parent/checkpoint; partial records; terminal-result/exit race; timeout/Ctrl-C cleanup; native exit codes; sampler synchronization; atomic evidence and exit propagation. |
 | `test_context_bench_accuracy.py` | Seed determinism, task/option validation, exact probe counts, truth surviving filler truncation, scorer golden cases and article handling, baseline-last ordering, prompt-hash mismatch, skipped-probe denominators, truncation flags, missing optional WWB, no generated-code execution and text redaction. |
 
-Use deterministic metric fixtures: 101 input tokens, five output tokens, 0.3-second generation and 100-ms TTFT must produce 50-ms fallback TPOT, 20 decode tok/s, 1010 prefill tok/s and approximately 353.333 e2e tok/s. For 45 output tokens and 14 target passes, AL is `44/13`, not `45/14`. The reduced YAML example must resolve to 14 throughput cases or two accuracy cases with ten probes each, without any model load. Assert that importing/planning does not start application services, download files, execute remote code or modify input artifacts.
+Use deterministic fixtures: 101 input tokens, five output tokens, 0.3-second generation and matched-source 100-ms TTFT yield 50-ms fallback TPOT, 20 decode tok/s, 1010 prefill tok/s and approximately 353.333 e2e tok/s. For 45 output tokens and 14 target passes, AL is `44/13`, not `45/14`. Assert the Section 8.3 example's case/probe counts and that planning performs no inference, service startup, downloads, remote execution or artifact writes.
 
-The following are acceptance commands **after the port exists**, run from the Smart Classroom root with the prepared benchmark-compatible environment. They are not commands implemented by this document update.
+After the port exists, run these acceptance commands from the Smart Classroom root in the prepared benchmark environment:
 
 ```powershell
 python -m unittest discover -s components/tests -p "test_context_bench_*.py"
@@ -552,14 +548,14 @@ python -m components.llm.context_bench.benchmark --config components/llm/context
 
 After smoke tests, restore at least one warmup and three measured iterations, run matched profiles across the intended context/task/precision/platform matrix, and collect separate sustained and gap-based results. For p95 qualification use enough repetitions to satisfy Section 8.7, not the three-sample initial comparison. Hardware acceptance also verifies artifact hashes unchanged, no orphan child processes, complete evidence after interruption, budget telemetry present and accuracy/output differences reviewed. Run on a dedicated evaluation host; memory-pressure benchmarks can affect the whole GPU/OS.
 
-Preserve the PowerShell launcher's argument forwarding and explicit environment setup path, but keep `--list-profiles` free of dependency installation. Setup installs only reviewed pinned dependencies in the selected environment, not during a trial, and never weakens TLS or execution policy. Optional WWB package/model acquisition is explicit setup work. No HTTP benchmark service, production instrumentation refactor, automatic model switching or UI is required for this port.
+The launcher forwards arguments and exit status; setup installs reviewed pinned dependencies explicitly, never during planning/trials or by weakening TLS/execution policy. Optional WWB package/model acquisition belongs to setup, not scoring.
 
 ## 9. Release Decisions
 
 | Area | Required checks |
 | --- | --- |
 | Backward compatibility | Load unchanged older configurations; retain existing key names, token/queue limits, chunking, segmentation and service endpoints. Test supported providers/model IDs, precisions and local paths; no drafter download when off; plain fallback in `auto`; no regressions from runtime dependency upgrades. |
-| Model/precision support | Qwen3.5-9B INT4/INT8: empty-cache target download, successful warm-up and later cache-only reuse without a drafter. Qwen3.6 INT4 and Qwen3.8 INT4/INT8: empty-cache target/drafter download, required conversion, successful warm-up and later cache-only reuse. |
+| Model/precision support | For every Section 2 profile, test empty-cache preparation, warm-up and later cache-only reuse. Plain mode downloads only the target; an accelerated case requires all artifacts for its selected method. |
 | Port-8000 tool calling | End-to-end function definition -> tool call -> tool result -> answer through `/v1/chat/completions`, with streaming and non-streaming clients. Test `none`/`auto`/`required`/named choices, multiple-call IDs, `parallel_tool_calls: false`, full history, malformed arguments, missing results, truncation, unsupported models and no server-side tool execution. |
 | Speculative configuration | Missing/mode-only blocks, all supported methods, explicit/default Hub revisions, local path handling and tuning bounds. Reject cross-model drafters and MTP with an external draft source/model; bundled MTP must never trigger a z-lab download. |
 | Classroom quality | Streaming/non-streaming text, images, supported thinking/structured output, cancellation and queue limits; summaries, mind maps, segmentation, reports, RAG Q&A, video summaries and grading. |
@@ -568,4 +564,4 @@ Preserve the PowerShell launcher's argument forwarding and explicit environment 
 | Timing statistics | Publish stage and individual-model results defined in Section 7 for each qualification case. Verify attribution for shared models, overlapping stages, streaming completion, retries, failures, cancellation and skipped stages; retain raw samples and do not present unavailable timings as zero or pending cases as measured. |
 | Context bench | Complete the Section 8 port and its hardware-independent tests; verify exact-context and matched-profile measurements, separate accuracy verdicts, interruption-safe evidence, nonzero failure exits and unchanged source/serving artifacts. Publish model-call evidence without presenting it as full classroom-workflow timing. |
 
-Qualify Qwen3.5-9B INT4/INT8 on ARL and PTL with plain generation: four configurations. Qualify the three Qwen3.6/Qwen3.8 model/precision combinations on both platforms with plain and paired DFlash/DFlash2 decoding: twelve more configurations, for sixteen total, plus other older-model regression coverage. Include tool-call round trips in every tool-capable combination. Add a separate MTP case for every target/precision/platform that advertises a qualified bundled head; do not infer MTP support from DFlash2 results. CPU qualification is separate. Record artifact/runtime/driver versions and workload settings; a model name alone is not evidence of compatibility.
+The required GPU matrix covers Arrow Lake (ARL) and Panther Lake (PTL): Qwen3.5-9B INT4/INT8 plain on both platforms (four cases), plus Qwen3.6 INT4 and Qwen3.8 INT4/INT8 with plain and their respective DFlash/DFlash2 methods on both platforms (twelve cases). These sixteen cases are planned qualification, not reported passes; DFlash2 remains blocked until its adapter/runtime is qualified. Add older-model regressions and separate MTP cases for each advertised target/precision/platform; do not infer support across methods. Include tool-call round trips for tool-capable profiles. CPU qualification is separate; identify exact hardware, artifacts, runtime/driver versions and workload settings in every result.
