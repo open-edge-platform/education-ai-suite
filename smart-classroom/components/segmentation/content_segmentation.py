@@ -73,16 +73,19 @@ class Topic(BaseModel):
     end_time: float = Field(gt=0)
 
 
-def _topics_json_schema() -> str:
-    """Schema for the topic array, passed to the decoder as a grammar."""
+def _topics_json_schema(quota: int | None = None) -> str:
+    """Schema for the topic array, passed to the decoder as a grammar.
+
+    A window is bounded by its own quota, the whole lesson by the 15-25 band.
+    """
     item = Topic.model_json_schema()
     # Restrict generation to the three declared keys.
     item["additionalProperties"] = False
     return json.dumps({
         "type": "array",
         "items": item,
-        "minItems": MIN_TOPICS,
-        "maxItems": MAX_TOPICS,
+        "minItems": quota if quota is not None else MIN_TOPICS,
+        "maxItems": quota if quota is not None else MAX_TOPICS,
     })
 
 
@@ -273,14 +276,15 @@ class ContentSegmentationComponent(PipelineComponent):
         logger.error("_clean_topics_output: all strategies failed. Preview: %s", raw[:200])
         raise ValueError("INVALID_TOPICS_FORMAT")
 
-    def _generate(self, messages: list, max_new_tokens: int | None = None) -> str:
+    def _generate(self, messages: list, max_new_tokens: int | None = None,
+                  quota: int | None = None) -> str:
         try:
             return self.model.generate(
                 messages=messages,
                 stream=False,
                 enable_thinking=False,
                 max_new_tokens=max_new_tokens,
-                json_schema=_topics_json_schema(),
+                json_schema=_topics_json_schema(quota),
             )
         except TypeError:
             logger.info("Backend does not accept json_schema; generating unconstrained.")
@@ -413,7 +417,7 @@ class ContentSegmentationComponent(PipelineComponent):
             window_start=window.start, window_end=window.end,
         )
         try:
-            raw = self._generate(messages, max_new_tokens=max_new_tokens)
+            raw = self._generate(messages, max_new_tokens=max_new_tokens, quota=quota)
             # This window was asked for its quota, not for the lesson's band.
             topics = json.loads(self._clean_topics_output(raw, quota=quota))
         except Exception as e:  # noqa: BLE001

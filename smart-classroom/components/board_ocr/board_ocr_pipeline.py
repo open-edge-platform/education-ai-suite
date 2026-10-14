@@ -178,7 +178,7 @@ class FrameExtractor:
 
         output_pattern = (self.output_dir / "frame_%06d.jpg").as_posix()
         cmd += [
-            "-vf", f"hwdownload,format=nv12,fps={self.frame_interval}",
+            "-vf", f"fps={self.frame_interval},hwdownload,format=nv12",
             "-qscale:v", "2",
             "-update", "0",
             output_pattern,

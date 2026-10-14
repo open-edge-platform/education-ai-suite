@@ -271,6 +271,32 @@ def test_a_window_is_generated_under_its_own_token_cap():
     assert handler.calls[0]["json_schema"], "decoding should be schema-constrained"
 
 
+def test_a_windows_grammar_is_bounded_by_its_quota_not_the_lesson_band():
+    """Under the 15-25 band a 10-topic window cannot close its array, and pads
+    with whitespace up to its token cap instead."""
+    handler = FakeSegmenter()
+    component = _component(handler)
+    window = tc.Chunk(text="[100-110] hi", index=0, total=3, tokens=100,
+                      start=100.0, end=1300.0)
+
+    component._generate_window(window, quota=10, language="en", max_new_tokens=1024)
+
+    schema = json.loads(handler.calls[0]["json_schema"])
+    assert (schema["minItems"], schema["maxItems"]) == (10, 10)
+
+
+def test_a_whole_lesson_grammar_keeps_the_lesson_band():
+    handler = FakeSegmenter(reply=lambda text: json.dumps(
+        [{"topic": f"Topic number {i}", "start_time": i * 10.0, "end_time": i * 10.0 + 10}
+         for i in range(MIN_TOPICS)]))
+    component = _component(handler)
+
+    component._generate([{"role": "user", "content": "x"}])
+
+    schema = json.loads(handler.calls[0]["json_schema"])
+    assert (schema["minItems"], schema["maxItems"]) == (MIN_TOPICS, MAX_TOPICS)
+
+
 def test_a_windows_topics_are_clamped_into_the_window():
     """A model that answers in whole-lesson seconds must not drift outside."""
     drifted = json.dumps([{"topic": "Drifted well past the end of this window",
