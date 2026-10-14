@@ -959,6 +959,45 @@ class SetupRunner extends EventEmitter {
     return this.snapshot();
   }
 
+  /**
+   * Check the steps a feature toggle has just brought in.
+   *
+   * checkAll() skips disabled steps, so a feature enabled after startup leaves
+   * its rows at "Not checked" — and an unchecked row offers no action, so the
+   * user is stuck until they think to press Re-check. A step that is switched
+   * off goes back to unknown, so switching it on again re-checks it rather than
+   * showing a result that may since have gone stale.
+   */
+  async checkNewlyEnabled() {
+    let changed = false;
+    const fresh = [];
+    for (const step of STEPS) {
+      const enabled = step.enabled ? step.enabled() : true;
+      const { status } = this.state.get(step.id);
+      if (!enabled && status !== STATUS.UNKNOWN && status !== STATUS.RUNNING) {
+        this.record(step, { status: STATUS.UNKNOWN, detail: '' });
+        changed = true;
+      } else if (enabled && status === STATUS.UNKNOWN) {
+        fresh.push(step);
+      }
+    }
+    if (changed) this.emitChanged();
+
+    for (const step of fresh) {
+      // Re-read: a checkAll() running alongside may have got there first.
+      if (this.state.get(step.id).status !== STATUS.UNKNOWN) continue;
+      this.record(step, { status: STATUS.RUNNING, detail: '' });
+      this.emitChanged();
+      try {
+        this.record(step, await step.check());
+      } catch (error) {
+        this.record(step, { status: STATUS.FAILED, detail: error.message });
+      }
+      this.emitChanged();
+    }
+    return this.snapshot();
+  }
+
   find(stepId, actionId) {
     const step = BY_ID.get(stepId);
     if (!step) throw new Error(`Unknown setup step: ${String(stepId).slice(0, 64)}`);
