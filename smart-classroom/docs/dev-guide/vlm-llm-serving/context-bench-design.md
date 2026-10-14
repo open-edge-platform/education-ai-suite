@@ -1,6 +1,6 @@
 # Context Bench Design
 
-**Status:** Implementation design for `smart-classroom/components/context_bench/`. Reference behavior and required porting changes are distinguished below; local qualification and performance results remain pending.
+**Status:** Implementation design for `smart-classroom/components/context_bench/`.
 
 Companion document: [vlm-llm-serving-design.md](vlm-llm-serving-design.md).
 
