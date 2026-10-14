@@ -1,0 +1,77 @@
+global:
+  # Set this value to hostPath where we want to mount a volume (Used in single node cluster or standalone sub-chart installation).
+  volumeHostPath: ""
+
+  # usePvc should be set to true to use a PVC for persisting models, cache and other files.
+  usePvc: false
+
+  # keepPvc should be set to true to retain the PVC after uninstalling the chart.
+  keepPvc: false
+
+  proxy:
+    no_proxy: ""
+    http_proxy: ""
+    https_proxy: ""
+  env:
+    RABBITMQ_DEFAULT_USER: ""
+    RABBITMQ_DEFAULT_PASS: ""
+    MINIO_ROOT_USER: ""
+    MINIO_ROOT_PASSWORD: ""
+
+
+# pvcName is the name of common PVC used by multiple microservices for persisting models, cache and other files.
+pvcName: ""
+
+# odModelName defines the name of Object Detection Model (ultralytics hub id)
+odModelName: ""
+
+# claimSize is the storage size claimed by PVC if usePvc is set to true.
+# claimSize should be set based on the size of models and files expected to be stored.
+claimSize: ""
+
+videoingestion:
+  name: videoingestion
+  fullnameOverride: videoingestion
+  fullname: videoingestion
+  image:
+    repository: intel/video-ingestion
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  containerPort: 8080  # Port on which container application listens internally
+  containerPortName: vi-port # Optional name to refer containerPort
+  service:
+    type: ClusterIP
+    port: 8080 # Port on which service exposes connection
+    portName: http  # Service port name. Useful when service exposes multiple ports.
+
+  resources: {}
+
+  env:
+    RUN_MODE: EVA
+    DETECTION_DEVICE: cpu
+    ADD_UTCTIME_TO_METADATA: "true"
+    LSFEATURE_NAME: "EVAM"
+    HTTPS: "false"
+    MTLS_VERIFICATION: "false"
+    APPEND_PIPELINE_NAME_TO_PUBLISHER_TOPIC: "false"
+    REST_SERVER_PORT: 8080
+
+rabbitmq:
+  name: rabbitmq
+  fullname: rabbitmq  
+  service:
+    name: rabbitmq
+    type: ClusterIP
+    amqpPort: 5672
+    managementPort: 15672
+    mqttPort: 1883
+
+minioServer:
+  name: minio-server
+  service:
+    type: ClusterIP
+    port: 9000
+    targetPort: 9000
+
+nodeAffinity: {}

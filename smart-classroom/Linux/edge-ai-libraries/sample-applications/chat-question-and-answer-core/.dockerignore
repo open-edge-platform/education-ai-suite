@@ -1,0 +1,14 @@
+**/venv
+.venv/
+__pycache__/
+*.md
+.vscode
+.dockerignore
+.git/
+chart/
+docs/
+docker/
+nginx_config/
+scripts/
+tests/
+ui/

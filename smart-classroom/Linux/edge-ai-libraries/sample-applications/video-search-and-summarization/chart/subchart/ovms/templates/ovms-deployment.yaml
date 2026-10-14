@@ -1,0 +1,294 @@
+{{- /* --- 1. ENV OVERRIDES: merge chart-level and parent-level env; parent-level takes precedence --- */ -}}
+{{- /* ovmsAllowedMediaDomains -> init-container args, ovms --allowed_media_domains flag */ -}}
+{{- $ovmsChartEnv := .Values.ovms.env -}}
+{{- $ovmsParentEnv := .Values.env -}}
+{{- $ovmsAllowedMediaDomains := default $ovmsChartEnv.ALLOWED_MEDIA_DOMAINS $ovmsParentEnv.ALLOWED_MEDIA_DOMAINS -}}
+{{- /* --- 2. SHARED OVMS MODEL CONFIG: single source of truth (templates/_ovms-model-config.tpl) --- */ -}}
+{{- /* Device, weight-format, storage-name and split-model decisions are shared with the
+       pipeline-manager deployment so the names registered here match the names the
+       consumer is told to call. Do NOT recompute them locally. */ -}}
+{{- $ovmsCfg := include "vss.ovms.modelConfig" (dict "global" .Values.global "ovmsEnv" .Values.ovms.env "parentEnv" .Values.env) | fromYaml -}}
+{{- $ovmsVlmDevice := $ovmsCfg.vlmDevice -}}
+{{- $ovmsLlmDevice := $ovmsCfg.llmDevice -}}
+{{- $ovmsVlmWeightFormat := $ovmsCfg.vlmWeightFormat -}}
+{{- $ovmsLlmWeightFormat := $ovmsCfg.llmWeightFormat -}}
+{{- $vlmStorageName := $ovmsCfg.vlmStorageName -}}
+{{- $llmStorageName := $ovmsCfg.llmStorageName -}}
+{{- $effectiveOvmLlmModel := $ovmsCfg.effectiveLlmModel -}}
+{{- $ovmsSplitModel := $ovmsCfg.splitModel -}}
+{{- $llmConfigured := $ovmsCfg.llmConfigured -}}
+{{- /* --- 3. ACCELERATOR KEYS (OVMS-local: scheduling + validation) --- */ -}}
+{{- /* A K8s device plugin resource key is mandatory when a device includes GPU/NPU.
+       When no separate LLM is configured, the LLM inherits the VLM's key. */ -}}
+{{- $ovmsVlmKey := .Values.global.devices.ovms.vlm.key -}}
+{{- $ovmsLlmKey := ternary .Values.global.devices.ovms.llm.key $ovmsVlmKey $llmConfigured -}}
+{{- $ovmsVlmNeedsKey := or (contains "GPU" $ovmsVlmDevice) (contains "NPU" $ovmsVlmDevice) -}}
+{{- $ovmsLlmNeedsKey := or (contains "GPU" $ovmsLlmDevice) (contains "NPU" $ovmsLlmDevice) -}}
+{{- if and $ovmsVlmNeedsKey (not $ovmsVlmKey) -}}
+{{- fail "global.devices.ovms.vlm.key is required when VLM device is GPU, NPU, or HETERO" -}}
+{{- end -}}
+{{- if and $ovmsLlmNeedsKey (not $ovmsLlmKey) -}}
+{{- fail "global.devices.ovms.llm.key is required when LLM device is GPU, NPU, or HETERO" -}}
+{{- end -}}
+{{- /* --- 4. HARDWARE FLAGS: drive conditional sections (image tag, device mounts, resources) --- */ -}}
+{{- /* ovmsNeedsGpu -> GPU image tag, /dev/dri mount | ovmsNeedsNpu -> /dev/accel mount */ -}}
+{{- $ovmsNeedsAccelerator := or (contains "GPU" $ovmsVlmDevice) (contains "GPU" $ovmsLlmDevice) (contains "NPU" $ovmsVlmDevice) (contains "NPU" $ovmsLlmDevice) -}}
+{{- $ovmsNeedsGpu := or (contains "GPU" $ovmsVlmDevice) (contains "GPU" $ovmsLlmDevice) -}}
+{{- $ovmsNeedsNpu := or (contains "NPU" $ovmsVlmDevice) (contains "NPU" $ovmsLlmDevice) -}}
+{{- /* --- 6b. EMITTED MODEL PATHS (model-download microservice layout) --- */ -}}
+{{- /* The model-download openvino plugin writes converted models to a deep,
+       lowercased path: ovms/openvino_models/<device>/<precision>/<source_model>.
+       The device segment is sanitized by model-download (main.py:
+       re.sub(r"[^A-Za-z0-9._-]+", "_", device)), e.g. HETERO:GPU,CPU -> hetero_gpu_cpu.
+       OVMS config.json base_path (relative to /opt/data/models) points there. */ -}}
+{{- $vlmDeviceDir := regexReplaceAll "[^A-Za-z0-9._-]+" (lower $ovmsVlmDevice) "_" -}}
+{{- $llmDeviceDir := regexReplaceAll "[^A-Za-z0-9._-]+" (lower $ovmsLlmDevice) "_" -}}
+{{- $vlmBasePath := printf "ovms/openvino_models/%s/%s/%s" $vlmDeviceDir (lower $ovmsVlmWeightFormat) .Values.global.vlmName -}}
+{{- $llmBasePath := printf "ovms/openvino_models/%s/%s/%s" $llmDeviceDir (lower $ovmsLlmWeightFormat) $effectiveOvmLlmModel -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ovms.fullname" . }}
+  labels:
+    app: {{ include "ovms.name" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.ovms.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.ovms.name }}
+    spec:
+      securityContext:
+        fsGroup: 0
+      {{- with .Values.nodeAffinity }}
+      affinity:
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      # --- 7. INIT CONTAINERS (model-download microservice, API-driven) ---
+      # Scripts live in the vss-model-download-helper ConfigMap (chart/templates/).
+      # Each init container starts the model-download service in the background,
+      # calls it via REST API to trigger download/conversion, waits for completion,
+      # then exits — advancing to the next init container or the main container.
+      initContainers:
+        - name: download-vlm
+          image: "{{ .Values.global.modelDownload.image.repository }}:{{ .Values.global.modelDownload.image.tag }}"
+          imagePullPolicy: {{ .Values.global.modelDownload.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/download-ovms-model.sh"]
+          env:
+            - name: MODEL_TYPE
+              value: "vlm"
+            - name: MODEL_NAME
+              value: {{ required "Value for `global.vlmName` is required!" .Values.global.vlmName | quote }}
+            - name: WEIGHT_FORMAT
+              value: {{ $ovmsVlmWeightFormat | quote }}
+            - name: DEVICE
+              value: {{ $ovmsVlmDevice | lower | quote }}
+            - name: MODEL_PATH
+              value: /opt/models
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              value: "1"
+            - name: OVMS_RELEASE_TAG
+              value: {{ .Values.global.modelDownload.ovmsReleaseTag | quote }}
+            {{- if .Values.global.huggingfaceToken }}
+            - name: HF_TOKEN
+              value: "{{ .Values.global.huggingfaceToken }}"
+            {{- end }}
+            - name: http_proxy
+              value: {{ .Values.global.proxy.http_proxy }}
+            - name: https_proxy
+              value: {{ .Values.global.proxy.https_proxy }}
+            - name: no_proxy
+              value: "{{ .Values.global.proxy.no_proxy }},localhost,127.0.0.1,audioanalyzer,pipelinemanager,videoingestion,minio-server,postgresql,video-summary-nginx,rabbitmq,multimodal-embedding-ms,multimodal-dataprep,vdms-vectordb,vector-retriever,videosearch,.svc.cluster.local"
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: workspace
+              mountPath: /opt/models
+              subPath: ov-models/models
+            - name: model-download-scripts
+              mountPath: /scripts
+            {{- if $ovmsNeedsGpu }}
+            - name: dri-device
+              mountPath: /dev/dri
+            {{- end }}
+            {{- if $ovmsNeedsNpu }}
+            - name: accel-device
+              mountPath: /dev/accel
+            {{- end }}
+        {{- if $ovmsSplitModel }}
+        - name: download-llm
+          image: "{{ .Values.global.modelDownload.image.repository }}:{{ .Values.global.modelDownload.image.tag }}"
+          imagePullPolicy: {{ .Values.global.modelDownload.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/download-ovms-model.sh"]
+          env:
+            - name: MODEL_TYPE
+              value: "llm"
+            - name: MODEL_NAME
+              value: {{ $effectiveOvmLlmModel | quote }}
+            - name: WEIGHT_FORMAT
+              value: {{ $ovmsLlmWeightFormat | quote }}
+            - name: DEVICE
+              value: {{ $ovmsLlmDevice | lower | quote }}
+            - name: MODEL_PATH
+              value: /opt/models
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              value: "1"
+            - name: OVMS_RELEASE_TAG
+              value: {{ .Values.global.modelDownload.ovmsReleaseTag | quote }}
+            {{- if .Values.global.huggingfaceToken }}
+            - name: HF_TOKEN
+              value: "{{ .Values.global.huggingfaceToken }}"
+            {{- end }}
+            - name: http_proxy
+              value: {{ .Values.global.proxy.http_proxy }}
+            - name: https_proxy
+              value: {{ .Values.global.proxy.https_proxy }}
+            - name: no_proxy
+              value: "{{ .Values.global.proxy.no_proxy }},localhost,127.0.0.1,audioanalyzer,pipelinemanager,videoingestion,minio-server,postgresql,video-summary-nginx,rabbitmq,multimodal-embedding-ms,multimodal-dataprep,vdms-vectordb,vector-retriever,videosearch,.svc.cluster.local"
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: workspace
+              mountPath: /opt/models
+              subPath: ov-models/models
+            - name: model-download-scripts
+              mountPath: /scripts
+            {{- if $ovmsNeedsGpu }}
+            - name: dri-device
+              mountPath: /dev/dri
+            {{- end }}
+            {{- if $ovmsNeedsNpu }}
+            - name: accel-device
+              mountPath: /dev/accel
+            {{- end }}
+        {{- end }}
+        # Assemble the OVMS config.json registering each converted model under
+        # its storage-aware name, pointing base_path at the emitted deep layout.
+        - name: write-ovms-config
+          image: "busybox:1.36"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              cat > /opt/models/config.json <<'EOF'
+              {
+                "model_config_list": [
+                  {
+                    "config": {
+                      "name": "{{ $vlmStorageName }}",
+                      "base_path": "{{ $vlmBasePath }}"
+                    }
+                  }{{- if $ovmsSplitModel }},
+                  {
+                    "config": {
+                      "name": "{{ $llmStorageName }}",
+                      "base_path": "{{ $llmBasePath }}"
+                    }
+                  }
+              {{- end }}
+                ]
+              }
+              EOF
+              echo "Wrote OVMS config.json:"
+              cat /opt/models/config.json
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: workspace
+              mountPath: /opt/models
+              subPath: ov-models/models
+      # --- 8. OVMS CONTAINER ---
+      # Uses the GPU-tagged image when any device targets GPU; otherwise the default CPU image.
+      # Mounts the same workspace volume (with exported models) and starts OVMS pointing at config.json.
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{- if $ovmsNeedsGpu -}} {{ .Values.ovms.image.repository }}:{{ .Values.ovms.image.Gputag }} {{- else -}} {{ .Values.ovms.image.repository }}:{{ .Values.ovms.image.tag }} {{- end -}}"
+          imagePullPolicy: {{ .Values.ovms.image.pullPolicy }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          ports:
+            - containerPort: {{ .Values.ovms.containerPort }}
+              name: {{ .Values.ovms.containerPortName }}
+              protocol: TCP
+          volumeMounts:
+            - name: workspace
+              mountPath: /opt/data
+              subPath: ov-models
+          env:
+            - name: http_proxy
+              value: {{ .Values.global.proxy.http_proxy }}
+            - name: https_proxy
+              value: {{ .Values.global.proxy.https_proxy }}
+            - name: no_proxy
+              value: "{{ .Values.global.proxy.no_proxy }},localhost,127.0.0.1,audioanalyzer,pipelinemanager,videoingestion,minio-server,postgresql,video-summary-nginx,rabbitmq,multimodal-embedding-ms,multimodal-dataprep,vdms-vectordb,vector-retriever,videosearch,.svc.cluster.local"
+          args: ["--port", "9300", "--rest_port", "8300", "--log_level", "DEBUG", "--config_path", "/opt/data/models/config.json", "--metrics_enable", "--allowed_media_domains", "{{ $ovmsAllowedMediaDomains }}"]
+      # --- 9. ACCELERATOR RESOURCES ---
+      # Only rendered when at least one device targets GPU or NPU.
+      # Requests K8s device plugin resource keys (e.g. gpu.intel.com/i915) for scheduling.
+      # Deduplicates keys when VLM and LLM share the same accelerator.
+      {{- if $ovmsNeedsAccelerator }}
+          resources:
+            requests:
+            {{- if $ovmsVlmNeedsKey }}
+              {{ $ovmsVlmKey }}: 1
+            {{- end }}
+            {{- if and $ovmsLlmNeedsKey (or (not $ovmsVlmNeedsKey) (ne $ovmsLlmKey $ovmsVlmKey)) }}
+              {{ $ovmsLlmKey }}: 1
+            {{- end }}
+            limits:
+            {{- if $ovmsVlmNeedsKey }}
+              {{ $ovmsVlmKey }}: 1
+            {{- end }}
+            {{- if and $ovmsLlmNeedsKey (or (not $ovmsVlmNeedsKey) (ne $ovmsLlmKey $ovmsVlmKey)) }}
+              {{ $ovmsLlmKey }}: 1
+            {{- end }}
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+      {{- end }}
+      # --- 10. VOLUMES ---
+      # /dev/dri (GPU) and /dev/accel (NPU) only when needed.
+      # Workspace: PVC / hostPath / emptyDir based on global settings.
+      # scripts-volume removed: model download/conversion now handled by the
+      # model-download init containers (see section 7).
+      volumes:
+      {{- if $ovmsNeedsGpu }}
+        - name: dri-device
+          hostPath:
+            path: /dev/dri
+            type: Directory
+      {{- end }}
+      {{- if $ovmsNeedsNpu }}
+        - name: accel-device
+          hostPath:
+            path: /dev/accel
+            type: Directory
+      {{- end }}
+        - name: workspace
+          {{- if .Values.global.usePvc }}
+          persistentVolumeClaim:
+            claimName: {{ include "ovms.fullname" . }}-pvc
+          {{- else if .Values.global.volumeHostPath }}
+          hostPath:
+            path: {{ .Values.global.volumeHostPath }}
+            type: DirectoryOrCreate
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: model-download-scripts
+          configMap:
+            name: vss-model-download-helper
+            defaultMode: 0755

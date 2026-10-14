@@ -1,0 +1,78 @@
+# Default values for VDMS vectorDB.
+global:
+  # Set this value to hostPath where we want to mount a volume (Used in single node cluster or standalone sub-chart installation).
+  volumeHostPath: ""
+  
+  # usePvc should be set to true to use a PVC for persisting models, cache and other files.
+  usePvc: false
+
+  # keepPvc should be set to true to retain the PVC after uninstalling the chart.
+  keepPvc: false
+
+replicaCount: 1
+
+# claimSize is the storage size claimed by PVC if usePvc is set to true.
+# claimSize should be set based on the size of models and files expected to be stored.
+claimSize: ""
+
+image:
+  repository: intellabs/vdms
+  # This sets the pull policy for images.
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "v2.12.0"
+
+imagePullSecrets: []
+# This is to override the chart name.
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  allowPrivilegeEscalation: false
+  runAsNonRoot: false
+  runAsUser: 0
+  seccompProfile:
+    type: RuntimeDefault    
+
+containerPort: 55555    # Port on which container application listens internally
+containerPortName: vdms-db-port  # Optional name to refer containerPort
+service:
+  type: ClusterIP
+  portName: http
+  port: 55555   # Port on which service listens for incoming connection, if exposed externally
+
+resources: {}
+
+livenessProbe:
+  tcpSocket:
+    port: vdms-db-port
+  periodSeconds: 20
+  failureThreshold: 10
+readinessProbe:
+  tcpSocket:
+    port: vdms-db-port
+  periodSeconds: 10
+  failureThreshold: 6
+startupProbe:
+  tcpSocket:
+    port: vdms-db-port
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 10
+
+volumes: []
+volumeMounts: []
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

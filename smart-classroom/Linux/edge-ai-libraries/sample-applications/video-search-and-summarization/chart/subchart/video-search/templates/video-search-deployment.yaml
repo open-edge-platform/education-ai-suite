@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "videosearch.fullname" . }}
+  labels:
+    app: {{ include "videosearch.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "videosearch.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "videosearch.name" . }}
+    spec:
+      initContainers:
+        - name: wait-for-vector-retriever
+          image: curlimages/curl:latest
+          command: 
+            - sh
+            - -c
+            - |
+              echo "Waiting for vector-retriever service to be ready..."
+              until curl -s -f http://{{ .Values.vectorRetriever.name }}:{{ .Values.vectorRetriever.service.port }}/ready; do
+                echo "vector-retriever service is not ready yet, waiting..."
+                sleep 10
+              done
+              echo "vector-retriever service is ready!"
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ include "vss.image" (dict "registry" .Values.global.registry "repository" .Values.videosearch.image.repository "tag" (.Values.global.tag | default .Values.videosearch.image.tag)) }}"
+          imagePullPolicy: "{{ .Values.global.pullPolicy | default .Values.videosearch.image.pullPolicy }}"
+          ports:
+            - containerPort: {{ .Values.videosearch.containerPort }}
+              name: {{ .Values.videosearch.containerPortName }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          {{- with .Values.videosearch.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: no_proxy
+              value: "{{ .Values.global.proxy.no_proxy }},localhost,127.0.0.1,audioanalyzer,multimodal-embedding-ms,multimodal-dataprep,vdms-vectordb,vector-retriever,videosearch,pipelinemanager,videoingestion,minio-server,postgresql,video-summary-nginx,ovms,rabbitmq,.svc.cluster.local"
+            - name: no_proxy_env
+              value: "{{ .Values.global.proxy.no_proxy }},localhost,127.0.0.1,audioanalyzer,multimodal-embedding-ms,multimodal-dataprep,vdms-vectordb,vector-retriever,videosearch,pipelinemanager,videoingestion,minio-server,postgresql,video-summary-nginx,ovms,rabbitmq,.svc.cluster.local"
+            - name: http_proxy
+              value: "{{ .Values.global.proxy.http_proxy }}"
+            - name: https_proxy
+              value: "{{ .Values.global.proxy.https_proxy }}"
+            - name: INDEX_NAME
+              value: {{ .Values.global.vdmsIndexName | quote }}
+            - name: EMBEDDINGS_ENDPOINT
+              value: {{ .Values.videosearch.env.EMBEDDINGS_ENDPOINT | default .Values.global.env.MULTIMODAL_EMBEDDING_ENDPOINT | quote }}
+            - name: EMBEDDINGS_MODEL_NAME
+              value: {{ required "global.embeddingModelName is required" .Values.global.embeddingModelName | quote }}
+            - name: RETRIEVER_ENDPOINT
+              value: {{ .Values.videosearch.env.RETRIEVER_ENDPOINT | quote }}
+            - name: WATCH_DIRECTORY
+              value: {{ .Values.videosearch.env.VS_WATCHER_DIR | quote }}
+            - name: WATCH_DIRECTORY_CONTAINER_PATH
+              value: {{ .Values.videosearch.env.WATCH_DIRECTORY_CONTAINER_PATH | quote }}
+            - name: WATCH_DIRECTORY_RECURSIVE
+              value: {{ .Values.videosearch.env.WATCH_DIRECTORY_RECURSIVE | quote }}
+            - name: DEBOUNCE_TIME
+              value: {{ .Values.videosearch.env.VS_DEBOUNCE_TIME | quote }}
+            - name: DELETE_PROCESSED_FILES
+              value: {{ .Values.videosearch.env.VS_DELETE_PROCESSED_FILES | quote }}
+            - name: VS_INITIAL_DUMP
+              value: {{ .Values.videosearch.env.VS_INITIAL_DUMP | quote }}
+            - name: VIDEO_UPLOAD_ENDPOINT
+              value: {{ .Values.videosearch.env.VIDEO_UPLOAD_ENDPOINT | quote }}
+            - name: WATCH_BATCH_SIZE
+              value: {{ .Values.videosearch.env.WATCH_BATCH_SIZE | quote }}
+            - name: BATCH_JOB_POLL_INTERVAL_SECONDS
+              value: {{ .Values.videosearch.env.BATCH_JOB_POLL_INTERVAL_SECONDS | quote }}
+            - name: BATCH_JOB_TIMEOUT_SECONDS
+              value: {{ .Values.videosearch.env.BATCH_JOB_TIMEOUT_SECONDS | quote }}
+            - name: AGGREGATION_ENABLED
+              value: {{ .Values.videosearch.env.AGGREGATION_ENABLED | quote }}
+            - name: AGGREGATION_SEGMENT_DURATION
+              value: {{ .Values.videosearch.env.AGGREGATION_SEGMENT_DURATION | quote }}
+            - name: AGGREGATION_MIN_GAP
+              value: {{ .Values.videosearch.env.AGGREGATION_MIN_GAP | quote }}
+            - name: AGGREGATION_MAX_RESULTS
+              value: {{ .Values.videosearch.env.AGGREGATION_MAX_RESULTS | quote }}
+            - name: AGGREGATION_INITIAL_K
+              value: {{ .Values.videosearch.env.AGGREGATION_INITIAL_K | quote }}
+            - name: AGGREGATION_CONTEXT_SEEK_OFFSET_SECONDS
+              value: {{ .Values.videosearch.env.AGGREGATION_CONTEXT_SEEK_OFFSET_SECONDS | quote }}
+            - name: AGGREGATION_PREFER_FULL_FRAME_SEEK
+              value: {{ .Values.videosearch.env.AGGREGATION_PREFER_FULL_FRAME_SEEK | quote }}
+            - name: AGGREGATION_FULL_FRAME_SEEK_BAND
+              value: {{ .Values.videosearch.env.AGGREGATION_FULL_FRAME_SEEK_BAND | quote }}
+            - name: SEARCH_DATAPREP_TIMEOUT_MS
+              value: {{ .Values.videosearch.env.SEARCH_DATAPREP_TIMEOUT_MS | quote }}
+            - name: AGGREGATION_QUAL_MAX_WEIGHT
+              value: {{ .Values.videosearch.env.AGGREGATION_QUAL_MAX_WEIGHT | quote }}
+            - name: AGGREGATION_QUAL_TOP_WEIGHT
+              value: {{ .Values.videosearch.env.AGGREGATION_QUAL_TOP_WEIGHT | quote }}
+            - name: AGGREGATION_QUAL_TOP_RATIO
+              value: {{ .Values.videosearch.env.AGGREGATION_QUAL_TOP_RATIO | quote }}
+            - name: AGGREGATION_QUAL_TOP_MIN_COUNT
+              value: {{ .Values.videosearch.env.AGGREGATION_QUAL_TOP_MIN_COUNT | quote }}
+            - name: AGGREGATION_QUAL_TOP_MAX_COUNT
+              value: {{ .Values.videosearch.env.AGGREGATION_QUAL_TOP_MAX_COUNT | quote }}
+            - name: AGGREGATION_CONTEXT_SIGMA_SECONDS
+              value: {{ .Values.videosearch.env.AGGREGATION_CONTEXT_SIGMA_SECONDS | quote }}
+            - name: AGGREGATION_CONTEXT_BOOST_STRENGTH
+              value: {{ .Values.videosearch.env.AGGREGATION_CONTEXT_BOOST_STRENGTH | quote }}

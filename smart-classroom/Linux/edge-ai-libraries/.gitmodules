@@ -1,0 +1,43 @@
+[submodule "libraries/anomalib"]
+	path = libraries/anomalib
+	url = https://github.com/open-edge-platform/anomalib
+[submodule "libraries/training_extensions"]
+	path = libraries/training_extensions
+	url = https://github.com/open-edge-platform/training_extensions.git
+[submodule "libraries/datumaro"]
+	path = libraries/datumaro
+	url = https://github.com/open-edge-platform/datumaro.git
+[submodule "libraries/geti-sdk"]
+	path = libraries/geti-sdk
+	url = https://github.com/open-edge-platform/geti-sdk.git
+[submodule "libraries/model_api"]
+	path = libraries/model_api
+	url = https://github.com/open-edge-platform/model_api.git
+[submodule "tools/geti"]
+	path = tools/geti
+	url = https://github.com/open-edge-platform/geti
+[submodule "libraries/robotics-ai-libraries/flann/flann"]
+	path = libraries/robotics-ai-libraries/flann/flann
+	url = https://github.com/flann-lib/flann.git
+	shallow = true
+[submodule "libraries/robotics-ai-libraries/pcl/pcl"]
+	path = libraries/robotics-ai-libraries/pcl/pcl
+	url = https://github.com/PointCloudLibrary/pcl.git
+	shallow = true
+[submodule "libraries/edge-control-libraries/fieldbus/ethercat-masterstack/ighethercat"]
+	path = libraries/edge-control-libraries/fieldbus/ethercat-masterstack/ighethercat
+	url = https://gitlab.com/etherlab.org/ethercat.git
+	shallow = true
+[submodule "libraries/robotics-ai-libraries/motion-control-gateway/amr/ydlidar_ros2/sdk"]
+	path = libraries/robotics-ai-libraries/motion-control-gateway/amr/ydlidar_ros2/sdk
+	url = https://github.com/YDLIDAR/sdk.git
+	shallow = true
+[submodule "microservices/isolation-forest"]
+	path = microservices/isolation-forest
+	url = https://github.com/intel/isolation-forest-microservice
+[submodule "microservices/random-forest"]
+	path = microservices/random-forest
+	url = https://github.com/intel/random-forest-microservice
+[submodule "libraries/dlstreamer"]
+	path = libraries/dlstreamer
+	url = https://github.com/open-edge-platform/dlstreamer

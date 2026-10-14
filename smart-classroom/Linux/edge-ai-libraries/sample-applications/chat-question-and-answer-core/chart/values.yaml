@@ -1,0 +1,49 @@
+image:
+  registry: "intel/"
+  pullPolicy: IfNotPresent
+  tags:
+    openvinoCPU: "core_2026.2.0-rc2"
+    openvinoGPU: "core_gpu_2026.2.0-rc2"
+    ollama: "core_ollama_2026.2.0-rc2"
+
+configmap:
+  enabled: true  # Set to `false` to use default model config in the application
+
+global:
+  http_proxy:
+  https_proxy:
+  no_proxy:
+  model_cache_path: "/tmp/model_cache"
+  ui_nodeport:
+  pvc:
+    size: 60Gi
+  keeppvc: false # true  to persist models across multiple deployments
+
+chatqna:
+  name: chatqna-core
+  service:
+    type: ClusterIP
+    port: 8888
+  readinessProbe:
+    httpGet:
+      path: /v1/chatqna/health
+      port: 8888
+    initialDelaySeconds: 30
+    periodSeconds: 30
+
+gpu:
+  enabled: false
+  devices: /dev/dri
+  # Extra supplemental group IDs for host video/render device access.
+  # Configure render-device group IDs for nodes that require supplemental groups to access /dev/dri.
+  supplementalGroups:
+  - 44   # video
+  - 109  # render (Ubuntu 20.04)
+  - 110  # render (Ubuntu 22.04)
+  - 992  # render (Ubuntu 24.04)
+  key: #update as per the cluster node label key for GPU assigned by device Plugin
+
+uiService:
+  name: chatqna-core-ui
+  type: ClusterIP
+  port: 8102

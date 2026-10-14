@@ -1,0 +1,719 @@
+import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { readCameras } from '../../services/cameraStorage';
+
+// Read once, at module load, so the stored cameras are already in place on the
+// first render and loadCameraSettingsFromStorage derives the right videoStatus.
+// Later edits go through setFrontCamera/etc; this snapshot is only the seed.
+const storedCameras = readCameras();
+
+export type Tab = 'transcripts' | 'summary' | 'mindmap';
+export type ProcessingMode = 'audio' | 'video-only' | 'microphone' | null;
+// 'no-devices' means the machine has no microphone; 'off' means it has one but
+// this session was started without audio (a camera-only recording).
+export type AudioStatus = 'idle' | 'checking' | 'ready' | 'recording' | 'processing' | 'transcribing' | 'summarizing' | 'mindmapping' | 'complete' | 'error' | 'no-devices' | 'off';
+
+export type ReportStatus = 'idle' | 'generating' | 'done' | 'error';
+export type VideoStatus = 'idle' | 'ready' | 'starting' | 'streaming' | 'stopping' | 'failed' | 'completed' | 'no-config'| 'playback';
+
+export interface SearchResult {
+  score: number;
+  session_id: string;
+  topic: string;
+  start_time: number;
+  end_time: number;
+  text: string;
+}
+ 
+export interface UIState {
+  aiProcessing: boolean;
+  summaryEnabled: boolean;
+  summaryLoading: boolean;
+  summaryComplete: boolean;
+  mindmapEnabled: boolean;
+  mindmapLoading: boolean;
+  // True once the mind-map image step has finished — i.e. the browser captured
+  // the jsMind view and (attempted to) upload it as the report's mind-map image.
+  // Set even when the capture/upload fails, so report auto-generation is never
+  // blocked forever; a failure just means the report renders without the image.
+  // Report auto-generation waits on this so the PNG is on disk before the
+  // backend reads it (see ReportPanel auto-trigger).
+  mindmapImageReady: boolean;
+  activeTab: Tab;
+  autoSwitched: boolean;
+  autoSwitchedToMindmap: boolean;
+  sessionId: string | null;
+  videoSessionId: string | null;
+  uploadedAudioPath: string | null;
+  shouldStartSummary: boolean;
+  shouldStartMindmap: boolean;
+  reportStatus: ReportStatus;
+  reportError: string | null;
+  shouldStartReport: boolean;
+  projectLocation: string;
+  frontCamera: string;
+  backCamera: string;
+  boardCamera: string;
+  frontCameraStream: string;
+  backCameraStream: string;
+  boardCameraStream: string;
+  activeStream: 'front' | 'back' | 'content' | 'all' | null;
+  videoAnalyticsLoading: boolean;
+  videoAnalyticsActive: boolean;
+  processingMode: ProcessingMode;
+  audioStatus: AudioStatus;
+  videoStatus: VideoStatus;
+  hasAudioDevices: boolean;
+  audioDevicesLoading: boolean;
+  isRecording: boolean;
+  justStoppedRecording: boolean;
+  videoAnalyticsStopping: boolean;
+  hasUploadedVideoFiles: boolean;
+  monitoringActive: boolean;
+  monitoringPaused: boolean;
+  videoPlaybackMode: boolean;
+  uploadedVideoFiles: {
+    front: File | null;
+    back: File | null;
+    board: File | null;
+  };
+  recordedVideoType: 'back' | 'board' | 'front' | null;
+  searchQuery: string;
+  searchResults: SearchResult[];
+  showSearchResults: boolean; 
+  contentSegmentationStatus: 'idle' | 'loading' | 'complete' | 'error';
+  contentSegmentationEnabled: boolean;
+  searchLoading: boolean;
+  searchError: string | null;
+  contentSegmentationError: string | null;
+  timelineHighlight: {
+    startTime: number;
+    endTime: number;
+    topic: string;
+  } | null;
+  csProcessing: boolean;
+  csSummarizing: boolean;
+  transcriptionDone: boolean;
+  csUploadsComplete: boolean;
+  csHasUploads: boolean;
+  csServerFilesExist: boolean;
+  csTags: string[];
+}
+ 
+const initialState: UIState = {
+  aiProcessing: false,
+  summaryEnabled: false,
+  summaryLoading: false,
+  summaryComplete: false,
+  mindmapEnabled: false,
+  mindmapLoading: false,
+  mindmapImageReady: false,
+  activeTab: 'transcripts',
+  autoSwitched: false,
+  autoSwitchedToMindmap: false,
+  sessionId: null,
+  videoSessionId: null,
+  uploadedAudioPath: null,
+  shouldStartSummary: false,
+  reportStatus: 'idle',
+  reportError: null,
+  shouldStartReport: false,
+  shouldStartMindmap: false,
+  transcriptionDone: false,
+  projectLocation: 'storage/',
+  activeStream: null,
+  frontCamera: storedCameras.front,
+  backCamera: storedCameras.back,
+  boardCamera: storedCameras.board,
+  frontCameraStream: '',
+  backCameraStream: '',
+  boardCameraStream: '',
+  videoAnalyticsLoading: false,
+  videoAnalyticsActive: false,
+  processingMode: null,
+  audioStatus: 'idle',
+  videoStatus: 'idle',
+  hasAudioDevices: true,
+  audioDevicesLoading: false,
+  isRecording: false,
+  justStoppedRecording: false,
+  videoAnalyticsStopping: false,
+  hasUploadedVideoFiles: false,
+  monitoringActive: false,
+  monitoringPaused: false,
+  videoPlaybackMode: false,
+  uploadedVideoFiles: {
+    front: null,
+    back: null,
+    board: null,
+  },
+  recordedVideoType: null,
+  searchQuery: '',
+  searchResults: [],
+  showSearchResults: false, 
+  contentSegmentationStatus: 'idle',
+  contentSegmentationEnabled: false,
+  searchLoading: false,
+  searchError: null,
+  contentSegmentationError: null,
+  timelineHighlight: null,
+  csProcessing: false,
+  csSummarizing: false,
+  csUploadsComplete: false,
+  csHasUploads: false,
+  csServerFilesExist: false,
+  csTags: [],
+};
+
+const uiSlice = createSlice({
+  name: 'ui',
+  initialState,
+  reducers: {
+    startProcessing(state) {
+      state.aiProcessing = true;
+      state.summaryEnabled = false;
+      state.summaryLoading = false;
+      state.summaryComplete = false;
+      state.mindmapEnabled = false;
+      state.mindmapLoading = false;
+      state.mindmapImageReady = false;
+      state.activeTab = 'transcripts';
+      state.autoSwitched = false;
+      state.autoSwitchedToMindmap = false;
+      state.sessionId = null;
+      state.uploadedAudioPath = null;
+      state.shouldStartSummary = false;
+      state.shouldStartMindmap = false;
+      state.reportStatus = 'idle';
+      state.reportError = null;
+      state.shouldStartReport = false;
+      state.transcriptionDone = false;
+      state.videoAnalyticsLoading = false;
+      state.videoAnalyticsActive = false;
+      state.contentSegmentationStatus = 'idle';
+      state.contentSegmentationEnabled = false;
+      state.contentSegmentationError = null;
+      state.searchLoading = false;
+      state.searchError = null;
+      state.searchQuery = '';
+      state.searchResults = [];
+      state.showSearchResults = false;
+      state.timelineHighlight = null;
+    },
+ 
+    processingFailed(state) {
+      state.aiProcessing = false;
+      state.summaryLoading = false;
+      state.summaryComplete = false;
+      state.mindmapLoading = false;
+      state.videoAnalyticsLoading = false;
+      state.videoAnalyticsActive = false;
+      state.processingMode = null;
+      state.audioStatus = 'error';
+      state.videoStatus = 'failed';
+      state.isRecording = false;
+      state.videoAnalyticsStopping = false;
+      state.contentSegmentationStatus = 'idle';
+      state.contentSegmentationEnabled = false;
+      state.contentSegmentationError = null;
+      state.searchLoading = false;
+      state.searchError = null;
+    },
+ 
+    transcriptionComplete(state, action: PayloadAction<{ enableSummary: boolean }>) {
+      console.log('transcriptionComplete reducer called');
+      state.transcriptionDone = true;
+      
+      // Only enable summary if the feature is enabled in backend
+      if (action.payload.enableSummary) {
+        state.summaryEnabled = true;
+        state.summaryLoading = true;
+        state.summaryComplete = false;
+        state.shouldStartSummary = true;
+        state.audioStatus = 'summarizing';
+        if (!state.autoSwitched) {
+          state.activeTab = 'summary';
+          state.autoSwitched = true;
+        }
+      } else {
+        // Summary feature disabled - mark as complete
+        state.audioStatus = 'complete';
+      }
+    },
+ 
+    clearSummaryStartRequest(state) {
+      state.shouldStartSummary = false;
+    },
+
+    // ===== Report generation =====
+    startReport(state) {
+      state.shouldStartReport = true;
+      state.reportStatus = 'generating';
+      state.reportError = null;
+    },
+    clearReportStartRequest(state) {
+      state.shouldStartReport = false;
+    },
+    reportDone(state) {
+      state.reportStatus = 'done';
+      state.shouldStartReport = false;
+    },
+    reportFailed(state, action: PayloadAction<string>) {
+      state.reportStatus = 'error';
+      state.reportError = action.payload;
+      state.shouldStartReport = false;
+    },
+
+    summaryStreamComplete(state) {
+      state.summaryLoading = false;
+      state.summaryComplete = true;
+      state.audioStatus = 'summarizing';
+      console.log('🎯 Summary stream completed');
+    },
+ 
+    setUploadedAudioPath(state, action: PayloadAction<string>) {
+      state.uploadedAudioPath = action.payload;
+      if (action.payload === 'MICROPHONE') {
+        state.audioStatus = 'recording';
+      } else if (action.payload && action.payload !== '') {
+        state.audioStatus = 'processing';
+      }
+    },
+ 
+    setSessionId(state, action: PayloadAction<string | null>) {
+      const v = action.payload;
+      if (typeof v === 'string' && v.trim().length > 0) {
+        state.sessionId = v;
+      }
+    },
+
+    setVideoSessionId(state, action: PayloadAction<string | null>) {
+      state.videoSessionId = action.payload;
+    },
+    
+    setActiveStream(state, action: PayloadAction<'front' | 'back' | 'content' | 'all' | null>) {
+      state.activeStream = action.payload;
+    },
+    
+    firstSummaryToken(state) {
+      state.summaryLoading = false;
+      state.audioStatus = 'summarizing';
+    },
+ 
+    summaryDone(state, action: PayloadAction<{ enableMindmap: boolean }>) {
+      state.aiProcessing = false;
+      state.summaryComplete = true;
+      
+      // Only enable mindmap if the feature is enabled in backend
+      if (action.payload.enableMindmap) {
+        state.mindmapEnabled = true;
+        state.mindmapLoading = false;
+        state.shouldStartMindmap = true;
+        state.audioStatus = 'mindmapping';
+   
+        if (!state.autoSwitchedToMindmap) {
+          state.activeTab = 'mindmap';
+          state.autoSwitchedToMindmap = true;
+        }
+      } else {
+        // Mindmap feature disabled - mark as complete
+        state.audioStatus = 'complete';
+      }
+    },
+   
+    mindmapStart(state) {
+      state.mindmapLoading = true;
+      state.shouldStartMindmap = true;
+      state.audioStatus = 'mindmapping';
+    },
+
+    mindmapLoadingStart(state) {
+      state.mindmapLoading = true;
+      state.audioStatus = 'mindmapping';
+    },
+ 
+    mindmapSuccess(state) {
+      state.mindmapLoading = false;
+      state.shouldStartMindmap = false;
+      state.audioStatus = 'complete';
+    },
+ 
+    mindmapFailed(state) {
+      state.mindmapLoading = false;
+      state.shouldStartMindmap = false;
+      state.audioStatus = 'error';
+    },
+
+    // Emitted by MindMapTab after the screenshot capture+upload attempt finishes
+    // (success OR failure). Gates report auto-generation so the mind-map PNG is
+    // saved before the backend reads it.
+    mindmapImageDone(state) {
+      state.mindmapImageReady = true;
+    },
+ 
+    clearMindmapStartRequest(state) {
+      state.shouldStartMindmap = false;
+    },
+ 
+    setActiveTab(state, action: PayloadAction<Tab>) {
+      state.activeTab = action.payload;
+    },
+    
+    setProjectLocation(state, action: PayloadAction<string>) {
+      state.projectLocation = action.payload;
+    },
+    
+    setFrontCamera(state, action: PayloadAction<string>) {
+      state.frontCamera = action.payload;
+    },
+    
+    setBackCamera(state, action: PayloadAction<string>) {
+      state.backCamera = action.payload;
+    },
+    
+    setBoardCamera(state, action: PayloadAction<string>) {
+      state.boardCamera = action.payload;
+    },
+    
+    setFrontCameraStream(state, action: PayloadAction<string>) {
+      state.frontCameraStream = action.payload;
+    },
+    
+    setBackCameraStream(state, action: PayloadAction<string>) {
+      state.backCameraStream = action.payload;
+    },
+    
+    setBoardCameraStream(state, action: PayloadAction<string>) {
+      state.boardCameraStream = action.payload;
+    },
+    
+    resetStream(state) {
+      state.activeStream = null;
+      state.videoStatus = 'idle';
+    },
+ 
+    startStream(state) {
+      state.activeStream = 'all';
+      state.videoStatus = 'streaming';
+    },
+ 
+    stopStream(state) {
+      state.activeStream = null;
+      state.videoStatus = 'completed';
+    },
+ 
+    setVideoAnalyticsLoading(state, action: PayloadAction<boolean>) {
+      state.videoAnalyticsLoading = action.payload;
+      if (action.payload) {
+        state.videoStatus = 'starting';
+      }
+    },
+
+    setVideoAnalyticsActive(state, action: PayloadAction<boolean>) {
+      state.videoAnalyticsActive = action.payload;
+      if (action.payload) {
+        state.videoStatus = 'streaming';
+        state.videoAnalyticsLoading = false;
+      } else if (!state.videoAnalyticsLoading && state.videoStatus !== 'completed') {
+        state.videoStatus = 'ready';
+      }
+    },
+
+    setProcessingMode(state, action: PayloadAction<ProcessingMode>) {
+      state.processingMode = action.payload;
+    },
+
+    loadCameraSettingsFromStorage(state) {
+      const hasVideoConfig = Boolean(
+        state.frontCamera?.trim() ||
+        state.backCamera?.trim() ||
+        state.boardCamera?.trim()
+      );
+      state.videoStatus = hasVideoConfig ? 'ready' : 'no-config';
+    },
+
+    setAudioStatus(state, action: PayloadAction<AudioStatus>) {
+      state.audioStatus = action.payload;
+    },
+
+    setVideoStatus(state, action: PayloadAction<VideoStatus>) {
+      state.videoStatus = action.payload;
+    },
+
+    setHasAudioDevices(state, action: PayloadAction<boolean>) {
+      state.hasAudioDevices = action.payload;
+      state.audioStatus = action.payload ? 'ready' : 'no-devices';
+    },
+
+    setAudioDevicesLoading(state, action: PayloadAction<boolean>) {
+      state.audioDevicesLoading = action.payload;
+      if (action.payload) {
+        state.audioStatus = 'checking';
+      }
+    },
+
+    setIsRecording(state, action: PayloadAction<boolean>) {
+      state.isRecording = action.payload;
+      if (action.payload) {
+        state.justStoppedRecording = false;
+        if (state.hasAudioDevices) {
+          state.audioStatus = 'recording';
+        }
+        if (state.videoStatus === 'ready') {
+          state.videoStatus = 'starting';
+        }
+      } else {
+        state.justStoppedRecording = true;
+      }
+    },
+
+    setJustStoppedRecording(state, action: PayloadAction<boolean>) {
+      state.justStoppedRecording = action.payload;
+    },
+
+    setVideoAnalyticsStopping(state, action: PayloadAction<boolean>) {
+      state.videoAnalyticsStopping = action.payload;
+      if (action.payload) {
+        state.videoStatus = 'stopping';
+      }
+    },
+
+    startTranscription(state) {
+      state.audioStatus = 'transcribing';
+    },
+
+    setHasUploadedVideoFiles(state, action: PayloadAction<boolean>) {
+      state.hasUploadedVideoFiles = action.payload;
+      if (action.payload && state.videoStatus === 'no-config') {
+        state.videoStatus = 'ready';
+      }
+    },
+
+    setMonitoringActive: (state, action) => {
+      state.monitoringActive = action.payload;
+    },
+
+    setMonitoringPaused: (state, action: PayloadAction<boolean>) => {
+      state.monitoringPaused = action.payload;
+    },
+    
+    setUploadedVideoFiles(state, action: PayloadAction<{
+      front?: File | null;
+      back?: File | null;
+      board?: File | null;
+    }>) {
+      if (action.payload.front !== undefined) {
+        state.uploadedVideoFiles.front = action.payload.front;
+      }
+      if (action.payload.back !== undefined) {
+        state.uploadedVideoFiles.back = action.payload.back;
+      }
+      if (action.payload.board !== undefined) {
+        state.uploadedVideoFiles.board = action.payload.board;
+      }
+    },
+
+    setVideoPlaybackMode(state, action: PayloadAction<boolean>) {
+      state.videoPlaybackMode = action.payload;
+    },
+    
+    setRecordedVideoType(state, action: PayloadAction<'back' | 'board' | 'front' | null>) {
+      state.recordedVideoType = action.payload;
+    },
+    
+    setPlaybackFromUploads(state) {
+      const hasFiles =
+        state.uploadedVideoFiles.front ||
+        state.uploadedVideoFiles.back ||
+        state.uploadedVideoFiles.board;
+      if (hasFiles) {
+        state.videoStatus = "completed";
+      }
+    },
+
+    setContentSegmentationStatus(state, action: PayloadAction<'idle' | 'loading' | 'complete' | 'error' >) {
+      state.contentSegmentationStatus = action.payload;
+    },
+
+    setContentSegmentationEnabled(state, action: PayloadAction<boolean>) {
+      state.contentSegmentationEnabled = action.payload;
+    },
+
+    startContentSegmentation(state) {
+      state.contentSegmentationStatus = 'loading';
+      state.contentSegmentationEnabled = false;
+    },
+
+    contentSegmentationSuccess(state) {
+      state.contentSegmentationStatus = 'complete';
+      state.contentSegmentationEnabled = true;
+    },
+
+    contentSegmentationFailed(state, action: PayloadAction<string | undefined>) {
+      state.contentSegmentationStatus = 'error';
+      state.contentSegmentationEnabled = false;
+      state.contentSegmentationError = action.payload || 'Content preparation failed. Please try again.';
+    },
+
+    setSearchLoading(state, action: PayloadAction<boolean>) {
+      state.searchLoading = action.payload;
+    },
+
+    setSearchError(state, action: PayloadAction<string | null>) {
+      state.searchError = action.payload;
+    },
+    
+    setSearchQuery(state, action: PayloadAction<string>) {
+      state.searchQuery = action.payload;
+    },
+
+    setSearchResults(state, action: PayloadAction<SearchResult[]>) {
+      state.searchResults = action.payload;
+      state.showSearchResults = action.payload.length > 0;
+    },
+
+    setShowSearchResults(state, action: PayloadAction<boolean>) {
+      state.showSearchResults = action.payload;
+    },
+
+    setTimelineHighlight(state, action: PayloadAction<{
+      startTime: number;
+      endTime: number;
+      topic: string;
+    } | null>) {
+      state.timelineHighlight = action.payload;
+    },
+
+    setCsProcessing(state, action: PayloadAction<boolean>) {
+      state.csProcessing = action.payload;
+    },
+
+    setCsSummarizing(state, action: PayloadAction<boolean>) {
+      state.csSummarizing = action.payload;
+    },
+
+    setCsUploadsComplete(state, action: PayloadAction<boolean>) {
+      state.csUploadsComplete = action.payload;
+    },
+
+    setCsHasUploads(state, action: PayloadAction<boolean>) {
+      state.csHasUploads = action.payload;
+    },
+
+    setCsTags(state, action: PayloadAction<string[]>) {
+      state.csTags = action.payload;
+    },
+
+    setCsServerFilesExist(state, action: PayloadAction<boolean>) {
+      state.csServerFilesExist = action.payload;
+    },
+
+    clearSearchResults(state) {
+      state.searchResults = [];
+      state.showSearchResults = false;
+      state.timelineHighlight = null;
+      state.searchQuery = '';
+    },
+
+    resetFlow(state) {
+      const preservedAudioDevices = state.hasAudioDevices;
+      const preservedAudioDevicesLoading = state.audioDevicesLoading;
+      const preservedCsHasUploads = state.csHasUploads;
+      const preservedCsUploadsComplete = state.csUploadsComplete;
+      // Which cameras exist is a setting, not flow state. Preserved by hand
+      // rather than left to initialState, which froze the values as they were at
+      // page load and would undo anything entered since.
+      const preservedFrontCamera = state.frontCamera;
+      const preservedBackCamera = state.backCamera;
+      const preservedBoardCamera = state.boardCamera;
+      Object.assign(state, initialState);
+      state.frontCamera = preservedFrontCamera;
+      state.backCamera = preservedBackCamera;
+      state.boardCamera = preservedBoardCamera;
+      state.hasAudioDevices = preservedAudioDevices;
+      state.audioDevicesLoading = preservedAudioDevicesLoading;
+      state.csHasUploads = preservedCsHasUploads;
+      state.csUploadsComplete = preservedCsUploadsComplete;
+      state.audioStatus = preservedAudioDevicesLoading ? 'checking' : (preservedAudioDevices ? 'ready' : 'no-devices');
+      state.contentSegmentationStatus = 'idle';
+      state.contentSegmentationEnabled = false;
+      state.contentSegmentationError = null;
+      state.searchLoading = false;
+      state.searchError = null;
+    },
+  },
+});
+ 
+export const {
+  startProcessing,
+  processingFailed,
+  transcriptionComplete,
+  clearSummaryStartRequest,
+  startReport,
+  clearReportStartRequest,
+  reportDone,
+  reportFailed,
+  summaryStreamComplete,
+  setUploadedAudioPath,
+  setSessionId,
+  setVideoSessionId,
+  setActiveStream,
+  resetStream,
+  startStream,
+  stopStream,
+  firstSummaryToken,
+  summaryDone,
+  mindmapStart,
+  mindmapLoadingStart,
+  mindmapSuccess,
+  mindmapFailed,
+  mindmapImageDone,
+  clearMindmapStartRequest,
+  setActiveTab,
+  setProjectLocation,
+  resetFlow,
+  setFrontCamera, 
+  setBackCamera, 
+  setBoardCamera,
+  setFrontCameraStream,
+  setBackCameraStream,
+  setBoardCameraStream,
+  setVideoAnalyticsLoading,
+  setVideoAnalyticsActive,
+  setProcessingMode,
+  loadCameraSettingsFromStorage,
+  setAudioStatus,
+  setVideoStatus,
+  setHasAudioDevices,
+  setAudioDevicesLoading,
+  setIsRecording,
+  setJustStoppedRecording,
+  setVideoAnalyticsStopping,
+  startTranscription,
+  setHasUploadedVideoFiles,
+  setMonitoringActive,
+  setMonitoringPaused,
+  setUploadedVideoFiles,
+  setVideoPlaybackMode,
+  setRecordedVideoType,
+  setPlaybackFromUploads,
+  setContentSegmentationStatus,
+  setContentSegmentationEnabled,
+  startContentSegmentation,
+  contentSegmentationSuccess,
+  contentSegmentationFailed,
+  setSearchLoading,
+  setSearchError,
+  setSearchQuery,
+  setSearchResults,
+  clearSearchResults,
+  setShowSearchResults,
+  setTimelineHighlight,
+  setCsProcessing,
+  setCsSummarizing,
+  setCsUploadsComplete,
+  setCsHasUploads,
+  setCsTags,
+  setCsServerFilesExist,
+} = uiSlice.actions;
+ 
+export default uiSlice.reducer;

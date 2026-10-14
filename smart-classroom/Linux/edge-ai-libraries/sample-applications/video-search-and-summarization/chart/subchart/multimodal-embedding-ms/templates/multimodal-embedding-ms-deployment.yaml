@@ -1,0 +1,156 @@
+{{- $mmDevice := default "CPU" .Values.global.devices.multimodalEmbedding.device -}}
+{{- $mmKey := .Values.global.devices.multimodalEmbedding.key -}}
+{{- $mmUsesGpu := eq $mmDevice "GPU" -}}
+{{- $mmUsesNpu := eq $mmDevice "NPU" -}}
+{{- $mmUsesAccelerator := or $mmUsesGpu $mmUsesNpu -}}
+{{- /* Validate: key required when device is GPU/NPU */ -}}
+{{- if and $mmUsesAccelerator (not $mmKey) -}}
+{{- fail "global.devices.multimodalEmbedding.key is required when device is GPU or NPU" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "multimodal-embedding-ms.fullname" . }}
+  labels:
+    {{- include "multimodal-embedding-ms.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "multimodal-embedding-ms.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "multimodal-embedding-ms.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podAffinity }}
+      affinity:
+        podAffinity:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        {{- if $mmUsesAccelerator }}
+        supplementalGroups:
+          {{- range .Values.global.accelGroupIds }}
+          - {{ . }}
+          {{- end }}
+        {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ include "vss.image" (dict "registry" .Values.global.registry "repository" (ternary .Values.image.gpu.repository .Values.image.cpu.repository $mmUsesGpu) "tag" (.Values.global.tag | default (ternary .Values.image.tag .Values.global.commonTag (empty .Values.global.commonTag) | default .Chart.AppVersion))) }}"
+          imagePullPolicy: {{ .Values.global.pullPolicy | default .Values.image.pullPolicy }}
+          securityContext:
+            privileged: false
+          ports:
+            - name: {{ .Values.containerPortName }}
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "multimodal-embedding-ms.fullname" . }}-config
+      {{- if $mmUsesAccelerator }}
+          resources:
+            requests:
+              {{ $mmKey }}: 1
+            limits:
+              {{ $mmKey }}: 1
+      {{- else if .Values.resources }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: volume-data
+              mountPath: /home/appuser/.cache/huggingface
+              subPath: huggingface
+      {{- if .Values.modelPvc.enabled }}
+            - name: models-data
+              mountPath: /app/ov_models
+              subPath: ovmodels
+      {{- else }}
+            - name: volume-data
+              mountPath: /app/ov_models
+              subPath: ovmodels
+      {{- end }}
+            - name: volume-data
+              mountPath: /tmp/dataprep
+              subPath: tmpvideos
+      {{- if $mmUsesGpu }}
+            - name: dri-device
+              mountPath: /dev/dri
+      {{- end }}
+      {{- if $mmUsesNpu }}
+            - name: accel-device
+              mountPath: /dev/accel
+      {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- if $mmUsesGpu }}
+        - name: dri-device
+          hostPath:
+            path: /dev/dri
+            type: Directory
+      {{- end }}
+      {{- if $mmUsesNpu }}
+        - name: accel-device
+          hostPath:
+            path: /dev/accel
+            type: Directory
+      {{- end }}
+      {{- if .Values.modelPvc.enabled }}
+        - name: models-data
+          {{- if .Values.modelPvc.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.modelPvc.existingClaim }}
+          {{- else if .Values.global.usePvc }}
+          persistentVolumeClaim:
+            claimName: {{ include "multimodal-embedding-ms.fullname" . }}-models-pvc
+          {{- else if .Values.global.volumeHostPath }}
+          hostPath:
+            path: {{ .Values.global.volumeHostPath }}
+            type: DirectoryOrCreate
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- end }}
+        - name: volume-data
+          {{- if .Values.global.usePvc }}
+          persistentVolumeClaim:
+            claimName: {{ include "multimodal-embedding-ms.fullname" . }}-data-pvc
+          {{- else if .Values.global.volumeHostPath }}
+          hostPath:
+            path: {{ .Values.global.volumeHostPath }}
+            type: DirectoryOrCreate
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

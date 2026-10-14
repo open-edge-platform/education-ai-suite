@@ -1,0 +1,103 @@
+x-nginx-common: &nginx-common
+  image: nginxinc/nginx-unprivileged:1.29.8
+  container_name: chatqna-core-nginx
+  ports:
+    - "${HOST_IP:-127.0.0.1}:8102:8102"
+  volumes:
+    - ../nginx_config/nginx.conf:/etc/nginx/nginx.conf:ro
+
+x-chatqna-core-common: &chatqna-core-common
+  image: ${REGISTRY:-}chatqna:${BACKEND_TAG:-latest}
+  build:
+    context: ../
+    dockerfile: docker/Dockerfile
+  environment:
+    http_proxy: ${http_proxy}
+    https_proxy: ${https_proxy}
+    no_proxy: ${no_proxy}
+    HF_ACCESS_TOKEN: ${HF_ACCESS_TOKEN}
+  expose:
+    - "8888"
+  volumes:
+    - "${MODEL_CACHE_PATH}:/tmp/model_cache"
+    - "${MODEL_CONFIG_PATH:-/dev/null}:/tmp/model_config/config.yaml"
+  group_add:
+    - ${USER_GROUP_ID-1000}
+
+services:
+  nginx-default:
+    <<: *nginx-common
+    profiles:
+      - OPENVINO
+    depends_on:
+      - chatqna-core-ov-cpu
+      - chatqna-core-ui
+
+  nginx-gpu:
+    <<: *nginx-common
+    profiles:
+      - OPENVINO-GPU
+    depends_on:
+      - chatqna-core-ov-gpu
+      - chatqna-core-ui
+
+  nginx-ollama:
+    <<: *nginx-common
+    profiles:
+      - OLLAMA
+    depends_on:
+      - chatqna-core-ollama
+      - chatqna-core-ui
+
+  chatqna-core-ov-cpu:
+    <<: *chatqna-core-common
+    profiles:
+      - OPENVINO
+    container_name: chatqna-core-ov-cpu
+
+  chatqna-core-ov-gpu:
+    <<: *chatqna-core-common
+    profiles:
+      - OPENVINO-GPU
+    container_name: chatqna-core-ov-gpu
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+      args:
+        USE_GPU: "true"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - ${RENDER_DEVICE_GID}
+      - ${USER_GROUP_ID-1000}
+
+  chatqna-core-ollama:
+    <<: *chatqna-core-common
+    profiles:
+      - OLLAMA
+    container_name: chatqna-core-ollama
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.ollama
+    environment:
+      http_proxy: ${http_proxy}
+      https_proxy: ${https_proxy}
+      no_proxy: ${no_proxy},127.0.0.1
+
+  chatqna-core-ui:
+    image: ${REGISTRY:-}chatqna-ui:${UI_TAG:-latest}
+    container_name: chatqna-core-ui
+    build:
+      context: ../ui/
+      dockerfile: Dockerfile
+    environment:
+      http_proxy: ${http_proxy}
+      https_proxy: ${https_proxy}
+      no_proxy: ${no_proxy}
+      APP_BACKEND_URL: ${APP_BACKEND_URL}
+    expose:
+      - "8102"
+
+networks:
+  default:
+    driver: bridge

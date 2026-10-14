@@ -1,0 +1,276 @@
+import { type Pipeline } from "@/api/api.generated";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { EllipsisVertical, ExternalLink, Lock, Plus } from "lucide-react";
+import { useState } from "react";
+import { useTheme } from "next-themes";
+import { Link } from "react-router";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { DeletePipelineDialog } from "./DeletePipelineDialog";
+import { EditPipelineDialog } from "./EditPipelineDialog";
+import { DuplicatePipelineDialog } from "./DuplicatePipelineDialog";
+import { CreatePipelineDialog } from "./CreatePipelineDialog.tsx";
+import { usePipelineTagColors } from "@/hooks/usePipelineTagColors";
+import thumbnailPlaceholder from "@/assets/thumbnail_placeholder.png";
+import { Button } from "@/components/ui/button";
+import { CARDS_GRID_CLASS, cn } from "@/lib/utils";
+
+const PIPELINE_SAMPLE_APP_LINKS: Record<string, string> = {
+  "defect-detection":
+    "https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/ai-suite-manufacturing/industrial-edge-insights-vision/pallet-defect-detection/index.html",
+  "smart-nvr":
+    "https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/smart-nvr/index.html",
+  "smart-parking":
+    "https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/smart-parking/index.html",
+};
+
+type PipelineCardsProps = {
+  pipelines: Pipeline[];
+  maxCards?: number;
+  source: "dashboard" | "pipelines";
+};
+
+export const PipelineCards = ({
+  pipelines,
+  maxCards,
+  source,
+}: PipelineCardsProps) => {
+  const { theme } = useTheme();
+  const { tagColorMap } = usePipelineTagColors(pipelines);
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(
+    null,
+  );
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+
+  const handleEditClick = (pipeline: Pipeline) => {
+    setSelectedPipeline(pipeline);
+    setEditDialogOpen(true);
+  };
+
+  const handleDuplicateClick = (pipeline: Pipeline) => {
+    setSelectedPipeline(pipeline);
+    setDuplicateDialogOpen(true);
+  };
+
+  const handleDeleteClick = (pipeline: Pipeline) => {
+    setSelectedPipeline(pipeline);
+    setDeleteDialogOpen(true);
+  };
+
+  const displayedPipelines =
+    maxCards !== undefined ? pipelines.slice(0, maxCards) : pipelines;
+
+  return (
+    <>
+      <div className={CARDS_GRID_CLASS}>
+        <CreatePipelineDialog>
+          <Button
+            variant="ghost"
+            className="w-full h-full min-h-[12.5rem] border-2 border-dashed border-border hover:border-brand-accent hover:bg-brand-accent/5 flex flex-col items-center justify-center gap-3 text-muted-foreground hover:text-brand-accent"
+          >
+            <Plus className="size-12" />
+            <span className="text-lg font-medium">Create Pipeline</span>
+          </Button>
+        </CreatePipelineDialog>
+
+        {displayedPipelines.map((pipeline) => (
+          <Card
+            key={pipeline.id}
+            className={cn(
+              "flex flex-col pt-0 transition-all duration-200 overflow-hidden",
+              openDropdownId === pipeline.id
+                ? "-translate-y-1 shadow-md"
+                : "hover:-translate-y-1 hover:shadow-md",
+            )}
+          >
+            {pipeline.variants.length > 0 && (
+              <Link
+                to={`/pipelines/${pipeline.id}/${pipeline.variants[0].id}?source=${source}`}
+              >
+                <img
+                  src={pipeline.thumbnail ?? thumbnailPlaceholder}
+                  alt={pipeline.name}
+                  className="w-full object-cover"
+                />
+              </Link>
+            )}
+            <CardHeader className="space-y-2">
+              <div className="flex items-center justify-between gap-2 min-w-0">
+                <CardTitle
+                  className="truncate min-w-0 overflow-hidden"
+                  title={pipeline.name}
+                >
+                  {pipeline.variants.length > 0 ? (
+                    <Link
+                      to={`/pipelines/${pipeline.id}/${pipeline.variants[0].id}?source=${source}`}
+                      className="hover:underline block truncate"
+                    >
+                      {pipeline.name}
+                    </Link>
+                  ) : (
+                    <span className="block truncate">{pipeline.name}</span>
+                  )}
+                </CardTitle>
+                <DropdownMenu
+                  onOpenChange={(open) =>
+                    setOpenDropdownId(open ? pipeline.id : null)
+                  }
+                >
+                  <DropdownMenuTrigger className="shrink-0 size-8 hover:bg-accent dark:hover:bg-accent/50 rounded flex items-center justify-center">
+                    <EllipsisVertical className="h-4 w-4" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {pipeline.source === "PREDEFINED" &&
+                      PIPELINE_SAMPLE_APP_LINKS[pipeline.id] && (
+                        <DropdownMenuItem asChild>
+                          <a
+                            href={PIPELINE_SAMPLE_APP_LINKS[pipeline.id]}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            Go to sample app
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </DropdownMenuItem>
+                      )}
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditClick(pipeline);
+                      }}
+                    >
+                      Edit Pipeline
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDuplicateClick(pipeline);
+                      }}
+                    >
+                      Duplicate Pipeline
+                    </DropdownMenuItem>
+                    {pipeline.source === "PREDEFINED" ? (
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled
+                        className="flex items-center justify-between gap-2"
+                      >
+                        Delete
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="pointer-events-auto">
+                              <Lock className="h-4 w-4" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            Predefined pipeline cannot be deleted.
+                          </TooltipContent>
+                        </Tooltip>
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClick(pipeline);
+                        }}
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {pipeline.tags?.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant="outline"
+                    className="rounded border-0"
+                    style={{
+                      backgroundColor:
+                        theme === "dark"
+                          ? `var(--${tagColorMap.get(tag)})`
+                          : `color-mix(in oklch, var(--${tagColorMap.get(tag)}) 50%, white)`,
+                    }}
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+                {pipeline.variants.map((variant) => (
+                  <Link
+                    key={variant.id}
+                    to={`/pipelines/${pipeline.id}/${variant.id}?source=${source}`}
+                  >
+                    <Badge
+                      variant="secondary"
+                      className="cursor-pointer bg-variant-badge-bg transition-opacity hover:opacity-70"
+                    >
+                      {variant.name}
+                    </Badge>
+                  </Link>
+                ))}
+              </div>
+              <CardDescription className="line-clamp-6 text-justify">
+                {pipeline.description}
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      {selectedPipeline && (
+        <>
+          <EditPipelineDialog
+            pipeline={selectedPipeline}
+            open={editDialogOpen}
+            onOpenChange={(isOpen) => {
+              setEditDialogOpen(isOpen);
+              if (!isOpen) {
+                setSelectedPipeline(null);
+              }
+            }}
+            onSuccess={() => setSelectedPipeline(null)}
+          />
+          <DuplicatePipelineDialog
+            pipeline={selectedPipeline}
+            open={duplicateDialogOpen}
+            onOpenChange={(isOpen) => {
+              setDuplicateDialogOpen(isOpen);
+              if (!isOpen) {
+                setSelectedPipeline(null);
+              }
+            }}
+            onSuccess={() => setSelectedPipeline(null)}
+          />
+          <DeletePipelineDialog
+            open={deleteDialogOpen}
+            onOpenChange={setDeleteDialogOpen}
+            pipeline={selectedPipeline}
+            onSuccess={() => setSelectedPipeline(null)}
+          />
+        </>
+      )}
+    </>
+  );
+};

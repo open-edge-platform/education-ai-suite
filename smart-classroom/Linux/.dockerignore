@@ -1,0 +1,37 @@
+# Keep the Docker build context small and reproducible.
+# The app.Dockerfile only needs ui/ (source) and docker/server.py.
+
+# VCS / editor
+.git/
+.gitignore
+**/.DS_Store
+
+# Python caches / envs
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+tests/
+
+# UI build artifacts (rebuilt inside the image)
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# Runtime / generated data
+models/
+storage/
+monitoring/logs/
+monitoring/executionlogs/
+*.log
+
+# metrics-collector builds from this directly (context: performance-tools);
+# the app image never needs it.
+performance-tools/
+
+# Compose / env files
+docker-compose*.yml
+.env
+.env.*
+!.env.example

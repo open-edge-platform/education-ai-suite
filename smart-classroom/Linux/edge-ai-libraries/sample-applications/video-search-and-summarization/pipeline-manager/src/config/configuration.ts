@@ -1,0 +1,137 @@
+// Copyright (C) 2025 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
+import { CONFIG_STATE } from 'src/features/features.model';
+
+export default () => ({
+  features: {
+    summary: process.env.SUMMARY_FEATURE,
+    search: process.env.SEARCH_FEATURE,
+  },
+  datastore: {
+    baseUrl: 'http://datastore:9009',
+    host: process.env.MINIO_HOST,
+    protocol: process.env.MINIO_PROTOCOL,
+    port: process.env.MINIO_PORT,
+    accessKey: process.env.MINIO_ROOT_USER,
+    secretKey: process.env.MINIO_ROOT_PASSWORD,
+    bucketName: process.env.MINIO_BUCKET,
+    maxFileSize: process.env.MAX_FILE_SIZE ?? 1_000_000_000,
+  },
+  search: {
+    endpoint: process.env.SEARCH_ENDPOINT,
+    dataPrep: process.env.SEARCH_DATAPREP_ENDPOINT,
+    vsIndexName: process.env.VS_INDEX_NAME,
+    dataPrepTimeoutMs: process.env.SEARCH_DATAPREP_TIMEOUT_MS
+      ? Number(process.env.SEARCH_DATAPREP_TIMEOUT_MS)
+      : 30000,
+    dataPrepPollMaxRetries: process.env.SEARCH_DATAPREP_POLL_MAX_RETRIES
+      ? Number(process.env.SEARCH_DATAPREP_POLL_MAX_RETRIES)
+      : 3,
+    dataPrepPollTimeoutMs: process.env.SEARCH_DATAPREP_POLL_TIMEOUT_MS
+      ? Number(process.env.SEARCH_DATAPREP_POLL_TIMEOUT_MS)
+      : 10000,
+    dataPrepPollRetryDelayMs: process.env.SEARCH_DATAPREP_POLL_RETRY_DELAY_MS
+      ? Number(process.env.SEARCH_DATAPREP_POLL_RETRY_DELAY_MS)
+      : 500,
+  },
+  database: {
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    username: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+  },
+  proxy: {
+    noProxy: process.env.no_proxy,
+    url: process.env.proxy ?? 'http://proxy.example.com:8080',
+  },
+  evam: {
+    host: process.env.EVAM_HOST,
+    pipelinePort: process.env.EVAM_PIPELINE_PORT,
+    publishPort: process.env.EVAM_PUBLISH_PORT,
+    videoTopic: 'topic/video_stream',
+    datetimeFormat: 'yyyy_MM_dd-HH_mm_ss.S',
+    model: process.env.EVAM_DETECTION_MODEL ?? 'yolov8l',
+    modelPath:
+      process.env.EVAM_DETECTION_MODEL_PATH ??
+      '/home/pipeline-server/models/object-detection/ultralytics/public/yolov8l/FP32/yolov8l.xml',
+    device: process.env.EVAM_DEVICE ?? 'CPU',
+    rmq: {
+      queue: 'my_mqtt_queue',
+      exchange: 'amq.topic',
+    },
+  },
+
+  audio: {
+    host: process.env.AUDIO_HOST,
+    device: process.env.AUDIO_DEVICE,
+    useFullTranscriptSummary:
+      process.env.AUDIO_USE_FULL_TRANSCRIPT_SUMMARY ?? 'true',
+    version: 'api/v1',
+    apiHealth: 'health',
+    apiTranscription: 'transcriptions',
+    apiModels: 'models',
+  },
+
+  summary: {
+    produceFinalSummary:
+      process.env.PRODUCE_FINAL_SUMMARY ?? 'true',
+  },
+
+  rmq: {
+    host: process.env.RABBITMQ_HOST,
+    amqpPort: process.env.RABBITMQ_AMQP_PORT,
+    username: process.env.RABBITMQ_USER,
+    password: process.env.RABBITMQ_PASSWORD,
+  },
+
+  // OpenAI-compatible API configuration for VLM captioning and LLM summarization.
+  // USE_VLLM controls backend selection: CONFIG_ON = vLLM, CONFIG_OFF = OVMS.
+  openai: {
+    usecase: 'default',
+    llmSummarization: {
+      apiKey: process.env.LLM_SUMMARIZATION_KEY ?? '',
+      apiBase: process.env.LLM_SUMMARIZATION_API,
+      useVLLM: process.env.USE_VLLM ?? CONFIG_STATE.OFF,
+      maxContextLength: process.env.MAX_CONTEXT_LENGTH ?? 90_000,
+      device: process.env.LLM_SUMMARIZATION_DEVICE,
+      concurrent: process.env.LLM_CONCURRENT,
+      modelName: process.env.LLM_MODEL_NAME,
+      modelsAPI: process.env.LLM_MODEL_API ?? 'v1/config',
+      defaults: {
+        temperature: null,
+        topP: null,
+        presencePenalty: null,
+        maxCompletionTokens: process.env.SUMMARIZATION_MAX_COMPLETION_TOKENS,
+        frequencyPenalty: null,
+        doSample: false,
+        seed: 42,
+      },
+    },
+  tick: {
+    interval: parseInt(process.env.TICK_INTERVAL_MS ?? '5000', 10),
+    fastInterval: parseInt(process.env.FAST_TICK_INTERVAL_MS ?? '2000', 10),
+  },
+
+    vlmCaptioning: {
+      apiKey: process.env.VLM_CAPTIONING_KEY ?? '',
+      apiBase: process.env.VLM_CAPTIONING_API,
+      useVLLM: process.env.USE_VLLM ?? CONFIG_STATE.OFF,
+      device: process.env.VLM_CAPTIONING_DEVICE,
+      concurrent: process.env.VLM_CONCURRENT,
+      modelName: process.env.VLM_MODEL_NAME,
+      modelsAPI: process.env.VLM_MODEL_API ?? 'v1/config',
+      multiFrame: process.env.MULTI_FRAME_COUNT ?? 12, // process.env.MULTI_FRAME_COUNT ?? 5,
+      frameOverlap: 0, // process.env.FRAME_OVERFLAP ?? 0,
+      defaults: {
+        temperature: null,
+        topP: null,
+        presencePenalty: null,
+        maxCompletionTokens: process.env.CAPTIONING_MAX_COMPLETION_TOKENS,
+        frequencyPenalty: null,
+        doSample: false,
+        seed: 42,
+      },
+    },
+  },
+});

@@ -1,0 +1,13 @@
+*.pyc
+__pycache__/
+.*_cache/
+**/charts
+.vscode
+.venv
+coverage
+.coverage
+.coverage-report/
+*.lock
+!uv.lock
+.vscode
+nginx_config/*.conf

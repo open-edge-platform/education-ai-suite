@@ -1,0 +1,129 @@
+global:
+  # Set this value to hostPath where we want to mount a volume (Used in single node cluster or standalone sub-chart installation).
+  volumeHostPath: ""
+
+  # usePvc should be set to true to use a PVC for persisting models, cache and other files.
+  usePvc: false
+
+  # keepPvc should be set to true to retain the PVC after uninstalling the chart.
+  keepPvc: false
+
+  # Common release tags to be used for several dependencies
+  commonTag: ""
+  embeddingModelName: ""
+
+  # Host group ids owning the accelerator device nodes (/dev/dri, /dev/accel).
+  # Added to the pod supplementalGroups when this service uses a GPU or NPU so the
+  # non-root container user can open the device. Override to match the target node.
+  accelGroupIds:
+    - 992
+
+  proxy:
+    # setup proxy settings
+    no_proxy: ""
+    http_proxy: ""
+    https_proxy: ""
+replicaCount: 1
+
+image:
+  cpu:
+    repository: intel/multimodal-embedding-serving
+  gpu:
+    repository: intel/multimodal-embedding-serving
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  runAsNonRoot: false
+  runAsUser: 0
+  seccompProfile:
+    type: RuntimeDefault
+
+containerPort: 8000 # Port on which container application listens internally
+containerPortName: mm-embed-port # Optional name to refer containerPort
+service:
+  type: ClusterIP
+  port: 8000 # Port on which service listens for incoming connection, if exposed externally
+  portName: http # Service port name. Useful when service exposes multiple ports.
+
+resources: {}
+
+modelPvc:
+  enabled: true
+  existingClaim: ""
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  size: "10Gi"
+
+livenessProbe:
+  exec:
+    command:
+      - python
+      - -c
+      - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"
+  initialDelaySeconds: 10
+  periodSeconds: 20
+  failureThreshold: 3
+
+readinessProbe:
+  exec:
+    command:
+      - python
+      - -c
+      - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 6
+
+# Wait for startup till max ~ 30Mins
+startupProbe:
+  exec:
+    command:
+      - python
+      - -c
+      - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 180
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+# Optional pod affinity rules for this microservice.
+podAffinity: {}
+
+# Environment variables
+embeddingDevice: "CPU"
+embeddingUseOV: true
+embeddingOVModelsDir: "/app/ov_models"
+# OpenVINO compiled-model cache directory. Persisted on the ov_models volume so
+# GPU/NPU graph compilation runs once and is reused on subsequent starts.
+ovCacheDir: "/app/ov_models/ov_cache"
+defaultStartOffsetSec: 0
+defaultClipDuration: -1
+defaultNumFrames: 64
+ovPerformanceMode: "THROUGHPUT"
+inferBatchSize: 32
+preprocessWorkers: 8
+videoFrameBatchSize: 64
+videoFrameQueueSize: 32
+videoFrameShmPoolBlockSize: 6220800
+videoFrameShmPoolBlocksMultiplier: 2
+videoFrameLogLevel: "INFO"

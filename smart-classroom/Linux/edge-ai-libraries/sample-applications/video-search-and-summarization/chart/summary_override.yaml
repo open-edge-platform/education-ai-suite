@@ -1,0 +1,20 @@
+rabbitmq:
+  enabled: true
+ovms:
+  enabled: true
+videoingestion:
+  enabled: true
+audioanalyzer:
+  enabled: true
+
+pipelinemanager:
+  env:
+    SUMMARY_FEATURE: "FEATURE_ON"
+
+summaryui:
+  enabled: true
+  name: summary-ui
+  feature:
+    summary: "FEATURE_ON"
+    search: "FEATURE_OFF"
+    mux: "ATOMIC"
