@@ -1,5 +1,0 @@
-# Override Compose file for CPU mode.
-services:
-  vippet:
-    profiles: [cpu]
-    # No devices or group_add needed for CPU mode.

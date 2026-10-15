@@ -1,8 +1,0 @@
-[run]
-source = src
-omit =
-    */tests/*
-    */env/*
-[report]
-exclude_also =
-    pragma: no cover

@@ -1,8 +1,0 @@
-docker/
-__pycache__/
-*.py[cod]
-*.egg-info/
-*.log
-tests/
-.git/
-.env

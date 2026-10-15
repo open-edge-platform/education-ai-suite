@@ -1,5 +1,0 @@
-[tool.pytest.ini_options]
-filterwarnings = [
-    "ignore::DeprecationWarning:opentelemetry.sdk._logs._internal",
-    "ignore:datetime.datetime.utcfromtimestamp:DeprecationWarning",
-]

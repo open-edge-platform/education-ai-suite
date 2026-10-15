@@ -1,7 +1,0 @@
-services:
-  vippet:
-    command: tail -f /dev/null
-    volumes:
-      - ./vippet:/home/dlstreamer/vippet
-    healthcheck:
-      test: ["CMD", "true"]
