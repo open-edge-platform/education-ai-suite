@@ -271,6 +271,9 @@ class ServiceManager extends EventEmitter {
       env: {
         ...process.env,
         ...config.proxyEnv(),
+        // Lets content_search accept /ingest-path (real file paths from the
+        // desktop UI). Browser launches never set it, so the endpoint stays off.
+        CS_ENABLE_PATH_INGEST: '1',
         PYTHONUNBUFFERED: '1',
         PYTHONIOENCODING: 'utf-8',
       },
