@@ -1213,7 +1213,9 @@ if ($noProxy) {
 # Desktop-app mode exits long before this point, so the browser dev server is
 # the only frontend this path starts.
 $frontendProxyCommands = ""
-$frontendStartCommand = "npm run dev -- --host 0.0.0.0 --port 5173"
+# Loopback only: the dev server proxies to the unauthenticated content-search and
+# grading backends, so binding 0.0.0.0 would expose them to the whole network.
+$frontendStartCommand = "npm run dev -- --host 127.0.0.1 --port 5173"
 $frontendHeader = "FRONTEND UI"
 $frontendStartMsg = "Starting Frontend (port 5173)..."
 $frontendTitle = "Frontend"

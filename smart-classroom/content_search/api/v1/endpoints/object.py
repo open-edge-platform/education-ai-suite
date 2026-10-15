@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import os
 import urllib.parse
 import mimetypes
 import json
@@ -131,8 +132,14 @@ class IngestPathRequest(BaseModel):
     chunk_duration: Optional[int] = None
 
 
-# Loopback addresses allowed to use server-side path ingest.
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"}
+# Set by the Electron process manager when it spawns the backend (inherited by
+# content_search through main.py -> start_services.py). Browser deployments never
+# set it, so path ingest does not exist there.
+_PATH_INGEST_ENV = "CS_ENABLE_PATH_INGEST"
+
+
+def _path_ingest_enabled() -> bool:
+    return os.environ.get(_PATH_INGEST_ENV, "").strip().lower() in {"1", "true", "yes"}
 
 
 @router.post("/ingest-path")
@@ -149,15 +156,16 @@ async def ingest_local_path(
     localhost HTTP. The file is copied into the object store, so the user's original
     is never touched by later cleanup/delete operations.
 
-    Restricted to loopback callers: the UI is often served on 0.0.0.0, and reading
-    arbitrary server-side paths must not be reachable from other devices.
+    Only enabled when the backend was started by the desktop app (see
+    ``_PATH_INGEST_ENV``). A peer-address check cannot gate this: every request
+    arrives through the UI's reverse proxy, so the peer is always 127.0.0.1.
     """
-    client_host = request.client.host if request.client else None
-    if client_host not in _LOOPBACK_HOSTS:
-        logger.warning(f"Rejected /ingest-path from non-loopback client: {client_host}")
+    if not _path_ingest_enabled():
+        client_host = request.client.host if request.client else None
+        logger.warning(f"Rejected /ingest-path (disabled outside the desktop app) from {client_host}")
         return resp_200(
             code=40300,
-            message="Path-based ingest is only available to local clients."
+            message="Path-based ingest is only available when the backend is started by the desktop app."
         )
 
     if not payload.path or not payload.path.strip():
