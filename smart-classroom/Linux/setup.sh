@@ -119,12 +119,12 @@ fi
 
 # --- Sanity-check the compose config before building anything --------------
 log "Validating docker compose config (docker compose config --services)…"
-(cd "$SCRIPT_DIR" && docker compose --project-directory "$SCRIPT_DIR" --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" config --services >/dev/null) \
+(cd "$SCRIPT_DIR" && docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" config --services >/dev/null) \
   || die "docker compose config failed — check COMPOSE_PROFILES/.env and the compose files above before retrying."
 
 # --- Build + start the stack -------------------------------------------------
 log "Building and starting the stack (docker compose up -d --build)…"
-(cd "$SCRIPT_DIR" && docker compose --project-directory "$SCRIPT_DIR" --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up -d --build) \
+(cd "$SCRIPT_DIR" && docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up -d --build) \
   || die "docker compose up failed — check the build/service logs above."
 
 # --- Wait for the app to become healthy -------------------------------------
