@@ -931,3 +931,6 @@ def register_routes(app: FastAPI):
 
     from api.vlm_chat import router as vlm_chat_router
     app.include_router(vlm_chat_router)
+
+    from api.processing_stats import router as processing_stats_router
+    app.include_router(processing_stats_router)

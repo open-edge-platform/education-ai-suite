@@ -24,7 +24,7 @@ The source URL intentionally retains the upstream directory layout. Local packag
 
 ### Required Porting Changes
 
-Retain the reference's benchmark methods. The following are deliberate porting changes, not existing upstream features:
+Retain the reference's benchmark methods. Accuracy testing follows the reference exactly -- probe seeding and planted values, prompts, scoring, 4-decimal rounding of aggregates, deltas and similarity, baseline selection (an `ok` case of `accuracy.baseline_profile`, optional for every suite), skipped-probe handling and the accuracy report sections; the port adds only local-only artifact access and opt-in text persistence. The following are deliberate porting changes, not existing upstream features:
 
 | Area | Reference behavior | Required port behavior |
 | --- | --- | --- |
@@ -34,7 +34,8 @@ Retain the reference's benchmark methods. The following are deliberate porting c
 | Measurement validity | Some unavailable metrics become zero; GPU telemetry is required even for CPU cases | Preserve nulls and timing provenance; apply device-appropriate budget checks (Sections 7 and 8). |
 | Cache sizing | Target-context estimate with empirical speculative headroom | Include qualified decode/draft reservations; reject infeasible or unknown `auto` sizing instead of silently changing the pool/backend (Section 8). |
 | Evidence and privacy | Text report, transient detailed records and printed answer excerpts | Versioned JSON plus text report, atomic checkpoints and opt-in synthetic answer persistence via `record_text` (Section 9). |
-| Completion and CLI status | Partial coverage is not a separate status; case failure need not yield a nonzero process exit | Explicit partial coverage and nonzero failure exits, propagated by PowerShell (Section 9). |
+| Completion and CLI status | Partial coverage is not a separate status; case failure need not yield a nonzero process exit | Explicit partial coverage for missing iterations or unaccounted probes, and nonzero failure exits, propagated by PowerShell (Section 9). A skipped accuracy probe keeps the reference semantics: accounted for, the case stays `ok`. |
+| Plan identity | Cases are identified only by their labels | Case IDs `c01`, `c02`, ... in execution order; `--list-profiles` and `report.txt` print the plan grid and every shipped config documents its steps, kept equal to the plan by a test (Section 3). |
 
 Capacity-search/bisection, synthetic dry-run PASS results, automatic production tuning and new benchmark service/UI endpoints are outside scope.
 
@@ -58,7 +59,10 @@ When adapting the reference, update package imports, test imports, launcher comm
 
 | Module | Responsibility and implementation entry points |
 | --- | --- |
-| `benchmark.py` | CLI/config validation (`_parse_args`, `_load_settings`, `_resolve_profiles`), case planning, IR/cache preflight, sequential subprocess supervision, memory sampling, status evaluation, baseline matching and `write_report`. Own all run-level state and output files. |
+| `benchmark.py` | Entry point: IR/cache preflight, the sequential case loop, status evaluation, cross-case scoring and `write_report`. Owns all run-level state and output files. |
+| `settings.py` | CLI and config validation (`_parse_args`, `_load_settings`, `_resolve_profiles`), task prompts, case planning with IDs (`plan_run`, `plan_grid`) and `--list-profiles`. Imports no inference packages. |
+| `sizing.py`, `supervisor.py` | KV/cache-pool estimates; child process spawning, IPC acknowledgements and memory sampling. |
+| `evidence.py`, `report.py` | Run directory, redaction and atomic `results.json`; rendering `report.txt` and console lines from the same snapshot. |
 | `trial_runner.py` | `run_case` loads once, runs throughput iterations or accuracy probes, emits progress/results, and exits the child. Keep `_load_pipeline`, `prepare_pipeline_input`, `generation_config`, `read_perf_metrics`, `validate_mtp` and error classification independently testable. |
 | `context_builder.py` | Render native chat templates, size synthetic transcript prompts, place accuracy inserts and count the actual inference input. Keep prompt construction outside measured generation. |
 | `metrics.py` | Build iteration records, normalize units, compute throughput/speculative statistics and aggregate measured iterations. No runtime loading, report I/O or scoring dependencies. |
@@ -101,7 +105,7 @@ Load benchmark YAML with a safe parser into plain mappings, apply CLI overrides,
 | Section/key | Type and resolution rules |
 | --- | --- |
 | `model` | Required mapping: `provider: openvino`, non-empty `device`, `weight_format`, `models_base_path`; optional `model_dirs` mapping from benchmark model name to local IR directory. Support CPU/GPU device selectors, not NPU in this design. |
-| `benchmark.models` | Required non-empty list of unique model names. These are benchmark keys, not necessarily Hub IDs. Resolve through `model_dirs` first; otherwise use `<models_base_path>/<provider>/<name with / replaced by _>_<weight_format>`. |
+| `benchmark.models` | Required non-empty list of unique model names. These are benchmark keys, not necessarily Hub IDs. Resolve through `model_dirs` first; otherwise use `<models_base_path>/<provider>/<name after the last />/<weight_format>`, the serving preparation layout, so `--weight-format` selects the artifact. |
 | `benchmark.context_tokens` | Required non-empty list of non-negative integers, sorted and deduplicated. Positive values are the total rendered input-token target, not transcript-only length. Zero means a standalone task prompt of its natural length. |
 | `benchmark.output_tokens`, `warmup`, `iterations` | Required integers: output ceiling at least 2, warmup at least 0, measured iterations at least 1. Reject booleans as integers. Preserve the reference configurations' one warmup and three measured iterations; label zero-warmup/single-iteration runs as smoke tests. |
 | `benchmark.throughput_task` | One task name or non-empty list; default `summary_2s`. Accept `summary_2s`, `classroom_summary`, `code`, `math`, `chat`; preserve order and deduplicate. |
@@ -115,7 +119,7 @@ Load benchmark YAML with a safe parser into plain mappings, apply CLI overrides,
 | `profile.scheduler` | Absent/empty selects stateful generation; a non-empty resolved mapping selects paged/continuous-batching generation. Every paged profile, including CLI overrides, requires positive integer `max_num_batched_tokens`, `max_num_seqs`, and boolean `enable_prefix_caching: false`. |
 | `profile.mtp` | Mapping with only `enabled`, `num_assistant_tokens`, `device`; a non-empty mapping implies enabled unless explicitly false. Preserve boolean shorthand only when an enabled profile receives its candidate count from the CLI. |
 | `profile.dflash` | Mapping with only `enabled`, `model`, `num_assistant_tokens`, `device`; `model` is a required local draft IR directory when enabled. A profile cannot contain both `mtp` and `dflash`. |
-| `accuracy` | Read only with `--accuracy`; accept `suites`, `baseline_profile`, integer `seed`, optional `embedding_model`, and the `retrieval`/`generation` mappings described in Section 6. Require an included baseline profile for generation-fidelity comparisons. |
+| `accuracy` | Read only with `--accuracy`; accept `suites`, `baseline_profile`, integer `seed`, optional `embedding_model`, and the `retrieval`/`generation` mappings described in Section 6. `baseline_profile` is optional, as in the reference; when set it must be one of the profiles being run. Without it there are no deltas and generation reports only fact coverage. |
 | `speculative_reference` | Optional display-only metadata: `source`, positive `num_assistant_tokens`, and per-task `dataset`, positive `acceptance_length`, `speedup`, optional `throughput`. Published numbers never affect status or ranking. |
 | `benchmark.record_text` | **Integration addition**, boolean, default false. Opt-in persistence of synthetic generated answers for offline rescoring/fork inspection; never enable for private classroom material. Scores and timings are retained regardless. |
 
@@ -136,7 +140,7 @@ model:
   weight_format: int4
   models_base_path: models
   model_dirs:
-    Qwen3.6-35B-A3B: models/openvino/Qwen3.6-35B-A3B_int4
+    Qwen3.6-35B-A3B: models/openvino/Qwen3.6-35B-A3B/int4
 
 benchmark:
   models: [Qwen3.6-35B-A3B]
@@ -151,7 +155,6 @@ benchmark:
   gpu_memory_budget_gb: 59
   cache_dir: null
   output_dir: monitoring/executionlogs/context_bench/qwen3.6_35b
-  record_text: false
 
 profiles:
   - name: paged_min
@@ -167,8 +170,7 @@ profiles:
     ov: *qwen36_ov
     scheduler: *qwen36_scheduler
     dflash:
-      model: models/openvino/qwen3.6-35b-a3b-dflash-int4-ov
-      device: GPU
+      model: models/openvino/Qwen3.6-35B-A3B-DFlash/int4
       num_assistant_tokens: 7
 
 accuracy:
@@ -191,7 +193,7 @@ accuracy:
 
 ### Plan Inspection and CLI
 
-`--list-profiles` prints settings, redacted model locations, requested pipeline mode, budgets and case/probe counts without inference imports, downloads or file creation. Artifact-dependent cache/token values remain unresolved; apply Section 9's path policy. The example yields **14 throughput cases** (two profiles times seven context/task pairs) or **two accuracy cases of ten probes** at 8K. An empty filtered matrix is a configuration error.
+`--list-profiles` prints settings, redacted model locations, budgets, the profile settings (fields every profile shares printed once), the case grid with IDs and a line per task, and probe counts, without inference imports, downloads or file creation. Two selected profiles that resolve to the same configuration are a configuration error, since every case would run twice. Artifact-dependent cache/token values remain unresolved; apply Section 9's path policy. The example yields **14 throughput cases** (two profiles times seven context/task pairs) or **two accuracy cases of ten probes** at 8K. An empty filtered matrix is a configuration error.
 
 Preserve CLI options `--config`, `--models`, `--contexts`, `--profiles`, `--device`, `--weight-format`, `--output-tokens`, `--warmup`, `--iterations`, `--iteration-gap`, `--throughput-task`, `--output-dir`, the property overrides, candidate-count aliases, `--accuracy`, `--accuracy-suites`, `--accuracy-tasks`, `--accuracy-depths` and `--accuracy-samples`. A weight-format override changes the label and derived path, not IR in an explicit `model_dirs` directory; validate its actual precision.
 
@@ -285,13 +287,13 @@ Only `classroom_summary` may read application settings: resolve language, summar
 
 Each suite mapping accepts `tasks`, `depths`, `samples`, `output_tokens`, `options`. Defaults are retrieval depths `[0.0, 0.5, 1.0]`, two samples, 64 output tokens; generation depth `[0.5]`, two samples, 256 output tokens. Positive integer sample/output budgets and finite depths in `[0,1]` are mandatory. Only `niah_single`, `niah_multikey` and `qa` are depth-swept; other tasks distribute facts by construction. Per-case probe count is the sum over tasks of `samples * number_of_depths` for depth-swept tasks, otherwise `samples`. The full eight retrieval tasks plus two generation tasks produce 32 probes with these defaults.
 
-Reuse `ProbeSpec` and the reference's task/scoring functions. Derive planted values deterministically from `(seed, context, task, depth, sample)` using stable hashing, not process-randomized Python hashes. Check that planted values do not occur in the filler. For multiple inserts, sort by depth and use cumulative filler allocation so rounding does not change total length; adjust filler only, never the facts. Aggregation-task ground truth must remain valid after filler truncation.
+Reuse `ProbeSpec` and the reference's task/scoring functions. Derive planted values deterministically from `(seed, context, task, depth, sample)` exactly as the reference: seed `random.Random` with the string `seed|context|task|depth|sample` (string seeding hashes with SHA-512, never the process-randomized `hash()`), so the same seed plants the same values as a reference run. Check that planted values do not occur in the filler. For multiple inserts, sort by depth and use cumulative filler allocation so rounding does not change total length; adjust filler only, never the facts. Aggregation-task ground truth must remain valid after filler truncation.
 
-Unlike throughput, probes allow at most **16 tokens** deviation from the requested context for each tokenizer count; record both actual counts. An individual prompt-build failure creates an explicit skipped-probe record and processing continues; inference failure ends that child case. If the first probe cannot provide warmup, use the first buildable probe; if none can be built, report `no_output`. Report planned/completed/skipped counts and score denominators so missing probes cannot inflate an apparent accuracy pass. Honor each probe's decode ceiling and mark a reached ceiling as potentially truncated when the runtime cannot identify the finish reason.
+Unlike throughput, probes allow at most **16 tokens** deviation from the requested context for each tokenizer count; record both actual counts. An individual prompt-build failure creates an explicit skipped-probe record and processing continues; as in the reference, the skip is accounted for (the case stays `ok`) and the rates are over the scored probes. Inference failure ends that child case. If the first probe cannot provide warmup, use the first buildable probe; if none can be built, report `no_output`. Keep planned/completed/skipped counts in `results.json` and list skips in `PROBE DETAIL`; the report tables follow the reference layout. Honor each probe's decode ceiling and mark a reached ceiling as potentially truncated when the runtime cannot identify the finish reason.
 
 ### Scoring and Interpretation
 
-Pair fidelity by model/artifact, context, prompt hash, suite/task/depth/sample and seed, independent of case order; update idempotently when the baseline completes. A missing/failed baseline leaves fidelity unavailable. Use SQuAD-style article removal only for retrieval scoring; lexical overlap must preserve articles. Use model tokens for divergence or label a word fallback explicitly, without comparing the two units. Run optional WWB scoring after all inference cases so its retained resources cannot affect later measurements; missing WWB disables only similarity. Optional package/model acquisition belongs to explicit setup, not scoring.
+Pair fidelity by model/artifact, context, prompt hash, suite/task/depth/sample and seed, independent of case order; update idempotently when the baseline completes. A missing baseline, or one whose status is not `ok`, leaves fidelity and deltas unavailable, as in the reference. Aggregates, deltas and similarity are rounded to 4 decimals. Use SQuAD-style article removal only for retrieval scoring; lexical overlap must preserve articles. Use model tokens for divergence or label a word fallback explicitly, without comparing the two units. Fill optional WWB similarity at every report render, as the reference does, so an interrupted run reports it for the cases it finished; it runs in the parent between cases, after the child exited, and missing WWB disables only similarity. Optional package/model acquisition belongs to explicit setup, not scoring.
 
 Synthetic retrieval scores are not published RULER dataset scores. Fidelity measures drift from the baseline, not absolute summary quality; a self-comparison is only a sanity check.
 
@@ -382,8 +384,9 @@ Preserve the user guide's report organization while adding the port's coverage/p
 | Run header | Run ID/revision, completion and coverage, hardware/runtime/artifacts, resolved settings, warmup/measurement counts and idle-gap policy. |
 | `SPEED AND RESOURCES` | Per-model/context/task profile rows, timing and memory statistics, TPOT/TTFT winners, matched speedups and output-consistency warnings. |
 | `SPECULATIVE WINDOW SWEEP` | k, acceptance length, acceptance source, verification-pass cost and speedup; best window per task. |
-| `RETRIEVAL ACCURACY` | Per-task scores, applicable depth matrices, sample denominators and signed deltas against the baseline. |
-| `GENERATION FIDELITY` | Semantic, lexical and token-divergence metrics plus ground-truth fact coverage; unavailable metrics remain explicit. |
+| `CASES` | The plan grid by case ID, plus the state of every case not done. |
+| `RETRIEVAL ACCURACY` | Reference layout: per-task scores with pipeline and speculative columns, signed recall delta against the baseline, the depth matrix and the best retrieval profile. |
+| `GENERATION FIDELITY` | Reference layout: semantic, lexical and token-divergence metrics plus ground-truth fact coverage, similarity notes, and the no-drift or largest-drift finding; unavailable metrics remain explicit. |
 | `PROBE DETAIL` | Coordinates, completion/skip status and scores; answer/truth text only under `record_text`. |
 | Failures and warnings | Failed/partial/budget-exceeded cases, sanitized reasons, missing telemetry and measurement limitations. |
 
@@ -396,7 +399,7 @@ Keep failed/budget-exceeded measurements visible but unranked. Display published
 | `ok` | All planned measured work completed with required telemetry inside budgets. Eligible only for metrics that exist; not a semantic-quality verdict. |
 | `memory_limit`, `gpu_memory_limit` | Inference completed but a measured budget was exceeded. Preserve timings and all exceeded-budget flags; exclude from rankings. |
 | `measurement_error` | Inference completed but required RAM/GPU telemetry or measurement integrity is unavailable. Keep known values; exclude from rankings. |
-| `partial` | **Integration addition:** only some planned iterations/probes completed, including prompt-build skips. Publish coverage and partial scores but exclude from full-run acceptance/rankings. A more specific runtime failure still takes precedence. |
+| `partial` | **Integration addition:** only some planned iterations completed, or accuracy probes are missing without having been skipped (a prompt-build skip is accounted for). Publish coverage and partial scores but exclude from full-run acceptance/rankings. A more specific runtime failure still takes precedence. |
 | `oom` | Explicit allocation failure or scheduler cache-admission failure, not an inferred cause from high memory alone. |
 | `gpu_abort` | Device command abort such as OpenCL -14; distinguish it from confirmed OOM. |
 | `unsupported` | Requested property, mechanism, device or runtime capability is unsupported; not a hardware context ceiling. |
@@ -414,9 +417,9 @@ Choose status in this order: explicit runtime/artifact failure; no measured outp
 
 | Model configuration | Pinned reference matrix | Port coverage |
 | --- | --- | --- |
-| Qwen3.6-35B-A3B | INT4; `paged_min` versus DFlash k=3/5/7/15; contexts 0/8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30-second idle gap. | Retain matched settings and distinguish stock/derived draft artifacts. Include an application-summary task for classroom evaluation. |
-| Qwen3.8-27B | INT8; `paged_min` versus MTP k=1/2/3/4/6; 8K context; default `summary_2s`; 64-token ceiling; default zero gap. | Provide separately identified INT4/INT8 artifacts where required by the serving design. Do not infer DFlash2 support from MTP. |
-| Qwen3.5-9B | No dedicated configuration in this pinned directory. | Add INT4/INT8 plain benchmark profiles; speculative support requires independent qualification. |
+| Qwen3.6-35B-A3B | INT4; `paged_min` versus DFlash k=3/5/7/15; contexts 0/8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30-second idle gap. | Retain the matched settings and task list (35 cases) and distinguish stock/derived draft artifacts. The application-summary task runs on its own with a 1024-token ceiling. |
+| Qwen3.8-27B | INT8; `paged_min` versus MTP k=1/2/3/4/6; 8K context; default `summary_2s`; 64-token ceiling; default zero gap. | One configuration; `--weight-format int4` selects the INT4 artifact through the derived path. Do not infer DFlash2 support from MTP. |
+| Qwen3.5-9B | No dedicated configuration in this pinned directory. | One plain configuration (paged versus stateful, INT4 default, `--weight-format int8`); speculative support requires independent qualification. |
 
 Both pinned configurations use one warmup and three measured iterations. Serving qualification follows the companion [model profiles](vlm-llm-serving-design.md#2-model-profiles).
 

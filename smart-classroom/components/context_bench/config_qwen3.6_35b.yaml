@@ -1,0 +1,192 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen3.6-35B-A3B INT4: plain paged baseline versus DFlash speculative decoding (k=3/5/7/15).
+# Speed and resources are always measured; --accuracy measures RULER retrieval and generation
+# fidelity instead. Both land in one report.txt, printed to the console at the end of the run.
+#
+#   .\components\context_bench\run_benchmark.ps1                       # this config is the default
+#   ... --list-profiles                                                 # the plan below; loads nothing
+#   ... --profiles paged_min dflash_k7 --contexts 8000 --throughput-task math
+#   ... --accuracy
+#   ... --throughput-task classroom_summary --output-tokens 1024       # the app's own request
+#
+# TEST STEPS. Every case below is one child process: load the model, run the warm-up(s), then
+# the measured generations, while RAM/GPU memory are sampled. IDs follow execution order, row
+# by row, so each task runs on every profile back to back under the same thermal conditions.
+# CLI filters (--profiles, --contexts, --throughput-task) renumber the steps; --list-profiles
+# prints the exact plan, with its IDs, before anything loads.
+#
+# Throughput run (default): 35 cases, each 1 warm-up + 3 measured generations of up to 512
+# tokens (EOS respected), 30 s idle before each measured one.
+#
+#   Context           Task       | paged_min  dflash_k3  dflash_k5  dflash_k7  dflash_k15
+#   none (task only)  code       | c01        c02        c03        c04        c05
+#   none (task only)  math       | c06        c07        c08        c09        c10
+#   none (task only)  chat       | c11        c12        c13        c14        c15
+#   8,000 tokens      code       | c16        c17        c18        c19        c20
+#   8,000 tokens      math       | c21        c22        c23        c24        c25
+#   8,000 tokens      chat       | c26        c27        c28        c29        c30
+#   8,000 tokens      summary_2s | c31        c32        c33        c34        c35
+#
+#   Context   none: the task prompt alone, the published DFlash blog's setting; 8,000 tokens:
+#             a synthetic classroom transcript, then the task, 8,000 rendered tokens in total.
+#   Task      code       a Python module with tests (HumanEval-like)
+#             math       six worked physics/arithmetic/algebra problems (GSM8K-like)
+#             chat       eight open-ended assistant requests (MT-Bench-like)
+#             summary_2s two-sentence summary of the transcript (~45 tokens; transcript only)
+#   Profile   paged_min  no speculation: the matched baseline of every dflash_k* case
+#             dflash_kN  DFlash draft proposes N tokens per verification pass; otherwise
+#                        identical OpenVINO properties and scheduler, so k is the only variable
+# Each (context, task) row gets its own speed table, plus a speculative window sweep (AL, pass
+# cost, speedup per k) and the blog's k=7 figure for code/math/chat.
+#
+# Accuracy run (--accuracy): 5 cases replace the throughput cases, one per profile at each
+# context with a transcript (context 0 has nowhere to plant a fact):
+#
+#   Context       Task     | paged_min  dflash_k3  dflash_k5  dflash_k7  dflash_k15
+#   8,000 tokens  accuracy | c01        c02        c03        c04        c05
+#
+#   accuracy  1 warm-up + 32 probes (`accuracy` below): 28 RULER retrieval probes scored
+#             against planted ground truth, and 4 generation probes (summary, fact_sheet)
+#             scored against paged_min's answer to the identical prompt.
+#
+# Artifacts come from the serving preparation workflow (never downloaded here):
+#   target  models/openvino/Qwen3.6-35B-A3B/int4            (OpenVINO/Qwen3.6-35B-A3B-int4-ov)
+#   draft   models/openvino/Qwen3.6-35B-A3B-DFlash/int4     (stock z-lab DFlash export)
+# Without the draft every dflash_k* case ends `missing_ir` at preflight while paged_min runs.
+# DFlash also needs the target IR's `hidden_states_decoder_layers` rt_info. When the stock
+# export lacks it, preflight reports `missing_ir`; point `model_dirs` at the derived target the
+# serving workflow creates (models/openvino/Qwen3.6-35B-A3B/int4-dflash, same weights,
+# annotated XML) or prepare one explicitly with
+#   python -m components.context_bench.dflash_draft_head prepare-target --target ... --draft ... --output ...
+# `paged_min` then runs on the same weights, so the comparison stays matched.
+#
+# The reference measurements below used a derived draft with its own int4 lm_head
+# (classroom_summary k=3 20.4 -> 18.6 ms/token, acceptance unchanged). Build it with
+#   python -m components.context_bench.dflash_draft_head build-head --target <target> \
+#       --draft models/openvino/Qwen3.6-35B-A3B-DFlash/int4 --output models/openvino/Qwen3.6-35B-A3B-DFlash/int4-int4head
+# and point `&dflash_draft` at the output. Keep stock and derived drafts in separate runs so
+# their results are never mixed.
+#
+# Read ACCEPTANCE LENGTH (AL), not the accepted %: speedup ~= AL / pass cost, and the
+# accepted % ((AL - 1) / k) falls with k by construction. The draft's block_size=16 includes
+# the seed token, so k=15 is the largest valid window; 17 linear-attention rows cover
+# max_num_seqs + k + 1 through k=15 and are kept on the baseline so schedulers match exactly.
+#
+# Reference measurements (pinned upstream, Arc B390 iGPU, 2026-10-08, int4-head draft) are
+# historical observations, not qualification results for this port:
+#   code none: k=7 2.40x (AL 5.94); math 8K: k=7 2.07x (AL 5.74); summary_2s 8K: k=3 1.32x (AL 3.14)
+
+model:
+  provider: openvino
+  device: GPU
+  weight_format: int4
+  models_base_path: models
+  # The derived path; named so it can be pointed at the `int4-dflash` target (see above).
+  model_dirs:
+    Qwen3.6-35B-A3B: models/openvino/Qwen3.6-35B-A3B/int4
+
+benchmark:
+  models: [Qwen3.6-35B-A3B]
+  # 0 = no transcript: code/math/chat run as standalone prompts; the summaries and the
+  # accuracy suites skip it. Positive values are the total rendered input-token target.
+  context_tokens: [0, 8000]
+  # Decode ceiling for every throughput task and the warm-up; EOS is respected. 512 lets
+  # math/code answers run past the first decode pass's one-time cost.
+  output_tokens: 512
+  warmup: 1
+  iterations: 3
+  # Untimed idle before each measured generation: the iGPU boosts after idle, so 30 s
+  # reports what an occasional classroom request sees (burst). --iteration-gap 0 measures
+  # sustained load.
+  iteration_gap_sec: 30
+  # The reference's four domains. classroom_summary (the application's summarizer request)
+  # is left out as there: at 512 tokens its long Markdown answer is cut off, so run it on its
+  # own with --output-tokens 1024 (see the usage lines above).
+  throughput_task: [code, math, chat, summary_2s]
+  timeout_sec: 5400
+  max_system_memory_pct: 100
+  gpu_memory_budget_gb: 59
+  cache_dir: null
+  output_dir: monitoring/executionlogs/context_bench/qwen3.6_35b
+
+# Published DFlash results, printed beside the window sweep at the same k. Display only.
+speculative_reference:
+  source: >-
+    HF blog "Accelerating Qwen3.6 on Intel Core Ultra Series 3 with DFlash" (2026-07-30):
+    Qwen3.6-35B-A3B + z-lab DFlash draft, both int4 W4A16, OpenVINO 2026.3, Core Ultra X7 368H
+    Arc B390 iGPU, greedy, baseline 41 t/s
+  num_assistant_tokens: 7
+  tasks:
+    code: {dataset: HumanEval, acceptance_length: 6.4, speedup: 2.2, throughput: 89.8}
+    math: {dataset: GSM8K, acceptance_length: 5.0, speedup: 1.6, throughput: 68.5}
+    chat: {dataset: MT-Bench, acceptance_length: 4.0, speedup: 1.3, throughput: 54.7}
+
+# Read only with --accuracy; identical to the reference configuration.
+accuracy:
+  suites: [retrieval, generation]
+  # Every profile is reported against this one: retrieval as a signed delta, generation as a
+  # direct comparison (its answers ARE the reference).
+  baseline_profile: paged_min
+  # Fixes every planted value, so a re-run is comparable line by line.
+  seed: 20260917
+  # who_what_benchmark embedding model for the Similarity column only; optional, acquired
+  # during setup. null switches the column off deliberately.
+  embedding_model: sentence-transformers/all-mpnet-base-v2
+  retrieval:
+    tasks: [niah_single, niah_multikey, niah_multivalue, niah_multiquery, vt, cwe, fwe, qa]
+    depths: [0.0, 0.5, 1.0]
+    samples: 2
+    output_tokens: 64
+    options:
+      niah_multikey: {num_distractors: 3}
+      niah_multivalue: {num_values: 4}
+      niah_multiquery: {num_queries: 4}
+      vt: {chain_length: 3, num_chains: 3}
+      cwe: {num_target_words: 10}
+      fwe: {top_k: 3}
+  generation:
+    tasks: [summary, fact_sheet]
+    depths: [0.5]
+    samples: 2
+    output_tokens: 256
+    options:
+      fact_sheet: {num_facts: 6}
+
+# max_num_batched_tokens is explicit (the SchedulerConfig default of 256 would chunk the
+# prefill); max_num_seqs: 1 keeps one linear-attention reservation per row; prefix caching
+# stays off so repeated prompts never reuse the warm-up's prefix. The draft runs on the
+# target's device (model.device).
+profiles:
+  - name: paged_min
+    ov: &ov_qwen36_paged
+      GPU_ENABLE_LARGE_ALLOCATIONS: "YES"
+      KV_CACHE_PRECISION: f16
+    scheduler: &scheduler_qwen36
+      max_num_batched_tokens: 65536
+      max_num_seqs: 1
+      num_linear_attention_blocks: 17
+      enable_prefix_caching: false
+
+  - name: dflash_k3
+    ov: *ov_qwen36_paged
+    scheduler: *scheduler_qwen36
+    dflash:
+      model: &dflash_draft models/openvino/Qwen3.6-35B-A3B-DFlash/int4
+      num_assistant_tokens: 3
+
+  - name: dflash_k5
+    ov: *ov_qwen36_paged
+    scheduler: *scheduler_qwen36
+    dflash: {model: *dflash_draft, num_assistant_tokens: 5}
+
+  - name: dflash_k7
+    ov: *ov_qwen36_paged
+    scheduler: *scheduler_qwen36
+    dflash: {model: *dflash_draft, num_assistant_tokens: 7}
+
+  - name: dflash_k15
+    ov: *ov_qwen36_paged
+    scheduler: *scheduler_qwen36
+    dflash: {model: *dflash_draft, num_assistant_tokens: 15}

@@ -1,7 +1,7 @@
 ﻿app:
   name: Smart Classroom
   cleanup_on_exit: true
-  language: en # en or zh
+  language: zh # en or zh
 
 features:
   asr:                { enabled: true }
@@ -24,8 +24,8 @@ monitoring:
 
 models:
   asr:
-    provider: openai # openvino, funasr and openai supported
-    name: whisper-small  # can be (whisper-base, whisper-small etc) or paraformer-zh
+    provider: funasr # openvino, funasr and openai supported
+    name: paraformer-zh  # can be (whisper-base, whisper-small etc) or paraformer-zh
     device: CPU # CPU Recommended
     temperature: 0.0
     diarization: False # requires manual HF token setup, see docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional
@@ -75,12 +75,24 @@ models:
 
   text_gen:
     provider: vlm
-    vlm_name: Qwen/Qwen3-VL-8B-Instruct
+    vlm_name: Qwen/Qwen3.6-35B-A3B
     device: GPU # GPU or CPU
     weight_format: int4 # int4,int 8-- shared with content_search.vlm.weight_format
     max_new_tokens: 5120
     concurrency: 1    # CapabilityRunner max_concurrency (single warm pipe)
     queue_max: 8      # CapabilityRunner queue depth before 503 backpressure
+
+    # Optional speculative decoding; omit the block (or mode: "off") for plain
+    # generation. Qualified pairs: Qwen/Qwen3.6-35B-A3B int4 + dflash,
+    # Qwen/Qwen3.8-27B int4/int8 + mtp (dflash2 is not qualified yet).
+    # See docs/dev-guide/vlm-llm-serving/serving-guide.md.
+    # speculative:
+    #   mode: auto            # "off" | auto (plain fallback) | "on" (require acceleration)
+    #   method: auto          # auto | dflash | dflash2 | mtp
+    #   draft_source: null    # null = profile default | huggingface | local | target
+    #   draft_model: null     # null = profile default drafter; local IR dir for draft_source: local
+    #   draft_revision: null  # null = pinned/recorded commit; full 40-char commit to override
+    #   num_assistant_tokens: null  # null = profile's tested default
 
     chunking:
       enabled: true                  # false = summarize the whole transcript in one pass

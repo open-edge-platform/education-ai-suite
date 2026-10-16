@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Reviewed, exactly pinned runtime dependencies of components/context_bench, installed by
+# setup_env.ps1 into the shared backend venv (<smart-classroom>/../smartclassroom). The pins
+# mirror smart-classroom/requirements.txt so installing them never changes the application's
+# stack; update both files together. Only `name==version` lines are accepted by the setup
+# script: no index URLs, pre-releases, unpinned ranges or trusted hosts.
+#
+# who_what_benchmark (embedding similarity) is optional and is not installed here; without it
+# only the similarity column is unavailable.
+openvino==2026.4.1
+openvino-genai==2026.4.1.0
+openvino-tokenizers==2026.4.1.0
+transformers==5.5.0
+tokenizers==0.22.2
+numpy==2.2.6
+psutil==7.1.3
+PyYAML==6.0.2
+pywin32==311; sys_platform == "win32"

@@ -8,6 +8,7 @@ from typing import Optional
 from model_manager.capability.state import CapabilityState
 from model_manager.capability.runner import CapabilityRunner
 from utils.config_loader import config
+from utils.processing_stats import timed_model_call
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,10 @@ class AsrHandler:
                 
                 max_concurrency, queue_max = self._concurrency_config()
                 self._runner = CapabilityRunner(
-                    self._processor.transcribe,
+                    timed_model_call(self._processor.transcribe, "asr", lambda: {
+                        "model": f"{self.provider}/{self.model_name}",
+                        "device": self.device,
+                    }),
                     max_concurrency=max_concurrency,
                     queue_max=queue_max
                 )

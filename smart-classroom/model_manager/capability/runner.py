@@ -38,7 +38,19 @@ class CapabilityRunner:
         except (RuntimeError, MemoryError) as exc:
             raise OomError(str(exc)) from exc
         finally:
-            self._release_slot()
+            # A consumer that left early (client disconnect) closes the stream so
+            # native work can stop. A stream backed by native inference may hold
+            # the slot until that work has actually ended (release_when_idle).
+            deferred = False
+            try:
+                close = getattr(iterator, "close", None)
+                if close is not None:
+                    close()
+                defer = getattr(iterator, "release_when_idle", None)
+                deferred = bool(defer is not None and defer(self._release_slot))
+            finally:
+                if not deferred:
+                    self._release_slot()
 
     def submit(self, *args, **kwargs) -> Any:
         with self._lock:

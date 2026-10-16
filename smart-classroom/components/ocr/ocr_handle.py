@@ -99,8 +99,13 @@ class OcrHandler:
                         from model_manager.capability.runner import CapabilityRunner
                     except ImportError:
                         from model_manager.capability import CapabilityRunner
+                    from utils.processing_stats import timed_model_call
+
                     self._runner = CapabilityRunner(
-                        self._call_processor,
+                        timed_model_call(self._call_processor, "ocr", lambda: {
+                            "model": self._provider,
+                            "device": self._device,
+                        }),
                         max_concurrency=max_concurrency,
                         queue_max=queue_max,
                     )

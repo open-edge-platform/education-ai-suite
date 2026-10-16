@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen3.8-27B: plain paged baseline versus multi-token prediction (MTP) k=1/2/3/4/6.
+# MTP is self-speculative decoding: the model's own draft head proposes k tokens and the main
+# model verifies them in one pass, so expect TPOT to move and TTFT not to. With --accuracy this
+# is the run that answers "does raising k cost correctness".
+#
+#   .\components\context_bench\run_benchmark.ps1 --config components/context_bench/config_qwen3.8_27b.yaml
+#   ... --list-profiles                       # the plan below; loads nothing
+#   ... --weight-format int4                  # the INT4 artifact, same profiles and steps
+#   ... --accuracy --profiles paged_min mtp_k3
+#
+# TEST STEPS. Every case below is one child process: load the model, run the warm-up(s), then
+# the measured generations, while RAM/GPU memory are sampled. IDs follow execution order, row
+# by row, so each task runs on every profile back to back under the same thermal conditions.
+# CLI filters (--profiles, --contexts, --throughput-task) renumber the steps; --list-profiles
+# prints the exact plan, with its IDs, before anything loads.
+#
+# Throughput run (default): 6 cases, each 1 warm-up + 3 measured generations of up to 64
+# tokens (EOS respected), back to back.
+#
+#   Context       Task       | paged_min  mtp_k1  mtp_k2  mtp_k3  mtp_k4  mtp_k6
+#   8,000 tokens  summary_2s | c01        c02     c03     c04     c05     c06
+#
+#   Context   a synthetic classroom transcript, then the task, 8,000 rendered tokens in total
+#   Task      summary_2s two-sentence summary of the transcript (~45 tokens)
+#   Profile   paged_min  no MTP: the baseline every mtp_k* case is compared with
+#             mtp_kN     the bundled MTP head proposes N tokens per verification pass;
+#                        otherwise identical, so k is the only variable
+#
+# Accuracy run (--accuracy): 6 cases replace the throughput cases, one per profile:
+#
+#   Context       Task     | paged_min  mtp_k1  mtp_k2  mtp_k3  mtp_k4  mtp_k6
+#   8,000 tokens  accuracy | c01        c02     c03     c04     c05     c06
+#
+#   accuracy  1 warm-up + 32 probes (`accuracy` below): 28 RULER retrieval probes scored
+#             against planted ground truth, and 4 generation probes (summary, fact_sheet)
+#             scored against paged_min's answer to the identical prompt. 6 x 32 probes is
+#             the expensive run; narrow it with --profiles while iterating.
+#
+# Artifacts (prepared by the serving workflow, never downloaded here) are derived from
+# `models_base_path` and the weight format, so --weight-format selects the artifact:
+#   models/openvino/Qwen3.8-27B/int8   (OpenVINO/Qwen3.8-27B-int8-ov)   default, as the reference
+#   models/openvino/Qwen3.8-27B/int4   (OpenVINO/Qwen3.8-27B-int4-ov)   --weight-format int4
+# Both bundle openvino_mtp_model.xml/.bin, the MTP head. Results of both go under output_dir;
+# each report's header names the weights it ran.
+#
+# MTP needs a runtime that implements the paged MTP strategy. The reference qualified it on the
+# openvino-genai 2026.5.0 nightly; this port pins the 2026.4.1 release (requirements.txt),
+# which is not yet qualified for Qwen3.8 MTP. On a runtime without it the mtp_* cases report
+# unsupported/load_error while paged_min still runs. MTP says nothing about DFlash2, which
+# needs its own exporter/runtime qualification.
+#
+# Every profile shares one scheduler and the PA backend; MTP's k is the only variable.
+# cache_size: 4 is the reference's measured floor at 8K on INT8 (requalify on INT4):
+# speculative decoding builds a second continuous-batching pipeline sized from the same
+# number, and 3 had every MTP profile dropped before prefill.
+
+model:
+  provider: openvino
+  device: GPU
+  weight_format: int8
+  models_base_path: models
+
+benchmark:
+  models: [Qwen3.8-27B]
+  context_tokens: [8000]
+  # Throughput decode length. Accuracy probes use the per-suite budgets under `accuracy`.
+  # throughput_task and iteration_gap_sec keep their defaults, as in the reference:
+  # summary_2s, back-to-back.
+  output_tokens: 64
+  warmup: 1
+  iterations: 3
+  timeout_sec: 5400
+  max_system_memory_pct: 100
+  gpu_memory_budget_gb: 59
+  cache_dir: null
+  output_dir: monitoring/executionlogs/context_bench/qwen3.8_27b
+
+# Read only with --accuracy; identical to the reference configuration.
+accuracy:
+  suites: [retrieval, generation]
+  # The no-MTP row every MTP profile is reported against.
+  baseline_profile: paged_min
+  seed: 20260917
+  embedding_model: sentence-transformers/all-mpnet-base-v2
+  retrieval:
+    tasks: [niah_single, niah_multikey, niah_multivalue, niah_multiquery, vt, cwe, fwe, qa]
+    depths: [0.0, 0.5, 1.0]
+    samples: 2
+    output_tokens: 64
+    options:
+      niah_multikey: {num_distractors: 3}
+      niah_multivalue: {num_values: 4}
+      niah_multiquery: {num_queries: 4}
+      vt: {chain_length: 3, num_chains: 3}
+      cwe: {num_target_words: 10}
+      fwe: {top_k: 3}
+  generation:
+    tasks: [summary, fact_sheet]
+    depths: [0.5]
+    samples: 2
+    output_tokens: 256
+    options:
+      fact_sheet: {num_facts: 6}
+
+profiles:
+  - name: paged_min
+    ov: &ov_qwen38
+      ATTENTION_BACKEND: PA
+      GPU_ENABLE_LARGE_ALLOCATIONS: "YES"
+      KV_CACHE_PRECISION: f16
+    scheduler: &scheduler_qwen38
+      max_num_batched_tokens: 32768
+      max_num_seqs: 1
+      enable_prefix_caching: false
+      cache_size: 4
+
+  - name: mtp_k1
+    ov: *ov_qwen38
+    scheduler: *scheduler_qwen38
+    mtp: {num_assistant_tokens: 1}
+
+  - name: mtp_k2
+    ov: *ov_qwen38
+    scheduler: *scheduler_qwen38
+    mtp: {num_assistant_tokens: 2}
+
+  - name: mtp_k3
+    ov: *ov_qwen38
+    scheduler: *scheduler_qwen38
+    mtp: {num_assistant_tokens: 3}
+
+  - name: mtp_k4
+    ov: *ov_qwen38
+    scheduler: *scheduler_qwen38
+    mtp: {num_assistant_tokens: 4}
+
+  - name: mtp_k6
+    ov: *ov_qwen38
+    scheduler: *scheduler_qwen38
+    mtp: {num_assistant_tokens: 6}

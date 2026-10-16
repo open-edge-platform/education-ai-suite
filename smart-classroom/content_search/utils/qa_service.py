@@ -220,6 +220,7 @@ class QAService:
                         "max_completion_tokens": effective_max_tokens,
                         "stream": False,
                     },
+                    headers={"X-SC-Stage": "qa"},  # processing-time attribution
                 )
                 response.raise_for_status()
                 data = response.json()

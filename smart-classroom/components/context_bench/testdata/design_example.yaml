@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Parser/plan fixture: the example configuration from the context-bench design (Section 3).
+# Two profiles, a stock draft, sustained load, an 80% RAM budget and reduced accuracy suites
+# without semantic similarity. Expected plan: 14 throughput cases, or two accuracy cases of
+# ten probes at 8K. Not a performance result; the 59 GiB GPU budget is machine-specific.
+model:
+  provider: openvino
+  device: GPU
+  weight_format: int4
+  models_base_path: models
+  model_dirs:
+    Qwen3.6-35B-A3B: models/openvino/Qwen3.6-35B-A3B/int4
+
+benchmark:
+  models: [Qwen3.6-35B-A3B]
+  context_tokens: [0, 8000]
+  output_tokens: 512
+  warmup: 1
+  iterations: 3
+  throughput_task: [code, math, chat, summary_2s]
+  iteration_gap_sec: 0
+  timeout_sec: 5400
+  max_system_memory_pct: 80
+  gpu_memory_budget_gb: 59
+  cache_dir: null
+  output_dir: monitoring/executionlogs/context_bench/qwen3.6_35b
+
+profiles:
+  - name: paged_min
+    ov: &qwen36_ov
+      GPU_ENABLE_LARGE_ALLOCATIONS: "YES"
+      KV_CACHE_PRECISION: f16
+    scheduler: &qwen36_scheduler
+      max_num_batched_tokens: 65536
+      max_num_seqs: 1
+      num_linear_attention_blocks: 17
+      enable_prefix_caching: false
+  - name: dflash_k7
+    ov: *qwen36_ov
+    scheduler: *qwen36_scheduler
+    dflash:
+      model: models/openvino/Qwen3.6-35B-A3B-DFlash/int4
+      num_assistant_tokens: 7
+
+accuracy:
+  suites: [retrieval, generation]
+  baseline_profile: paged_min
+  seed: 20260917
+  embedding_model: null
+  retrieval:
+    tasks: [niah_single]
+    depths: [0.0, 0.5, 1.0]
+    samples: 2
+    output_tokens: 64
+  generation:
+    tasks: [summary, fact_sheet]
+    samples: 2
+    output_tokens: 256
+    options:
+      fact_sheet: {num_facts: 6}
