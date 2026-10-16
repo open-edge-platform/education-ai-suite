@@ -29,50 +29,9 @@ The main features are as follows:
 - RAG-based Question & Answer over uploaded educational materials
 - Vector-based retrieval using ChromaDB with CLIP and mE5 embeddings
 
-### Report Generator
-
-- Report generation triggered via report API after session outputs are ready
-- Session-based inputs from summary, mindmap, and topic segmentation outputs
-- Field-selectable template report generation with streaming output
-- Report retrieval and export in Markdown, DOCX, and PDF formats
-- Fast reselect flow to update included fields without rerunning full LLM generation
-
 ## Architecture
 
 - Plug-and-play architecture for integrating new ASR, LLM, and video analytics models
-- API-first design ready for frontend integration
+- API-first design ready for frontend integration.
 
-## Get Started
 
-To see the system requirements and other installations, see the following guides:
-
-- [System Requirements](./docs/user-guide/get-started/system-requirements.md): Check the hardware and software requirements for deploying the application.
-- [Get Started](./docs/user-guide/get-started.md): Follow step-by-step instructions to set up the application.
-- [Application Flow](./docs/user-guide/application-flow.md): Check the flow of application.
-- [Speaker Diarization Setup](./docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional): Optional one-time Hugging Face token setup required to enable speaker diarization.
-
-## How It Works
-
-The architecture follows a modular, dual-pipeline design for comprehensive classroom analysis.
-
-The **audio pipeline** begins with audio preprocessing, where FFmpeg chunks input audio into smaller segments for optimal handling. These segments are processed by an **ASR transcriber** (e.g., Whisper or Paraformer) to convert speech into text. An **LLM summariser** (Qwen), optimised through OpenVINO™, generates concise summaries delivered via the output handler.
-
-The **video analytics pipeline** processes up to three concurrent camera streams (front, back, content) through DL Streamer-based processing graphs. Each stream passes through **YOLO-based person detection and pose estimation**, followed by **posture classification** (sit/stand, hand-raise) and **multi-model classification** (ResNet-18, MobileNet-V2, Person-ReID). All models run on OpenVINO™ with NPU by default. Processed video is streamed via a **MediaMTX RTSP server**, and per-frame metadata is aggregated into classroom engagement statistics.
-
-The **content search pipeline** handles multimodal content ingestion and retrieval. Uploaded files (videos, documents, images) are processed through format-specific extractors: videos are split into time-based chunks and summarized by a **VLM** (Qwen3-VL); documents undergo text extraction with optional OCR (PaddleOCR) and semantic chunking; images are embedded directly via **CLIP**. All content is indexed into **ChromaDB** with dual embeddings (CLIP for visual, mE5 for text). At query time, a **cross-encoder reranker** (BGE-reranker) scores document results, and **Reciprocal Rank Fusion (RRF)** merges results across modalities for balanced retrieval. A RAG-based Q&A layer generates grounded answers from the retrieved context.
-
-<p align="center">
-  <img src="./docs/user-guide/_assets/architecture.svg" alt="High-Level Audio Pipeline Diagram" width="80%">
-</p>
-<p align="center">
-  <img src="./docs/user-guide/_assets/video-pipeline.svg" alt="High-Level Video Pipeline Diagram" width="80%">
-</p>
-<p align="center">
-  <img src="./docs/user-guide/_assets/Content_Search_Arch.png" alt="Content Search Architecture" width="80%">
-</p>
-
-For more information see [How it works](./docs/user-guide/how-it-works.md)
-
-## Learn More
-
-- [Release Notes](./docs/user-guide/release-notes.md)
