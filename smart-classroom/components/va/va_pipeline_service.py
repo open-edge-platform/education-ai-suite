@@ -25,14 +25,20 @@ from utils.gstreamer_env import (
 )
 from components.va.runner_client import PipelineRunnerClient
 
-MAX_INPUT_FRAMERATE = "30/1"
+MAX_INPUT_FRAMERATE = "15/1"
 CLASSIFY_FRAMERATE = "1/1"
 
 # Keyframe cadence of the RTSP output, in seconds. A WebRTC or HLS client cannot
 # render anything until an IDR arrives, so this bounds how long a viewer waits
-# after opening a stream. 0.5s matches what the 30fps pipelines produced with
-# the previous fixed gop-size=15.
+# after opening a stream.
 RTSP_KEYFRAME_INTERVAL_SEC = 0.5
+# Floor on the keyframe interval. Without it a low-framerate sink
+# degenerates to all-IDR (gop-size=1 at 1fps), and every picture becomes a full
+# keyframe pushed out as one burst of hundreds of RTP packets.
+RTSP_MIN_GOP_FRAMES = 15
+
+# Upper bound (width, height) on the RTSP output.
+RTSP_OUTPUT_MAX_RESOLUTION = (1920, 1080) # (1280, 720)
 
 class PipelineName(Enum):
     """Enumeration of pipeline names"""
@@ -201,6 +207,22 @@ class VideoAnalyticsPipelineService:
             self.logger.error(f"File validation error: {e}")
             return f"File validation error: {e}"
 
+    @staticmethod
+    def _get_d3d12_to_d3d11_elements() -> List[str]:
+        """Get elements handing decoded D3D12 frames to the D3D11 pipeline.
+
+        The d3d12 decoders must output D3D12Memory: asked for D3D11Memory
+        they take a copy-out path that asserts and returns a flow error when a
+        damaged stream (e.g. RTSP packet loss) makes them output a frame twice.
+        d3d12download then does the D3D11 interop copy on the GPU instead.
+        """
+        return [
+            "video/x-raw(memory:D3D12Memory)",
+            "!",
+            "d3d12download",
+            "!",
+        ]
+
     def _get_source_elements(self, source: str, input_type: str) -> List[str]:
         """Get source elements based on input type"""
         if input_type == "rtsp" and config.va_pipeline.rtsp_codec == "h264":
@@ -216,6 +238,7 @@ class VideoAnalyticsPipelineService:
                 "!",
                 "d3d12h264dec",
                 "!",
+                *self._get_d3d12_to_d3d11_elements(),
             ]
         elif input_type == "rtsp" and config.va_pipeline.rtsp_codec == "h265":
             return [
@@ -230,14 +253,17 @@ class VideoAnalyticsPipelineService:
                 "!",
                 "d3d12h265dec",
                 "!",
+                *self._get_d3d12_to_d3d11_elements(),
             ]
         elif input_type == "file":
+            # decodebin3 since the file codec is not fixed; 
             return [
                 "filesrc",
                 f"location={Path(source).as_posix()}",
                 "!",
                 "decodebin3",
                 "!",
+                *self._get_d3d12_to_d3d11_elements(),
             ]
         else:
             raise ValueError(f"Unknown input type: {input_type}")
@@ -258,17 +284,22 @@ class VideoAnalyticsPipelineService:
         """Keyframe interval in frames, for a pipeline running at sink_framerate.
 
         mfh264enc's gop-size counts *pictures*, not seconds. Deriving it from the
-        framerate keeps the keyframe cadence constant in wall-clock time.
+        framerate keeps the keyframe cadence constant in wall-clock time, down to
+        the RTSP_MIN_GOP_FRAMES floor.
         """
         fps = self._framerate_to_fps(sink_framerate)
-        return max(1, round(fps * RTSP_KEYFRAME_INTERVAL_SEC))
+        return max(RTSP_MIN_GOP_FRAMES, round(fps * RTSP_KEYFRAME_INTERVAL_SEC))
 
     def _get_rtsp_sink_elements(
         self, rtsp_url: str, pipeline_name: str, sink_framerate: Optional[str] = None
     ) -> List[str]:
         """Get RTSP sink elements for pushing to RTSP server"""
+        max_width, max_height = RTSP_OUTPUT_MAX_RESOLUTION
         return [
             "d3d11convert",
+            "!",
+            f"video/x-raw(memory:D3D11Memory),width=[1,{max_width}],"
+            f"height=[1,{max_height}],pixel-aspect-ratio=1/1",
             "!",
             "mfh264enc",
             "bitrate=3000",
@@ -307,17 +338,24 @@ class VideoAnalyticsPipelineService:
         )
 
     def _get_input_framerate_cap_elements(self) -> List[str]:
-        """Get elements capping the framerate ahead of gvadetect.
-        It exists so a 50/60fps camera cannot push the pose model past the rate the
-        NPU can serve.
+        """Get elements capping the framerate at max_input_framerate.
+        Used ahead of gvadetect so a high-framerate camera cannot push the pose
+        model past the rate the NPU can serve, and ahead of the content video
+        output to bound encode load.
         """
         if not self.max_input_framerate:
             return []
+        caps = "video/x-raw(memory:D3D11Memory)"
         return [
             "videorate",
             "drop-only=true",
             "!",
-            f"video/x-raw(memory:D3D11Memory),framerate=[0/1,{self.max_input_framerate}]",
+            # videorate fixates within the first caps structure downstream
+            # offers. Behind a tee that is a classification branch's 1/1, which
+            # would drag the whole pipeline down to it, so the exact cap goes
+            # first. The range lets slower sources pass through unchanged.
+            f"{caps},framerate={self.max_input_framerate};"
+            f"{caps},framerate=[0/1,{self.max_input_framerate}]",
             "!",
         ]
 
@@ -762,13 +800,14 @@ class VideoAnalyticsPipelineService:
 
         pipeline = [
             *self._get_source_elements(source, input_type),
-            # Branch 1: ResNet18 classification. Unlike front/back this rate
-            # applies to the whole pipeline, video output included, so the sink
-            # below is told the same framerate.
-            "videorate",
+            "tee",
+            "name=t",
+            # Branch 1: ResNet18 classification at classify_framerate
+            "t.",
             "!",
-            f"video/x-raw(memory:D3D11Memory),framerate={self.classify_framerate}",
+            "queue",
             "!",
+            *self._get_classify_decimation_elements(),
             "gvaclassify",
             f"model={self._get_model_path('resnet18')}",
             f"device={options.device}",
@@ -785,10 +824,19 @@ class VideoAnalyticsPipelineService:
             f"file-path={output_dir.as_posix()}/content_results.txt",
             "file-format=json-lines",
             "!",
-            "gvawatermark",
+            "fakesink",
+            "async=false",
+            "sync=false",
+            # Branch 2: video output. Split off ahead of the classification
+            # decimation so the stream keeps the capped source rate instead of
+            # 1fps. It carries no inference metadata, hence no gvawatermark.
+            "t.",
             "!",
+            "queue",
+            "!",
+            *self._get_input_framerate_cap_elements(),
             *self._get_video_sink_elements(
-                options, "content_stream", self.classify_framerate
+                options, "content_stream", self.max_input_framerate
             ),
         ]
         return pipeline

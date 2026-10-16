@@ -346,8 +346,14 @@ python grading_service.py
 ```bash
 cd <path-to>\education-ai-suite\smart-classroom\ui
 npm install
-npm run dev -- --host 0.0.0.0 --port 5173
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
+
+> [!WARNING]
+> Keep the frontend bound to `127.0.0.1`. The dev server proxies `/api/v1` and
+> `/grading-api` to the Content Search and Grading backends, which have no
+> authentication. Binding it to `0.0.0.0` exposes those backends, including
+> their file read and write APIs, to every device on the network.
 
 ### Optional: Run as an Electron Desktop App
 
@@ -384,24 +390,11 @@ After starting the frontend you can open the Smart Classroom UI in a browser
 (or, if you used `npm run electron:dev`, in the Electron desktop window
 that opens automatically):
 
-Local machine:
-
 - `http://localhost:5173`
 - `http://127.0.0.1:5173`
 
-From another device on the same network (replace <HOST_IP> with your computer’s IP):
-
-- `http://<HOST_IP>:5173`
-
-Find your IP (Windows PowerShell):
-
-```sh
-ipconfig
-```
-
-Use the IPv4 Address from your active network adapter.
-
-If you changed the port, adjust the URL accordingly.
+The UI is only reachable from the machine running the services. If you changed
+the port, adjust the URL accordingly.
 
 ## Troubleshooting
 
@@ -411,14 +404,8 @@ If you changed the port, adjust the URL accordingly.
 - **Backend not ready:**
   Wait until Uvicorn shows **"Application startup complete"** and is listening on port **8000**.
 
-- **URL fails from another device:**
-  Confirm you used `--host 0.0.0.0` and replaced `<HOST_IP>` correctly.
-
 - **Nothing at http://localhost:5173:**
   Check that the frontend terminal shows the Vite server running and no port conflict.
-
-- **Firewall blocks access:**
-  Allow inbound traffic on ports **5173** (frontend) and **8000** (backend) on Windows.
 
 - **Auto reload not happening:**
   Refresh manually if the backend was restarted after initial UI load.

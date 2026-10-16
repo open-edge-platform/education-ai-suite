@@ -171,8 +171,9 @@ The startup script performs:
 
 Once all services are running, open your browser:
 
-- **Local:** <http://localhost:5173>
-- **Network:** <http://YOUR_IP:5173>
+- <http://localhost:5173>
+
+The UI is only reachable from this machine.
 
 ---
 
