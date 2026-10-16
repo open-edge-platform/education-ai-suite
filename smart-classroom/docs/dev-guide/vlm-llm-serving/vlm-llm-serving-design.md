@@ -1,40 +1,40 @@
-# Smart Classroom VLM/LLM Serving Design
+# Smart Classroom Vision-Language Model (VLM) and Large Language Model (LLM) Serving Design
 
-**Status:** Implementation design. Unless explicitly identified as existing behavior, the features and contracts below are requirements, not claims of implemented or qualified support. Model/runtime qualification and performance results remain pending.
+**Status:** Implementation design. Unless explicitly identified as existing behavior, the following features and contracts are requirements, not claims of implemented or qualified support. Model and runtime qualification and performance results remain pending.
 
 ## 1. Key Features and Compatibility
 
-This design covers shared model serving, speculative decoding, timing instrumentation and offline benchmarking while preserving classroom inference interfaces.
+This design covers shared model serving, speculative decoding, timing instrumentation, and offline benchmarking while preserving classroom inference interfaces.
 
 | Key feature | Stakeholder benefit |
 | --- | --- |
-| **Qwen3.5 / Qwen3.6 / Qwen3.8 model choice** | Qwen3.5-9B INT4/INT8, Qwen3.6-35B-A3B INT4 and Qwen3.8-27B INT4/INT8 through the shared OpenVINO service. |
+| **Qwen3.5, Qwen3.6, or Qwen3.8 model choice** | Serve Qwen3.5-9B INT4 and INT8, Qwen3.6-35B-A3B INT4, and Qwen3.8-27B INT4 and INT8 through the shared OpenVINO service. |
 | **Tool calling on port 8000** | OpenAI-compatible function calls and tool-result conversations through `/v1/chat/completions`, enabling agent workflows without a separate endpoint. |
 | **Selectable speculative decoding** | Choose DFlash, DFlash2 or supported MTP explicitly, with plain-generation fallback under the `auto` activation policy. |
-| **Automatic first-run preparation** | Download the target and required speculative artifacts, convert when needed, and reuse validated files on later starts. No pre-existing local model files are required. |
+| **Automatic first-run preparation** | Download the target and required speculative artifacts, convert them when needed, and reuse validated files on later starts. No pre-existing local model files are required. |
 | **Backward compatibility** | Retain older models and configuration, the port-8000 API, `/v1/chat/completions`, and the shared classroom generation interface. |
-| **Controlled activation** | Warm-up before readiness, visible acceleration status and safe failure handling before release. |
-| **Workflow and model timing statistics** | Attribute processing time to ASR, VA, OCR, Summary, Mindmap and other stages, then compare individual model calls by model, precision, device and effective decoding method. |
-| **Standalone `context_bench` benchmarking** | Compare model/runtime profiles using repeatable time to first token (TTFT), time per output token after the first (TPOT), throughput and memory measurements, with optional retrieval-accuracy and generation-fidelity checks. See [context-bench-design.md](context-bench-design.md). |
+| **Controlled activation** | Complete the warm-up of the selected model pipeline before reporting readiness, show the model's acceleration status, and handle failures safely. |
+| **Workflow-stage and model-call timing statistics** | Measure processing time separately for workflow stages, including Automatic Speech Recognition (ASR), video analytics (VA), Optical Character Recognition (OCR), Summary, and Mindmap. Compare individual model calls by model, precision, device, and effective decoding method. |
+| **Standalone `context_bench` benchmarking** | Compare model and runtime profiles using repeatable measurements of time to first token (TTFT), time per output token after the first (TPOT), throughput, and memory. Optionally assess retrieval accuracy and generation fidelity against a baseline. See [context-bench-design.md](context-bench-design.md). |
 
-**Preserve existing model support**, including Qwen3-VL-8B-Instruct and Qwen3.5-9B, with unchanged providers, model IDs, precisions, local paths and generation behavior. No configuration migration or default model replacement is required; speculation remains off unless enabled. A model without a qualified accelerator continues through plain generation. Qualified serving profiles prepare missing artifacts automatically after software setup; the offline benchmark consumes prepared artifacts.
+**Preserve existing model support**, including Qwen3-VL-8B-Instruct and Qwen3.5-9B, with unchanged providers, model IDs, precisions, local paths and generation behavior. No configuration migration or default model replacement is required; speculation remains switched off unless enabled. A model without a qualified accelerator continues through plain generation. Qualified serving profiles prepare missing artifacts automatically after software setup; the offline benchmark consumes prepared artifacts.
 
-Keep one target per serving instance. Generating tool calls and consuming tool results are in scope; executing tools remains the client/controller's responsibility. Multi-model routing, UI redesign and NPU text-generation support are outside scope; existing NPU use by other classroom components is unchanged.
+Keep one target per serving instance. Generating tool calls and consuming tool results are in scope; executing tools remains the client's or controller's responsibility. Multi-model routing, UI redesign, and NPU text-generation support are outside the scope; existing NPU use by other classroom components is unchanged.
 
 ## 2. Model Profiles
 
 | Model | Target artifacts | Optional accelerator |
 | --- | --- | --- |
-| Previously supported VLM/LLM models | Preserve their supported download/export paths and precisions | Plain generation; a drafter is not required |
-| `Qwen/Qwen3.5-9B` | [INT4 IR](https://huggingface.co/OpenVINO/Qwen3.5-9B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.5-9B-int8-ov) | Plain generation; speculative decoding requires a separately qualified profile |
+| Previously supported VLM and LLM models | Preserve their supported download and export paths, and precisions | Plain generation; a drafter is not required |
+| `Qwen/Qwen3.5-9B` | [INT4 intermediate representation (IR)](https://huggingface.co/OpenVINO/Qwen3.5-9B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.5-9B-int8-ov) | Plain generation; speculative decoding requires a separately qualified profile |
 | `Qwen/Qwen3.6-35B-A3B` | [INT4 IR](https://huggingface.co/OpenVINO/Qwen3.6-35B-A3B-int4-ov) | [DFlash](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash) |
 | `Qwen/Qwen3.8-27B` | [INT4 IR](https://huggingface.co/OpenVINO/Qwen3.8-27B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.8-27B-int8-ov) | [DFlash2](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2) |
 
-A Qwen3.5-9B selection uses `provider: vlm`, `vlm_name: Qwen/Qwen3.5-9B` and `weight_format: int4` or `int8` under `models.text_gen`. Omit `speculative` for plain generation; listing the target artifacts does not qualify a speculative method or tool-call capability.
+A Qwen3.5-9B selection uses `provider: vlm`, `vlm_name: Qwen/Qwen3.5-9B`, and `weight_format: int4` or `int8` under `models.text_gen`. Omit `speculative` for plain generation; listing the target artifacts does not qualify a speculative method or tool-call capability.
 
-A maintained catalog supplies compatible target/method combinations, default drafter sources, immutable revisions, conversion recipes, dependency versions and tested tuning values. Explicit speculative settings select or override these defaults only within a validated profile. Drafter precision is independent of target precision. Extend the catalog without restricting the existing plain-model loading path.
+A maintained catalog supplies compatible combinations of targets and methods, default drafter sources, immutable revisions, conversion recipes, dependency versions, and tested tuning values. Explicit speculative settings select or override these defaults only within a validated profile. Drafter precision is independent of target precision. Extend the catalog without restricting the existing plain-model loading path.
 
-A source checkpoint is not runtime-ready IR. Each accelerated profile must provide downloadable compatible IR or a tested conversion recipe for downloaded source files, including target hidden-state outputs where needed. DFlash2 requires independent exporter/runtime qualification. MTP (multi-token prediction) uses the target's bundled prediction head and requires its own artifact/runtime qualification; it does not use either z-lab drafter above. Select one mechanism per pipeline, never silently substitute or combine them.
+A source checkpoint is not runtime-ready IR. Each accelerated profile must provide downloadable compatible IR or a tested conversion recipe for downloaded source files, including target hidden-state outputs where needed. Qualify the DFlash2 exporter and runtime independently. Multi-token prediction (MTP) uses the target's bundled prediction head and requires its own artifact and runtime qualification; it does not use either of the two external Dflash and Dflash2 z-lab drafters listed above. Select one mechanism per pipeline, never silently substitute or combine them.
 
 ## 3. Architecture
 
