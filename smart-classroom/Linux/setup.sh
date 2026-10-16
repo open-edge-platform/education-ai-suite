@@ -19,7 +19,18 @@ die() { printf '\033[1;31m[setup]\033[0m %s\n' "$*" >&2; exit 1; }
 
 if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   log "Initializing git submodules (edge-ai-libraries, performance-tools)…"
-  git -C "$SCRIPT_DIR" submodule update --init --recursive edge-ai-libraries
+  git -C "$SCRIPT_DIR" submodule sync -- edge-ai-libraries
+  git -C "$SCRIPT_DIR" submodule update --init edge-ai-libraries
+  git -C "$SCRIPT_DIR/edge-ai-libraries" sparse-checkout init --no-cone
+  git -C "$SCRIPT_DIR/edge-ai-libraries" sparse-checkout set --no-cone \
+    '/*' \
+    '!/*' \
+    '/microservices/' \
+    '!/microservices/*/' \
+    '!/microservices/isolation-forest' \
+    '!/microservices/random-forest' \
+    '/microservices/audio-analyzer/' \
+    '/microservices/model-download/'
   git -C "$SCRIPT_DIR" submodule update --init performance-tools
 else
   log "Not a git checkout — skipping submodule init."
