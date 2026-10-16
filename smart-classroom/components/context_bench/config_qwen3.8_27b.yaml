@@ -47,7 +47,7 @@
 # each report's header names the weights it ran.
 #
 # MTP needs a runtime that implements the paged MTP strategy. The reference qualified it on the
-# openvino-genai 2026.5.0 nightly; this port pins the 2026.4.1 release (requirements.txt),
+# openvino-genai 2026.5.0 nightly; the application pins the 2026.4.1 release (requirements.txt),
 # which is not yet qualified for Qwen3.8 MTP. On a runtime without it the mtp_* cases report
 # unsupported/load_error while paged_min still runs. MTP says nothing about DFlash2, which
 # needs its own exporter/runtime qualification.

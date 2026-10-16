@@ -166,11 +166,8 @@ class TestPackageLocation(unittest.TestCase):
                          "'smartclassroom'", "-m components.context_bench.benchmark",
                          "$LASTEXITCODE", "exit $ExitCode", "Push-Location", "Resolve-CallerPath"):
             self.assertIn(required, text)
-        setup = (settings.TOOL_DIR / "setup_env.ps1").read_text(encoding="utf-8")
-        for forbidden in ("--trusted-host", "Bypass -Scope LocalMachine", "CurrentUser",
-                          "--extra-index-url", "--pre"):
-            self.assertNotIn(forbidden, setup)
-        self.assertIn("-Scope Process", setup)
+        self.assertIn("setup-smart-classroom.ps1", text)
+        self.assertIn("-Scope Process", text)
 
     def _shells(self):
         return [shell for shell in ("powershell", "pwsh") if shutil.which(shell)]

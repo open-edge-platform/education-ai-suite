@@ -99,33 +99,15 @@ without `--trust-remote-code`. If the installed exporter cannot convert it
 natively, preparation fails — `auto` then continues with plain generation and
 reports the reason.
 
-## Preparing Models Ahead of Time
+## Model Preparation
 
-[start-smart-classroom.ps1](../../../start-smart-classroom.ps1) runs
-`python -m components.vlm.text_gen_prepare` before the backend starts. The warm
-VLM calls the same helper again at load, where it only validates.
-
-```powershell
-# Download/convert everything the configured method needs, then exit.
-# No elevation, no service restart, no warm-up; nonzero exit if incomplete.
-./start-smart-classroom.ps1 -DownloadModelsOnly
-
-# Start using only files already on disk (no network or conversion for text generation).
-./start-smart-classroom.ps1 -SkipModelDownload
-
-# Check that an offline bundle is complete.
-./start-smart-classroom.ps1 -DownloadModelsOnly -SkipModelDownload
-```
-
-* `-DownloadModelsOnly` requires every artifact of the selected method, even
-  under `mode: auto`, and fails when the selected profile is not qualified. It
-  refuses to run while a backend is serving on port 8000, and cannot be combined
-  with `-Electron`. It uses the saved `.proxy-config` or the inherited proxy
-  environment without prompting.
-* `-SkipModelDownload` covers text generation only; ASR, embeddings, OCR and
-  frontend dependencies follow their usual paths.
-* Preparation exit codes: `0` ready (possibly with an `auto` fallback reason),
-  `1` incomplete or failed, `2` invalid configuration.
+The backend prepares the configured model when it loads the warm VLM, so
+[start-smart-classroom.ps1](../../../start-smart-classroom.ps1), the desktop app
+and `python main.py` all prepare the same way, with no extra switch. The first
+start downloads or converts what is missing (progress is in the backend log) and
+the backend reports ready on `/health` only after warm-up; later starts only
+validate. To run offline, start once with network access, or copy the prepared
+`models/` directories; the manifest above records what was prepared.
 
 ## Tool Calling on Port 8000
 

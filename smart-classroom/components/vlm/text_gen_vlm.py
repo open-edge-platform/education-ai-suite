@@ -130,9 +130,7 @@ class VLMTextGen:
         global _PLAIN_DECISION
         plan = self._plan
         started = time.monotonic()
-        prepared = text_gen_prepare.prepare(
-            plan, allow_download=not text_gen_prepare.cache_only_requested()
-        )
+        prepared = text_gen_prepare.prepare(plan)
         timings = {"prepare_s": round(time.monotonic() - started, 3)}
         fallback = prepared.speculative_error
         spec = prepared.speculative

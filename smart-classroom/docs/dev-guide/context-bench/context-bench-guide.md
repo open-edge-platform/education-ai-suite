@@ -20,14 +20,9 @@ time. Results are observations on the machine that produced them, not qualificat
 
 ## Quick start
 
-Run from `smart-classroom/`. Prepare the shared backend venv
-(`<smart-classroom>/../smartclassroom`) once, explicitly:
-
-```powershell
-.\components\context_bench\setup_env.ps1
-```
-
-Then:
+Run from `smart-classroom/`. The benchmark uses the backend venv
+(`<smart-classroom>/../smartclassroom`) that `setup-smart-classroom.ps1` creates; the
+application's `requirements.txt` pins everything it needs. Then:
 
 ```powershell
 # Plan only: settings, redacted locations, the case grid (c01, c02, ...) and probe counts.

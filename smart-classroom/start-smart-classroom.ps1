@@ -6,9 +6,7 @@ param(
     [switch]$NoElevate,
     [switch]$Silent,
     [switch]$NoWindowsTerminal,
-    [switch]$Electron,
-    [switch]$DownloadModelsOnly,
-    [switch]$SkipModelDownload
+    [switch]$Electron
 )
 
 # ============================================================================
@@ -58,8 +56,7 @@ if ($Help) {
     Write-Host @"
 Smart Classroom Startup Script
 
-Usage: ./start-smart-classroom.ps1 [-SkipProxy] [-Restart] [-Silent] [-NoElevate] [-NoWindowsTerminal] [-Electron]
-                                  [-DownloadModelsOnly] [-SkipModelDownload] [-Help]
+Usage: ./start-smart-classroom.ps1 [-SkipProxy] [-Restart] [-Silent] [-NoElevate] [-NoWindowsTerminal] [-Electron] [-Help]
 
 Options:
     -SkipProxy           Skip proxy configuration prompts
@@ -69,12 +66,6 @@ Options:
     -NoWindowsTerminal   Use Invoke-WmiMethod instead of Windows Terminal (for remote sessions)
     -Electron            Shortcut for ./start-desktop-app.ps1 - launches the desktop app, which
                          manages the Python services itself. Never elevates.
-    -DownloadModelsOnly  Prepare the text-generation target and every artifact of the selected
-                         speculative method, then exit. No services, elevation, restart or
-                         warm-up; nonzero exit if anything is incomplete. Uses the saved
-                         .proxy-config or the inherited proxy environment.
-    -SkipModelDownload   Validate existing text-generation artifacts only: no network or
-                         conversion. Combine with -DownloadModelsOnly to check an offline bundle.
     -Help                Show this help message
 
 Note: without -Electron the script starts every service itself and requests
@@ -88,74 +79,6 @@ Services Launched (in order):
 
 "@ -ForegroundColor Cyan
     exit 0
-}
-
-# ============================================================================
-# MODEL PREPARATION ONLY (-DownloadModelsOnly)
-# ============================================================================
-# Runs before desktop delegation, elevation, restart and cleanup: preparing
-# files needs no Administrator rights and must never touch running services.
-if ($Electron -and ($DownloadModelsOnly -or $SkipModelDownload)) {
-    Write-Host "ERROR: -DownloadModelsOnly/-SkipModelDownload cannot be combined with -Electron;" -ForegroundColor Red
-    Write-Host "       run ./start-smart-classroom.ps1 -DownloadModelsOnly first, then start the desktop app." -ForegroundColor Yellow
-    exit 1
-}
-
-if ($DownloadModelsOnly) {
-    $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
-
-    # Proxy from the saved settings (or the inherited environment), no prompts.
-    $prepProxyFile = Join-Path $ScriptDir ".proxy-config"
-    if (Test-Path $prepProxyFile) {
-        try {
-            $prepProxy = Get-Content $prepProxyFile -Raw | ConvertFrom-Json
-            if ($prepProxy.httpProxy) { $env:HTTP_PROXY = $prepProxy.httpProxy; $env:http_proxy = $prepProxy.httpProxy }
-            if ($prepProxy.httpsProxy) { $env:HTTPS_PROXY = $prepProxy.httpsProxy; $env:https_proxy = $prepProxy.httpsProxy }
-            if ($prepProxy.noProxy) { $env:NO_PROXY = $prepProxy.noProxy }
-        } catch {
-            Write-Host "  Warning: could not read .proxy-config; using the inherited proxy environment." -ForegroundColor Yellow
-        }
-    }
-    # Comma-separated with loopback kept local (see Format-NoProxy below).
-    $prepNoProxy = @()
-    if ($env:NO_PROXY) { $prepNoProxy = $env:NO_PROXY -split '[;,]' | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
-    foreach ($loopback in @('localhost', '127.0.0.1', '::1')) {
-        if ($prepNoProxy -notcontains $loopback) { $prepNoProxy += $loopback }
-    }
-    $env:NO_PROXY = ($prepNoProxy -join ',')
-    $env:no_proxy = $env:NO_PROXY
-
-    # The model owner is a running backend; never prepare underneath it.
-    if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {
-        Write-Host "ERROR: a backend is already serving on port 8000. Stop it before -DownloadModelsOnly," -ForegroundColor Red
-        Write-Host "       or start normally to let it prepare missing files." -ForegroundColor Yellow
-        exit 1
-    }
-
-    $prepPython = Join-Path (Split-Path $ScriptDir -Parent) "smartclassroom\Scripts\python.exe"
-    if (-not (Test-Path $prepPython)) {
-        Write-Host "ERROR: backend environment not found at $prepPython. Run ./setup-smart-classroom.ps1 first." -ForegroundColor Red
-        exit 1
-    }
-
-    $prepArgs = @("-m", "components.vlm.text_gen_prepare", "--download-only")
-    if ($SkipModelDownload) { $prepArgs += "--skip-download" }
-    $env:PYTHONUTF8 = '1'
-    $env:PYTHONUNBUFFERED = '1'
-    Write-Host "Preparing text-generation models (download only)..." -ForegroundColor Cyan
-    Push-Location $ScriptDir
-    try {
-        & $prepPython @prepArgs
-        $prepExit = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
-    if ($prepExit -eq 0) {
-        Write-Host "Model preparation complete." -ForegroundColor Green
-    } else {
-        Write-Host "Model preparation incomplete (exit code $prepExit)." -ForegroundColor Red
-    }
-    exit $prepExit
 }
 
 # ============================================================================
@@ -185,7 +108,6 @@ if (-not $NoElevate) {
         if ($Help) { $relaunchArgs += "-Help" }
         if ($Silent) { $relaunchArgs += "-Silent" }
         if ($NoWindowsTerminal) { $relaunchArgs += "-NoWindowsTerminal" }
-        if ($SkipModelDownload) { $relaunchArgs += "-SkipModelDownload" }
         # No -Electron: desktop-app mode exits above and never elevates.
         $relaunchArgs += "-NoElevate"  # Prevent infinite elevation loop
 
@@ -1194,17 +1116,6 @@ function Wait-ForService {
                     }
                 }
                 
-                # Text-generation model preparation runs before main.py; a first-run
-                # download is progress, not a crash.
-                if (-not $serviceRunning) {
-                    foreach ($proc in $pythonProcs) {
-                        if ($proc.CommandLine -and $proc.CommandLine -like "*text_gen_prepare*") {
-                            $serviceRunning = $true
-                            break
-                        }
-                    }
-                }
-
                 # Check for python with specific command line pattern (main.py, start_services.py)
                 if (-not $serviceRunning -and $CommandLinePattern) {
                     foreach ($proc in $pythonProcs) {
@@ -1284,10 +1195,6 @@ function Wait-ForService {
     }
 }
 
-# Text-generation preparation flags for the backend terminal
-$textGenCacheOnly = if ($SkipModelDownload) { '1' } else { '' }
-$textGenPrepareArgs = if ($SkipModelDownload) { '--skip-download' } else { '' }
-
 # Build proxy commands for child terminals
 $proxyCommands = ""
 if ($httpProxy) {
@@ -1306,7 +1213,9 @@ if ($noProxy) {
 # Desktop-app mode exits long before this point, so the browser dev server is
 # the only frontend this path starts.
 $frontendProxyCommands = ""
-$frontendStartCommand = "npm run dev -- --host 0.0.0.0 --port 5173"
+# Loopback only: the dev server proxies to the unauthenticated content-search and
+# grading backends, so binding 0.0.0.0 would expose them to the whole network.
+$frontendStartCommand = "npm run dev -- --host 127.0.0.1 --port 5173"
 $frontendHeader = "FRONTEND UI"
 $frontendStartMsg = "Starting Frontend (port 5173)..."
 $frontendTitle = "Frontend"
@@ -1439,15 +1348,6 @@ if (`$prepareContentSearchModels) {
     }
 
     Write-Host 'Content Search embedding models are ready.' -ForegroundColor Green
-}
-
-Write-Host ''
-Write-Host 'Preparing text generation models...' -ForegroundColor Yellow
-`$env:SC_TEXT_GEN_CACHE_ONLY = '$textGenCacheOnly'
-python -m components.vlm.text_gen_prepare $textGenPrepareArgs
-if (`$LASTEXITCODE -ne 0) {
-    Write-Host 'Text generation model preparation failed; see the messages above.' -ForegroundColor Red
-    exit 1
 }
 
 Write-Host ''

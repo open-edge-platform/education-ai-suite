@@ -63,7 +63,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(text_gen_profiles, "OPENVINO_MODELS_DIR", models)
     monkeypatch.setattr(prep, "MANIFEST_DIR", models / ".manifests")
     monkeypatch.setattr(prep, "HF_SOURCES_DIR", tmp_path / "models" / "hf")
-    monkeypatch.setattr(prep, "_prepare_target", lambda plan, allow: plan.target_dir)
+    monkeypatch.setattr(prep, "_prepare_target", lambda plan: plan.target_dir)
     monkeypatch.setattr(prep, "_repo_size", lambda repo, rev: 0)
     hub = SimpleNamespace(resolved=[], downloads=[], exports=[])
 
@@ -149,7 +149,7 @@ def test_pinned_revision_mismatch_replaces_drafter_when_downloads_allowed(env):
     assert any(p.name.startswith("int4.superseded-") for p in plan.speculative.draft_dir().parent.iterdir())
 
 
-def test_export_failure_falls_back_in_auto_and_fails_in_on_or_download_only(env, monkeypatch):
+def test_export_failure_falls_back_in_auto_and_fails_in_on(env, monkeypatch):
     def failing(*args):
         raise prep.PreparationError("drafter export failed")
 
@@ -158,8 +158,6 @@ def test_export_failure_falls_back_in_auto_and_fails_in_on_or_download_only(env,
     assert result.speculative is None and "export failed" in result.speculative_error
     with pytest.raises(prep.PreparationError):
         prep.prepare(_plan(env, mode="on"), genai_version=GENAI)
-    with pytest.raises(prep.PreparationError):
-        prep.prepare(_plan(env, mode="auto"), require_speculative=True, genai_version=GENAI)
 
 
 def test_old_runtime_means_plain_in_auto(env):
@@ -167,12 +165,6 @@ def test_old_runtime_means_plain_in_auto(env):
     assert result.speculative is None and "openvino-genai >= 2026.3" in result.speculative_error
     with pytest.raises(SpeculativeUnavailableError):
         prep.prepare(_plan(env, mode="on"), genai_version=lambda: "2025.4.0")
-
-
-def test_cache_only_never_downloads(env):
-    result = prep.prepare(_plan(env, mode="auto"), allow_download=False, genai_version=GENAI)
-    assert result.speculative is None and "downloads are disabled" in result.speculative_error
-    assert env.downloads == [] and env.resolved == []
 
 
 def test_mismatched_drafter_fails_even_in_auto(env):
@@ -201,8 +193,6 @@ def test_local_drafter_is_validated_never_downloaded(env, tmp_path):
 
 def test_mtp_uses_target_head_and_fetches_only_head_files(env, monkeypatch):
     plan = _plan(env, "Qwen/Qwen3.8-27B", "int4", mode="on", method="mtp")
-    with pytest.raises(prep.PreparationError, match="downloads are disabled"):
-        prep.prepare(plan, allow_download=False, genai_version=GENAI)
 
     def snapshot(repo, local_dir, revision, allow_patterns=None):
         env.downloads.append((repo, revision, allow_patterns))
@@ -283,23 +273,3 @@ def test_artifact_lock_excludes_and_recovers_stale(tmp_path):
     with prep.ArtifactLock(artifact, timeout_s=0):
         pass
     assert not stale.exists()
-
-
-def test_cli_exit_codes(monkeypatch):
-    from utils.config_loader import config
-
-    monkeypatch.setattr(prep, "_text_gen_needed", lambda: True)
-    node = SimpleNamespace(vlm_name="Qwen/Qwen3.6-35B-A3B", weight_format="int4", device="GPU",
-                           speculative={"mode": "auto", "method": "eagle"})
-    monkeypatch.setattr(config.models, "text_gen", node, raising=False)
-    assert prep.main([]) == prep.EXIT_CONFIG
-
-    node.speculative = {"mode": "auto"}
-    node.vlm_name = "Qwen/Qwen3.5-9B"  # no qualified accelerator
-    assert prep.main(["--download-only"]) == prep.EXIT_FAILED
-
-    node.speculative = {"mode": "on"}
-    assert prep.main([]) == prep.EXIT_FAILED
-
-    monkeypatch.setattr(prep, "_text_gen_needed", lambda: False)
-    assert prep.main([]) == prep.EXIT_OK

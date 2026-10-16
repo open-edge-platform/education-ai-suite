@@ -146,7 +146,7 @@ Tool definitions and selection are per-request API fields (`tools`, `tool_choice
 
 ## 5. Model Preparation
 
-Integrate preparation into [../../../start-smart-classroom.ps1](../../../start-smart-classroom.ps1), after configuration, proxy and software initialization and before model-dependent services start. Desktop and direct startup use the same helper; request handlers never download or convert files.
+The model owner prepares its artifacts when it loads the warm model, before it reports ready (`components/vlm/text_gen_prepare.py`, called from the VLM load). Every startup path therefore prepares the same way and needs no launcher step or switch: [start-smart-classroom.ps1](../../../start-smart-classroom.ps1), the desktop app ([start-desktop-app.ps1](../../../start-desktop-app.ps1)) and `python main.py`. The first start downloads or converts what is missing; later starts only validate. Dependent services already wait for the owner's `/health` before using the model. Request handlers never download or convert files.
 
 1. **Select:** Resolve the target and speculative policy, method and source. Validate explicit settings, then select the compatible catalog profile. A recognized method without runtime/profile support means plain generation in `auto` or an actionable failure in `"on"`.
 2. **Prepare:** For Hub drafters, download pinned target/drafter files over HTTPS. For `local`, validate the specified IR directory without downloading a replacement drafter. For MTP, acquire the target's bundled head and metadata without downloading an unrelated external model. Use runtime-ready IR directly; convert downloaded sources only through the profile's qualified recipe. Network failures do not trigger unrelated export attempts.
@@ -155,18 +155,7 @@ Integrate preparation into [../../../start-smart-classroom.ps1](../../../start-s
 
 Create storage on demand, use resumable staging and per-artifact locks, and publish only complete validated artifacts. Bound retries and check disk space for weights and conversion intermediates. Keep prior valid artifacts for rollback. Legacy files can be validated and reused without claiming provenance that is not known.
 
-### Launcher Behavior
-
-| Invocation | Behavior |
-| --- | --- |
-| Normal startup | Download/prepare missing selected files, then start services under the failure policy below. |
-| `-DownloadModelsOnly` | Prepare without changing services or running inference warm-up. Require all artifacts for the selected method: target plus external drafter, or target plus bundled MTP head. Return nonzero if incomplete, even in `auto`; this includes a missing accelerated profile. |
-| `-SkipModelDownload` | Validate existing text-generation artifacts only; no network, conversion or dependency installation. An empty target cache fails. May combine with download-only to validate an offline bundle. |
-| `-Silent` | No prompts; report outcome and exit status. It may restart existing services during normal startup, but never during download-only preparation. |
-
-These are intended launcher behaviors; the preparation switches are part of the proposed change. Initialize proxy/environment settings before download-only dispatch, then exit before elevation, restart or cleanup. Reject download-only with desktop delegation or an externally owned server. Forward supported options through relaunch paths. Preparation requires no elevation and must not trigger service cleanup on failure.
-
-Cache-only operation covers text generation, not ASR, embeddings, OCR/grading or frontend dependencies. Install trusted exporter dependencies during software setup. Validate paths and downloaded metadata, never execute repository code, and preserve TLS verification. Pass arguments as data and credentials/proxy settings through the environment without logging secrets.
+To run offline, start once with network access (or copy prepared `models/` directories): validated artifacts are reused without network access. Install trusted exporter dependencies during software setup. Validate paths and downloaded metadata, never execute repository code, and preserve TLS verification. Pass arguments as data and credentials/proxy settings through the environment without logging secrets.
 
 ## 6. Generation and Failure Policy
 
@@ -186,7 +175,7 @@ Tool calling is independent of speculative decoding: it must work with speculati
 | Speculative artifact acquisition, conversion or activation fails | Not applicable | Warm a plain pipeline once, after safe cleanup | Fail |
 | Invalid active method/source/tuning, mismatched target/drafter or integrity failure | Fail for active target | Fail | Fail |
 
-The cache-only switch prevents acquisition even when files are missing; `local` draft sources also prohibit replacement downloads. Download-only requires every artifact for the requested method; a normal `auto` fallback is not successful accelerator qualification.
+`local` draft sources prohibit replacement downloads. A normal `auto` fallback is not successful accelerator qualification; qualify with `"on"`.
 
 If native cleanup cannot be confirmed, stop the model process before recovery. Retain the plain-mode decision for that launch so recovery does not repeatedly activate a failing drafter. Never replay a partially streamed request. Roll back by restoring the previous model/artifacts or disabling speculation and restarting, not by deleting caches.
 
@@ -247,11 +236,11 @@ Compare repeated warm runs using the same fixed inputs, prompt templates, token 
 | Area | Required checks |
 | --- | --- |
 | Backward compatibility | Load unchanged older configurations; retain existing key names, token/queue limits, chunking, segmentation and service endpoints. Test supported providers/model IDs, precisions and local paths; no drafter download when off; plain fallback in `auto`; no regressions from runtime dependency upgrades. |
-| Model/precision support | For every Section 2 profile, test empty-cache preparation, warm-up and later cache-only reuse. Plain mode downloads only the target; an accelerated case requires all artifacts for its selected method. |
+| Model/precision support | For every Section 2 profile, test empty-cache preparation, warm-up and later reuse of the validated artifacts. Plain mode downloads only the target; an accelerated case requires all artifacts for its selected method. |
 | Port-8000 tool calling | End-to-end function definition -> tool call -> tool result -> answer through `/v1/chat/completions`, with streaming and non-streaming clients. Test `none`/`auto`/`required`/named choices, multiple-call IDs, `parallel_tool_calls: false`, full history, malformed arguments, missing results, truncation, unsupported models and no server-side tool execution. |
 | Speculative configuration | Missing/mode-only blocks, all supported methods, explicit/default Hub revisions, local path handling and tuning bounds. Reject cross-model drafters and MTP with an external draft source/model; bundled MTP must never trigger a z-lab download. |
 | Classroom quality | Streaming/non-streaming text, images, supported thinking/structured output, cancellation and queue limits; summaries, mind maps, segmentation, reports, RAG Q&A, video summaries and grading. |
-| Reliability | Invalid pairs and corrupt artifacts, network/disk failures, interrupted/concurrent downloads, safe startup fallback and non-disruptive download-only behavior on Windows PowerShell 5.1/7. |
+| Reliability | Invalid pairs and corrupt artifacts, network/disk failures, interrupted/concurrent downloads, safe startup fallback, and identical preparation from both launchers on Windows PowerShell 5.1/7. |
 | Performance | Repeated plain/accelerated comparisons: answer quality, time to first token, tokens/s, end-to-end p50/p95 latency and peak memory. Separate download/conversion/compile time from inference. |
 | Timing statistics | Publish stage and individual-model results defined in Section 7 for each qualification case. Verify attribution for shared models, overlapping stages, streaming completion, retries, failures, cancellation and skipped stages; retain raw samples and do not present unavailable timings as zero or pending cases as measured. |
 | Context bench | Complete the [benchmark implementation and tests](context-bench-design.md#10-implementation-sequence-and-verification); verify exact-context and matched-profile measurements, separate accuracy verdicts, interruption-safe evidence, nonzero failure exits and unchanged source/serving artifacts. Publish model-call evidence without presenting it as full classroom-workflow timing. |

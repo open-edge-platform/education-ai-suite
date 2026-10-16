@@ -14,9 +14,9 @@
 #   .\components\context_bench\run_benchmark.ps1 --config components/context_bench/config_qwen3.8_27b.yaml
 #   .\components\context_bench\run_benchmark.ps1 --profiles paged_min dflash_k7 --contexts 8000 --warmup 0 --iterations 1
 #
-# The venv (<smart-classroom>/../smartclassroom) is not created here; prepare it explicitly
-# with .\components\context_bench\setup_env.ps1 (or the main setup script). If PowerShell
-# blocks local scripts, relax the policy for this process only:
+# The venv (<smart-classroom>/../smartclassroom) is not created here: setup-smart-classroom.ps1
+# creates it with the application's requirements.txt, which pins everything the benchmark
+# needs. If PowerShell blocks local scripts, relax the policy for this process only:
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 
 Set-StrictMode -Version 3.0
@@ -32,7 +32,7 @@ $VenvPython = Join-Path $VenvPath 'Scripts\python.exe'
 
 if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
     Write-Host "Backend venv not found at $VenvPath." -ForegroundColor Red
-    Write-Host "Prepare it explicitly first: $(Join-Path $ScriptDir 'setup_env.ps1')" -ForegroundColor Yellow
+    Write-Host "Prepare it first: $(Join-Path $SmartClassroomRoot 'setup-smart-classroom.ps1')" -ForegroundColor Yellow
     exit 2
 }
 

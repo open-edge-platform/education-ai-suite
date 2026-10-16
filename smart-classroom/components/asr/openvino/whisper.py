@@ -47,6 +47,11 @@ class Whisper(BaseASR):
             f"{self.model_path}/openvino_decoder_model.xml",
             self.device
         )
+        # Newer optimum-intel exports of the stateful decoder have no
+        # `cache_position` input; feed it only where the IR declares it.
+        self._decoder_inputs = {
+            name for port in self.decoder.inputs for name in port.get_names()
+        }
 
         logger.info("OpenVINO Whisper models loaded successfully")
  
@@ -81,9 +86,10 @@ class Whisper(BaseASR):
             inputs_map = {
                 "input_ids": inp,
                 "encoder_hidden_states": encoder_output,
-                "cache_position": cache_position,
                 "beam_idx": beam_idx,
             }
+            if "cache_position" in self._decoder_inputs:
+                inputs_map["cache_position"] = cache_position
 
             req = self.decoder.create_infer_request()
             req.infer(inputs_map)

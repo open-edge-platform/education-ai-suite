@@ -3,10 +3,10 @@
 
 """Prepare the ``text_gen`` target and speculative artifacts before serving.
 
-One helper for every startup path: the launcher runs it as
-``python -m components.vlm.text_gen_prepare`` before services start, and the
-warm VLM calls :func:`prepare` again at load, where everything is already in
-place and only validation runs. Request handlers never download or convert.
+The model owner calls :func:`prepare` when it loads the warm VLM, so every
+startup path (``start-smart-classroom.ps1``, the desktop app, ``python main.py``)
+prepares the same way: the first start downloads or converts what is missing,
+later starts only validate. Request handlers never download or convert.
 
 Order of work (see the serving design, "Model Preparation"):
 
@@ -25,7 +25,6 @@ plain generation; incompatibility (:class:`CompatibilityError`) always fails.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import logging
@@ -59,9 +58,6 @@ logger = logging.getLogger(__name__)
 _CONTENT_SEARCH_DIR = SC_ROOT / "content_search"
 HF_SOURCES_DIR = SC_ROOT / "models" / "hf"
 MANIFEST_DIR = OPENVINO_MODELS_DIR / ".manifests"
-
-# Set by the launcher's -SkipModelDownload: validate existing files only.
-CACHE_ONLY_ENV = "SC_TEXT_GEN_CACHE_ONLY"
 
 DOWNLOAD_ATTEMPTS = 3
 LOCK_TIMEOUT_S = 3600.0
@@ -101,10 +97,6 @@ class PreparedArtifacts:
     manifest: Optional[Path] = None
 
 
-def cache_only_requested() -> bool:
-    return os.environ.get(CACHE_ONLY_ENV, "").strip().lower() in ("1", "true", "yes")
-
-
 def _installed_version(distribution: str) -> Optional[str]:
     try:
         from importlib.metadata import version
@@ -121,27 +113,25 @@ def installed_genai_version() -> Optional[str]:
 # ----------------------------------------------------------------------------
 # Entry point
 # ----------------------------------------------------------------------------
-def prepare(plan: TextGenPlan, *, allow_download: bool = True,
-            require_speculative: bool = False,
+def prepare(plan: TextGenPlan, *,
             genai_version: Optional[Callable[[], Optional[str]]] = None) -> PreparedArtifacts:
     """Prepare the plan's artifacts; raises on target failure.
 
-    ``require_speculative`` turns a speculative acquisition failure into an
-    error (``mode: "on"`` and download-only preparation); otherwise it is
-    reported in ``speculative_error`` for plain fallback.
+    A speculative acquisition failure is an error under ``mode: "on"``;
+    otherwise it is reported in ``speculative_error`` for plain fallback.
     """
     timings: dict = {}
     t0 = time.monotonic()
-    target_dir = _prepare_target(plan, allow_download)
+    target_dir = _prepare_target(plan)
     timings["target_s"] = round(time.monotonic() - t0, 3)
 
     result = PreparedArtifacts(plan=plan, target_dir=target_dir, timings=timings)
-    strict = require_speculative or plan.mode == "on"
+    strict = plan.mode == "on"
     if plan.wants_speculative:
         t1 = time.monotonic()
         try:
             _check_runtime(plan.speculative, (genai_version or installed_genai_version)())
-            result.speculative = _prepare_speculative(plan, target_dir, allow_download)
+            result.speculative = _prepare_speculative(plan, target_dir)
         except CompatibilityError:
             raise
         except (PreparationError, SpeculativeUnavailableError) as exc:
@@ -178,15 +168,10 @@ def _convert_helpers():
     return convert_model, is_model_ready
 
 
-def _prepare_target(plan: TextGenPlan, allow_download: bool) -> Path:
+def _prepare_target(plan: TextGenPlan) -> Path:
     model_dir = plan.target_dir
     convert_model, is_model_ready = _convert_helpers()
     if not is_model_ready(model_dir, require_detokenizer=True):
-        if not allow_download:
-            raise PreparationError(
-                f"text_gen target {plan.model_name} ({plan.weight_format}) is not in the "
-                "local cache and downloads are disabled (-SkipModelDownload)"
-            )
         model_dir.mkdir(parents=True, exist_ok=True)
         with ArtifactLock(model_dir):
             if not is_model_ready(model_dir, require_detokenizer=True):
@@ -235,14 +220,13 @@ def check_tokenizer_runtime(model_dir: Path, installed: Optional[str]) -> None:
 # ----------------------------------------------------------------------------
 # Speculative artifacts
 # ----------------------------------------------------------------------------
-def _prepare_speculative(plan: TextGenPlan, target_dir: Path,
-                         allow_download: bool) -> PreparedSpeculative:
+def _prepare_speculative(plan: TextGenPlan, target_dir: Path) -> PreparedSpeculative:
     settings = plan.speculative
     if settings.method == "mtp":
-        _prepare_mtp_head(plan, target_dir, allow_download)
+        _prepare_mtp_head(plan, target_dir)
         return PreparedSpeculative(settings, target_dir, target_dir, None)
     if settings.method == "dflash":
-        draft_dir, revision = _prepare_external_draft(plan, allow_download)
+        draft_dir, revision = _prepare_external_draft(plan)
         validate_dflash_pair(target_dir, draft_dir, settings.num_assistant_tokens)
         derived = ensure_dflash_target(target_dir, draft_dir)
         return PreparedSpeculative(settings, derived, draft_dir, revision)
@@ -250,15 +234,14 @@ def _prepare_speculative(plan: TextGenPlan, target_dir: Path,
     raise SpeculativeUnavailableError(f"no preparation adapter for {settings.method}")
 
 
-def _prepare_mtp_head(plan: TextGenPlan, target_dir: Path, allow_download: bool) -> None:
+def _prepare_mtp_head(plan: TextGenPlan, target_dir: Path) -> None:
     missing = [f for f in MTP_FILES if not (target_dir / f).is_file()]
     if not missing:
         return
     repo = preconverted_repo(plan.model_name, plan.weight_format)
-    if not allow_download or repo is None:
+    if repo is None:
         raise PreparationError(
             f"MTP head {', '.join(missing)} missing from the {plan.model_name} export"
-            + ("" if allow_download else " and downloads are disabled")
         )
     with ArtifactLock(target_dir):
         # Only the head and its metadata: never an unrelated external model.
@@ -273,7 +256,7 @@ def _prepare_mtp_head(plan: TextGenPlan, target_dir: Path, allow_download: bool)
         )
 
 
-def _prepare_external_draft(plan: TextGenPlan, allow_download: bool) -> tuple:
+def _prepare_external_draft(plan: TextGenPlan) -> tuple:
     settings = plan.speculative
     draft_dir = settings.draft_dir()
     if settings.source == "local":
@@ -291,18 +274,9 @@ def _prepare_external_draft(plan: TextGenPlan, allow_download: bool) -> tuple:
         revision = _read_json(draft_dir / ".prepared.json").get("revision")
         pinned = settings.draft_revision or recorded
         if pinned and revision and pinned != revision:
-            if not allow_download:
-                raise PreparationError(
-                    f"prepared drafter {repo}@{revision[:12]} does not match the pinned "
-                    f"revision {pinned[:12]} and downloads are disabled"
-                )
             _set_aside(draft_dir, "superseded")
         else:
             return draft_dir, revision or pinned
-    if not allow_download:
-        raise PreparationError(
-            f"drafter {repo} is not prepared and downloads are disabled (-SkipModelDownload)"
-        )
 
     draft_dir.parent.mkdir(parents=True, exist_ok=True)
     with ArtifactLock(draft_dir):
@@ -773,73 +747,3 @@ def _write_manifest(result: PreparedArtifacts) -> Optional[Path]:
     except OSError as exc:
         logger.warning("Could not write text_gen manifest: %s", exc)
         return None
-
-
-# ----------------------------------------------------------------------------
-# CLI (launcher entry point)
-# ----------------------------------------------------------------------------
-EXIT_OK, EXIT_FAILED, EXIT_CONFIG = 0, 1, 2
-
-
-def _text_gen_needed() -> bool:
-    try:
-        from model_manager.feature_bootstrap import resolve_effective_features
-
-        return resolve_effective_features().needs_capability("text_gen")
-    except Exception as exc:  # noqa: BLE001 - when unsure, prepare
-        logger.debug("Feature resolution failed (%s); preparing text_gen anyway.", exc)
-        return True
-
-
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Prepare the configured text_gen target and speculative artifacts.")
-    parser.add_argument("--download-only", action="store_true",
-                        help="require every artifact of the selected method; no warm-up")
-    parser.add_argument("--skip-download", action="store_true",
-                        help="validate existing artifacts only (no network or conversion)")
-    args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(name)s: %(message)s")
-
-    if args.skip_download:
-        os.environ[CACHE_ONLY_ENV] = "1"
-        os.environ["HF_HUB_OFFLINE"] = "1"
-    if not args.download_only and not _text_gen_needed():
-        # Same rule as warm-up: nothing loads text_gen, so nothing is fetched.
-        logger.info("No enabled feature uses text_gen; skipping its preparation.")
-        return EXIT_OK
-    try:
-        from utils.config_loader import config
-
-        plan = resolve_plan(getattr(config.models, "text_gen", None))
-    except (SpeculativeConfigError, ValueError) as exc:
-        logger.error("Invalid text_gen configuration: %s", exc)
-        return EXIT_CONFIG
-    except SpeculativeUnavailableError as exc:
-        logger.error("%s", exc)
-        return EXIT_FAILED
-
-    if args.download_only and plan.mode != "off" and plan.speculative is None:
-        logger.error("Download-only preparation requires the selected accelerated profile, "
-                     "but none is available: %s", plan.plain_reason)
-        return EXIT_FAILED
-    try:
-        result = prepare(plan, allow_download=not args.skip_download,
-                         require_speculative=args.download_only)
-    except PreparationError as exc:
-        logger.error("text_gen preparation failed: %s", exc)
-        return EXIT_FAILED
-    except SpeculativeUnavailableError as exc:
-        logger.error("%s", exc)
-        return EXIT_FAILED
-
-    method = result.speculative.settings.method if result.speculative else "plain"
-    logger.info("text_gen artifacts ready: %s %s, decoding=%s%s", plan.model_name,
-                plan.weight_format, method,
-                f" (fallback reason: {result.speculative_error})"
-                if result.speculative_error else "")
-    return EXIT_OK
-
-
-if __name__ == "__main__":
-    sys.exit(main())

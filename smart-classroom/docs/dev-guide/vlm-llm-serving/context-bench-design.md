@@ -71,7 +71,7 @@ When adapting the reference, update package imports, test imports, launcher comm
 | `accuracy.py` | Build probe sets, dispatch scoring, group results and pair generated answers with the selected baseline. Score in the parent after child exit, outside resource sampling. |
 | `wwb_adapter.py` | Optional, version-qualified who_what_benchmark semantic-similarity adapter. Missing package/model or unsupported result shape makes only similarity unavailable. |
 | `dflash_draft_head.py` | Optional explicit preparation utility for a derived draft with its own quantized output head. Never run it implicitly inside a timed benchmark or overwrite serving artifacts. |
-| Model-specific YAML and PowerShell launchers | Keep benchmark settings separate from application YAML. Colocate `run_benchmark.ps1` and `setup_env.ps1` with the package; forward arguments and Python exit status. Setup installs reviewed pinned dependencies explicitly, never during planning/trials or by weakening TLS/execution policy. |
+| Model-specific YAML and PowerShell launchers | Keep benchmark settings separate from application YAML. Colocate `run_benchmark.ps1` with the package; forward arguments and Python exit status. Use the backend venv and the application's pinned `requirements.txt` from `setup-smart-classroom.ps1`; install nothing during planning/trials or by weakening TLS/execution policy. |
 
 ### Control Flow
 
