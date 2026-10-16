@@ -96,6 +96,10 @@ def make_service(**attrs):
     svc.pipeline_retry_counts = {}
     svc.pipeline_final_status = {}
     svc.pipeline_errors = {}
+    svc.pipeline_progress = {}
+    svc.pipeline_stall_reasons = {}
+    svc.pipeline_stall_timeout = 60.0
+    svc.pipeline_startup_grace = 120.0
     svc.max_retries = 10
     svc.on_all_pipelines_done = None
     svc._reports_generated = False
@@ -189,8 +193,8 @@ def test_monitor_still_restarts_a_genuine_crash():
 
     launches = []
 
-    def fake_launch(name, options, description):
-        launches.append(name)
+    def fake_launch(name, options, description, start_position_ns=None):
+        launches.append((name, start_position_ns))
         # Stop the loop after one restart so the test terminates.
         flag.set()
 
@@ -198,7 +202,8 @@ def test_monitor_still_restarts_a_genuine_crash():
 
     svc._monitor_pipeline("front")
 
-    assert launches == ["front"]
+    # Not a file source (no input_type), so nothing to resume from.
+    assert launches == [("front", None)]
     assert svc.pipeline_retry_counts["front"] == 1
 
 
