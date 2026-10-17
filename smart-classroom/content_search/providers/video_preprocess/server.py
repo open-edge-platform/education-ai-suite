@@ -179,7 +179,7 @@ class VlmClient:
             resp = self._session.post(
                 self._endpoint,
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", "X-SC-Stage": "video_captioning"},
                 timeout=self._timeout_seconds,
             )
         except requests.RequestException as exc:

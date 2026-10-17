@@ -69,7 +69,7 @@ class Whisper(BaseASR):
         result = self.model.transcribe(
             audio_path,
             temperature=temperature,
-            language="en",
+            language=getattr(config.app, "language", "en"),
             condition_on_previous_text=False,
             no_speech_threshold=self.NO_SPEECH_THRESHOLD,
             logprob_threshold=self.LOGPROB_THRESHOLD,

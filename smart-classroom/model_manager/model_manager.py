@@ -89,6 +89,8 @@ class ModelManager:
         }
         if t and t.loaded:
             text_gen_health["memory"] = t.memory_stats()
+            # Actual model, tool-call capability and requested/effective decoding.
+            text_gen_health["serving"] = t.serving_status()
 
         return {"ocr": ocr_health, "asr": asr_health, "text_gen": text_gen_health}
 

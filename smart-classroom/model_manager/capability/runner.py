@@ -16,6 +16,55 @@ class OomError(Exception):
     pass
 
 
+class _SlotStream:
+    """Iterator that holds a runner slot until exhausted, failed or closed.
+
+    A class, not a generator: closing a generator before its first ``next()``
+    skips its ``finally`` and would leak the slot.
+    """
+
+    def __init__(self, iterator: Iterator, release: Callable[[], None]):
+        self._iterator = iterator
+        self._release = release
+        self._closed = False
+
+    def __iter__(self) -> "_SlotStream":
+        return self
+
+    def __next__(self) -> Any:
+        if self._closed:
+            raise StopIteration
+        try:
+            return next(self._iterator)
+        except StopIteration:
+            self.close()
+            raise
+        except (RuntimeError, MemoryError) as exc:
+            self.close()
+            raise OomError(str(exc)) from exc
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        # A consumer that left early (client disconnect) closes the stream so
+        # native work can stop. A stream backed by native inference may hold
+        # the slot until that work has actually ended (release_when_idle).
+        deferred = False
+        try:
+            close = getattr(self._iterator, "close", None)
+            if close is not None:
+                close()
+            defer = getattr(self._iterator, "release_when_idle", None)
+            deferred = bool(defer is not None and defer(self._release))
+        finally:
+            if not deferred:
+                self._release()
+
+
 class CapabilityRunner:
     def __init__(self, fn: Callable, *, max_concurrency: int = 1,
                  queue_max: int = 8, timeout_s: float | None = None):
@@ -30,15 +79,6 @@ class CapabilityRunner:
         self._semaphore.release()
         with self._lock:
             self._current_queue -= 1
-
-    def _wrap_stream(self, iterator: Iterator) -> Iterator:
-        try:
-            for item in iterator:
-                yield item
-        except (RuntimeError, MemoryError) as exc:
-            raise OomError(str(exc)) from exc
-        finally:
-            self._release_slot()
 
     def submit(self, *args, **kwargs) -> Any:
         with self._lock:
@@ -59,7 +99,7 @@ class CapabilityRunner:
                 # Streaming callable: keep the slot held until the caller
                 # exhausts the iterator.
                 released = True
-                return self._wrap_stream(result)
+                return _SlotStream(result, self._release_slot)
             return result
         except (RuntimeError, MemoryError) as exc:
             raise OomError(str(exc)) from exc

@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -41,10 +41,19 @@ class Message(BaseModel):
     Attributes:
         role (str): The role of the message sender (e.g., "user").
         content: The content of the message (text string or list of text/image/video parts).
+            May be null on an assistant message that carries tool calls.
+        tool_calls (Optional[List[dict]]): Assistant tool calls (OpenAI format).
+        tool_call_id (Optional[str]): The call a ``role: "tool"`` result answers.
+        name (Optional[str]): Optional participant/function name.
     """
 
     role: str
-    content: Union[str, List[Union[str, MessageContentText, MessageContentImageUrl]]]
+    content: Optional[
+        Union[str, List[Union[str, MessageContentText, MessageContentImageUrl]]]
+    ] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -90,6 +99,18 @@ class ChatRequest(BaseModel):
     enable_thinking: Optional[bool] = Field(
         None,
         json_schema_extra={"example": False, "description": "Set False to suppress Qwen3 thinking; None keeps model default"},
+    )
+    tools: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        json_schema_extra={"description": "OpenAI function tool definitions; validated by the server"},
+    )
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+        None,
+        json_schema_extra={"description": '"none", "auto", "required" or {"type": "function", "function": {"name": ...}}'},
+    )
+    parallel_tool_calls: Optional[bool] = Field(
+        None,
+        json_schema_extra={"description": "False returns at most one tool call"},
     )
 
 

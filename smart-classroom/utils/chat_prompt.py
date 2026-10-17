@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Placeholder the OpenVINO VLM pipeline substitutes with the first image tensor.
 MEDIA_TAG = "<ov_genai_image_0>"
+MEDIA_TAG_PREFIX = "<ov_genai_image_"
 
 _NO_THINK = "/no_think"
 
@@ -35,6 +36,7 @@ def render_chat_prompt(
     model_name,
     enable_thinking: Optional[bool] = None,
     has_images: bool = False,
+    tools: Optional[list] = None,
 ) -> str:
     """Render ``messages`` into a prompt string ready for ``generate``.
 
@@ -45,15 +47,28 @@ def render_chat_prompt(
 
     Works with both a transformers tokenizer and the OpenVINO one, which take
     the same information through incompatible signatures.
+
+    ``tools`` (OpenAI ``{"type": "function", ...}`` definitions) is rendered by
+    the model's own tool-aware template; omitted, the call is unchanged.
     """
     messages = _prepare(messages, model_name, enable_thinking, has_images)
     extra = {} if enable_thinking is None else {"enable_thinking": enable_thinking}
 
     if isinstance(tokenizer, ov_genai.Tokenizer):
-        return _render_ov(tokenizer, messages, extra)
+        return _render_ov(tokenizer, messages, extra, tools)
+    if tools:
+        extra["tools"] = tools
     return tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True, **extra
     )
+
+
+def template_supports_tools(tokenizer) -> bool:
+    """Whether the model's chat template renders tool definitions at all."""
+    template = getattr(tokenizer, "chat_template", None)
+    if isinstance(template, dict):
+        template = " ".join(str(t) for t in template.values())
+    return bool(template) and "tools" in str(template)
 
 
 def _prepare(
@@ -62,7 +77,11 @@ def _prepare(
     """Copy ``messages`` with the media tag and ``/no_think`` switch applied."""
     prepared = [dict(m) for m in messages]
 
-    if has_images:
+    # A caller that placed per-message image tags itself (multi-turn tool
+    # conversations) keeps them; adding another would shift the image indices.
+    if has_images and not any(
+        MEDIA_TAG_PREFIX in str(m.get("content") or "") for m in prepared
+    ):
         first_user = _find_user(prepared)
         if first_user is not None:
             prepared[first_user]["content"] = (
@@ -90,7 +109,7 @@ def _find_user(messages: list, last: bool = False) -> Optional[int]:
     return indices[-1] if last else indices[0]
 
 
-def _render_ov(tokenizer, messages: list, extra: dict) -> str:
+def _render_ov(tokenizer, messages: list, extra: dict, tools: Optional[list] = None) -> str:
     """Render via the OpenVINO tokenizer.
 
     Its signature is positional -- ``(history, add_generation_prompt,
@@ -98,8 +117,11 @@ def _render_ov(tokenizer, messages: list, extra: dict) -> str:
     on recent runtimes, so fall back to the three-argument form.
     """
     try:
-        return tokenizer.apply_chat_template(messages, True, "", None, extra or None)
+        return tokenizer.apply_chat_template(messages, True, "", tools or None, extra or None)
     except TypeError:
+        if tools:
+            # Dropping the definitions would silently disable tool calling.
+            raise
         if extra:
             logger.warning(
                 "OpenVINO tokenizer does not accept extra_context; %s will be "

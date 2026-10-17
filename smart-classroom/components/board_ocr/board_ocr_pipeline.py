@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 
 from utils.config_loader import config
+from utils.processing_stats import stage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +269,7 @@ class BoardOCRWorker:
 
         self.frames_dir.mkdir(parents=True, exist_ok=True)
         self._thread = threading.Thread(
-            target=self._run, daemon=True, name="board-ocr-worker"
+            target=self._run_attributed, daemon=True, name="board-ocr-worker"
         )
         self._thread.start()
         logger.info(
@@ -333,6 +334,12 @@ class BoardOCRWorker:
         if self._extractor is None:
             return False
         return not self._extractor.is_running
+
+    def _run_attributed(self):
+        # A new thread starts without the caller's stage: attribute its OCR
+        # calls to this session's board OCR, apart from document OCR.
+        with stage_scope(self.session_id, "board_ocr"):
+            self._run()
 
     def _run(self):
         while not self._stop.is_set():
