@@ -150,7 +150,7 @@ class TestProbeCounts(unittest.TestCase):
 
 
 class TestAccuracyConfig(unittest.TestCase):
-    PROFILES = [{"name": "paged_min"}, {"name": "mtp_k3"}]
+    PROFILES = [{"name": "paged_min"}, {"name": "dflash_k3"}]
 
     def _resolve(self, section, **overrides):
         args = SimpleNamespace(accuracy=True, accuracy_suites=None, accuracy_tasks=None,
@@ -347,7 +347,7 @@ class TestFidelityPairing(unittest.TestCase):
         return notes
 
     def test_a_baseline_that_completes_last_still_fills_every_case(self):
-        drifted = _case("mtp_k3", self.specs, False)
+        drifted = _case("dflash_k3", self.specs, False)
         cases = [drifted]
         self._fill(cases)
         self.assertIsNone(drifted["accuracy"]["generation"]["rouge_l"])
@@ -362,19 +362,19 @@ class TestFidelityPairing(unittest.TestCase):
         self.assertEqual(drifted["accuracy"]["generation"], first)  # idempotent
 
     def test_a_prompt_hash_mismatch_leaves_fidelity_unavailable(self):
-        cases = [_case("paged_min", self.specs, True), _case("mtp_k3", self.specs, True, prompt_hash="q")]
+        cases = [_case("paged_min", self.specs, True), _case("dflash_k3", self.specs, True, prompt_hash="q")]
         self._fill(cases)
         self.assertIsNone(cases[1]["accuracy"]["generation"]["rouge_l"])
         notes = {p.get("fidelity_note") for p in cases[1]["_probes"] if p["suite"] == "generation"}
         self.assertEqual(notes, {"prompt differs from the baseline's"})
 
     def test_a_failed_baseline_or_another_context_is_never_a_reference(self):
-        failed = [_case("paged_min", self.specs, True, status="crashed"), _case("mtp_k3", self.specs, True)]
+        failed = [_case("paged_min", self.specs, True, status="crashed"), _case("dflash_k3", self.specs, True)]
         self._fill(failed)
         self.assertIsNone(failed[1]["accuracy"]["generation"]["rouge_l"])
         other = _case("paged_min", self.specs, True)
         other["context_tokens"] = 32000
-        cases = [other, _case("mtp_k3", self.specs, True)]
+        cases = [other, _case("dflash_k3", self.specs, True)]
         self._fill(cases)
         self.assertIsNone(cases[1]["accuracy"]["generation"]["rouge_l"])
 
@@ -403,7 +403,11 @@ class TestOptionalWwb(unittest.TestCase):
                 self.offline = os.environ.get("HF_HUB_OFFLINE")
 
             def evaluate(self, gt, prediction):
-                return evaluate(gt, prediction)
+                # WWB's input contract: DataFrames read through their `answers` column.
+                import pandas as pd
+
+                assert isinstance(gt, pd.DataFrame) and isinstance(prediction, pd.DataFrame)
+                return evaluate(list(gt["answers"].values), list(prediction["answers"].values))
 
         module.TextSimilarity = TextSimilarity
         package.whowhat_metrics = module
@@ -414,7 +418,7 @@ class TestOptionalWwb(unittest.TestCase):
         sys.modules["whowhatbench"] = None  # import fails as if absent
         sys.modules["whowhatbench.whowhat_metrics"] = None
         specs = accuracy.build_probe_specs(_cfg(), 8000)
-        cases = [_case("paged_min", specs, True), _case("mtp_k3", specs, False)]
+        cases = [_case("paged_min", specs, True), _case("dflash_k3", specs, False)]
         notes = accuracy.fill_generation_fidelity(cases, "paged_min", _encoder,
                                                   wwb_adapter.DEFAULT_EMBEDDING_MODEL, with_similarity=True)
         self.assertTrue(any("not installed" in note for note in notes))
@@ -423,9 +427,12 @@ class TestOptionalWwb(unittest.TestCase):
         self.assertIsNotNone(generation["rouge_l"])
 
     def test_return_shapes_and_offline_loading(self):
-        self._install(lambda gt, pred: ({"similarity": [0.9]}, {"similarity": [0.95, 0.85]}))
+        seen = []
+        self._install(lambda gt, pred: seen.append((gt, pred)) or (
+            {"similarity": [0.9]}, {"similarity": [0.95, 0.85]}))
         result = wwb_adapter.similarity(["a", "b"], ["c", "d"])
-        self.assertEqual(result.values, [0.95, 0.85])
+        self.assertEqual(result.values, [0.95, 0.85], result.reason)
+        self.assertEqual(seen, [(["a", "b"], ["c", "d"])])  # baseline first, in input order
         self.assertEqual(wwb_adapter._EVALUATOR_CACHE[wwb_adapter.DEFAULT_EMBEDDING_MODEL].offline, "1")
         self._install(lambda gt, pred: [0.1])
         self.assertFalse(wwb_adapter.similarity(["a", "b"], ["c", "d"]).available)
@@ -484,7 +491,7 @@ class TestSafetyAndTextPolicy(unittest.TestCase):
 
     def test_accuracy_report_sections_show_denominators_and_deltas(self):
         specs = accuracy.build_probe_specs(_cfg(), 8000)
-        cases = [_case("paged_min", specs, True), _case("mtp_k3", specs, False, skip=(1,), status="partial")]
+        cases = [_case("paged_min", specs, True), _case("dflash_k3", specs, False, skip=(1,), status="partial")]
         accuracy.fill_generation_fidelity(cases, "paged_min", _encoder)
         accuracy.fill_deltas(cases, "paged_min")
         exported = [{**c, "probes": c["_probes"]} for c in cases]

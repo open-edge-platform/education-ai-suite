@@ -9,8 +9,8 @@ SPDX-License-Identifier: Apache-2.0
 model, precision, device, context, task and runtime profile:
 
 1. Can this machine process the context within the configured memory budgets?
-2. Which profile (KV precision, stateful vs paged pipeline, scheduler, MTP or DFlash
-   speculative decoding and its window) has the best measured latency?
+2. Which profile (KV precision, stateful vs paged pipeline, scheduler, DFlash speculative
+   decoding and its window) has the best measured latency?
 3. Optionally (`--accuracy`): how does a profile affect synthetic retrieval accuracy and
    generation fidelity relative to a baseline profile?
 
@@ -64,7 +64,7 @@ files. Missing files are reported per case as `missing_ir` with a hint.
 | Config | Model / precision | Profiles | Default run |
 | --- | --- | --- | --- |
 | `config_qwen3.6_35b.yaml` (default) | Qwen3.6-35B-A3B INT4, `models/openvino/Qwen3.6-35B-A3B/int4` | `paged_min`, `dflash_k3/5/7/15` (draft `models/openvino/Qwen3.6-35B-A3B-DFlash/int4`) | 35 cases: contexts 0 and 8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30 s gap. `--accuracy`: 5 cases |
-| `config_qwen3.8_27b.yaml` | Qwen3.8-27B INT8 (`--weight-format int4` for INT4), `models/openvino/Qwen3.8-27B/<weight_format>` | `paged_min`, `mtp_k1/2/3/4/6` | 6 cases: 8000; `summary_2s`; 64 tokens; no gap. `--accuracy`: 6 cases |
+| `config_qwen3.8_27b.yaml` | Qwen3.8-27B INT8 (`--weight-format int4` for INT4), `models/openvino/Qwen3.8-27B/<weight_format>` | `paged_min` (plain only) | 1 case: 8000; `summary_2s`; 64 tokens; no gap. `--accuracy`: 1 case |
 | `config_qwen3.5_9b.yaml` | Qwen3.5-9B INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3.5-9B/<weight_format>` | `paged_min`, `stateful` (plain only) | 4 cases: 8000; `summary_2s`, `classroom_summary`; 1024 tokens; no gap. `--accuracy`: 2 cases |
 
 One config per model: the weight formats differ only in the artifact, so `--weight-format`
@@ -105,8 +105,8 @@ setting); `8,000 tokens` is a synthetic classroom transcript followed by the tas
 `config_qwen3.8_27b.yaml` -- 1 warm-up + 3 measured generations, up to 64 tokens, back to back.
 
 ```text
-  Context       Task       | paged_min  mtp_k1  mtp_k2  mtp_k3  mtp_k4  mtp_k6
-  8,000 tokens  summary_2s | c01        c02     c03     c04     c05     c06
+  Context       Task       | paged_min
+  8,000 tokens  summary_2s | c01
 ```
 
 `config_qwen3.5_9b.yaml` -- 1 warm-up + 3 measured generations, up to 1024 tokens, back to back.
@@ -119,7 +119,7 @@ setting); `8,000 tokens` is a synthetic classroom transcript followed by the tas
 
 With `--accuracy` the throughput cases are replaced by one accuracy case per profile at every
 context with a transcript (context 0 has nowhere to plant a fact): `8,000 tokens | accuracy`,
-`c01` ... one per profile (5, 6 and 2 cases). Each runs 1 warm-up and 32 probes: 28 RULER
+`c01` ... one per profile (5, 1 and 2 cases). Each runs 1 warm-up and 32 probes: 28 RULER
 retrieval probes scored against planted ground truth and 4 generation probes scored against
 the baseline profile's answer to the identical prompt.
 
@@ -132,8 +132,8 @@ the baseline profile's answer to the identical prompt.
 | `classroom_summary` | The application's summarizer request, a long Markdown summary; transcript contexts only, and needs about 1024 output tokens to finish |
 | accuracy | The probes of the `accuracy` section; no timed iterations, latency and memory come from the probes |
 
-Two selected profiles that resolve to the same configuration (typically `--mtp-tokens K` over a
-k-sweep) are refused, since every case would run twice; narrow with `--profiles`.
+Two selected profiles that resolve to the same configuration (typically `--assistant-tokens K`
+over a k-sweep) are refused, since every case would run twice; narrow with `--profiles`.
 
 All use one warm-up and three measured iterations. A model name without a `model_dirs`
 entry resolves to `<models_base_path>/<provider>/<name after the last />/<weight_format>`,
@@ -142,28 +142,20 @@ the same layout the serving preparation workflow uses.
 directory; the IR's actual weight compression (NNCF rt_info) is always reported and a label
 mismatch is flagged.
 
-MTP uses the target's bundled `openvino_mtp_model.xml/.bin` and needs a runtime implementing
-the paged MTP strategy. The reference qualified it on the openvino-genai 2026.5.0 nightly;
-the pinned 2026.4.1 release is not yet qualified for Qwen3.8 MTP, and on a runtime without it
-the `mtp_*` cases report `unsupported`/`load_error` while `paged_min` still runs. MTP says
-nothing about DFlash2, which needs its own qualification.
+Speculative decoding is benchmarked only where serving supports it: DFlash on
+Qwen3.6-35B-A3B INT4 with the z-lab drafter. The Qwen3.8 and Qwen3.5 configs are plain only.
 
-### DFlash target metadata and derived drafts
+### DFlash artifacts
 
-DFlash requires the target IR to carry the model-level rt_info
-`hidden_states_decoder_layers`. If it is missing, preflight fails with `missing_ir`; the
-benchmark does not modify the target. Point `model_dirs` at a derived target -- the serving
-workflow creates `models/openvino/Qwen3.6-35B-A3B/int4-dflash` -- or prepare one explicitly:
-
-```powershell
-python -m components.context_bench.dflash_draft_head prepare-target --target models/openvino/Qwen3.6-35B-A3B/int4 --draft models/openvino/Qwen3.6-35B-A3B-DFlash/int4 --output <new directory>
-python -m components.context_bench.dflash_draft_head build-head --target models/openvino/Qwen3.6-35B-A3B/int4 --draft models/openvino/Qwen3.6-35B-A3B-DFlash/int4 --output <new directory>
-```
-
-Both write only to a new directory (an existing one is refused), leave inputs unchanged and
-record source/output SHA-256 hashes in `context_bench_derivation.json`. `build-head` gives the
-draft its own int4 `lm_head` (requires OpenVINO and NumPy); keep stock and derived drafts in
-separately labelled runs.
+Start the application once with `models.text_gen.vlm_name: Qwen/Qwen3.6-35B-A3B`,
+`weight_format: int4` and `speculative: {mode: auto, method: dflash}`; the serving
+preparation then exports the drafter to `models/openvino/Qwen3.6-35B-A3B-DFlash/int4`, the
+`dflash.model` of the config. DFlash also requires the target IR to carry the model-level
+rt_info `hidden_states_decoder_layers` (the current `OpenVINO/Qwen3.6-35B-A3B-int4-ov` export
+does). For an older export without it, serving derives
+`models/openvino/Qwen3.6-35B-A3B/int4-dflash` (same weights, annotated XML); the benchmark
+never modifies the target, so preflight fails with `missing_ir` until `model_dirs` points
+there.
 
 ## Configuration reference
 
@@ -181,15 +173,15 @@ YAML > tool default; resolved values are never written back.
 | `timeout_sec` | Progress timeout (no event for this long), not a total case limit |
 | `max_system_memory_pct`, `gpu_memory_budget_gb` | Host RAM budget (default 80); GPU budget in GiB, required for GPU runs; validated when present but not enforced on CPU |
 | `cache_dir`, `output_dir`, `record_text` | Compiled-blob cache (optional), evidence base directory, opt-in persistence of synthetic answers (default false) |
-| `profiles[]` | `name`, `ov`, `scheduler`, and at most one of `mtp` / `dflash` |
+| `profiles[]` | `name`, `ov`, `scheduler`, optional `dflash`; any other key (e.g. `mtp`, which is not supported) is an error |
 | `profile.scheduler` | Empty = stateful pipeline. Any key = paged, which requires positive `max_num_batched_tokens`, `max_num_seqs` and `enable_prefix_caching: false`. `cache_size`: omitted (runtime-managed), whole GiB, or `auto` |
-| `profile.mtp` / `profile.dflash` | `num_assistant_tokens` >= 1, optional `device` (must equal the target device), `enabled`; DFlash needs `model`. MTP needs `ov.ATTENTION_BACKEND: PA`; DFlash needs `num_linear_attention_blocks >= max_num_seqs + k + 1` when set |
+| `profile.dflash` | `model` (local draft IR directory), `num_assistant_tokens` >= 1, optional `device` (must equal the target device), `enabled`; needs a paged `scheduler`, and `num_linear_attention_blocks >= max_num_seqs + k + 1` when set |
 | `accuracy` | Read only with `--accuracy`: `suites`, `baseline_profile` (optional; when set it must be one of the profiles being run -- without it there are no deltas and the generation suite reports only Coverage), `seed`, `embedding_model`, and per-suite `tasks`, `depths`, `samples`, `output_tokens`, `options` |
 | `speculative_reference` | Published figures printed beside the window sweep; never ranked |
 
 Overrides: `--pipeline-config KEY=VALUE` (strings into `ov`), `--scheduler-config KEY=VALUE`
 (booleans/numbers converted), `KEY=` removes a key; validation runs afterwards and a pipeline
-change is announced (moving a stateful profile to paged needs all three required scheduler keys). `--mtp-tokens`/`--assistant-tokens K` changes only profiles that already
+change is announced (moving a stateful profile to paged needs all three required scheduler keys). `--assistant-tokens K` (alias `--mtp-tokens`) changes only profiles that already
 speculate. A requested speculative case either runs that mechanism or fails; it never falls
 back to plain generation.
 
@@ -206,9 +198,9 @@ the reference does) -- run it there with
 
 The preflight estimate covers growing KV for full-attention layers (top-level or
 `text_config`), context plus decode ceiling (plus `k + 1` verification tokens), fixed
-linear-attention state times reserved rows, MTP-head KV and the DFlash draft's KV. Any unknown
+linear-attention state times reserved rows, and the DFlash draft's KV. Any unknown
 part makes the estimate unavailable (context 0 always is). A fixed pool below the estimate is
-a case error. `auto` becomes `ceil(max(2, 1.3 x estimate) x factor)` and must fit
+a case error. `auto` becomes `ceil(max(2, 1.3 x estimate))` and must fit
 `floor(budget - weights - 8)`; an infeasible or unknown `auto`, `auto` on CPU, and `auto` on
 DFlash (no qualified factor) are case errors. The pool is never clamped and `auto` is never
 silently removed.

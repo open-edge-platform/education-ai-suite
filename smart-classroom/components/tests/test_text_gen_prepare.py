@@ -18,7 +18,8 @@ from components.vlm import text_gen_prepare as prep
 from components.vlm import text_gen_profiles
 from components.vlm.text_gen_profiles import SpeculativeUnavailableError, resolve_plan
 
-COMMIT = "0123456789abcdef0123456789abcdef01234567"
+# The catalog's pinned drafter commit.
+COMMIT = text_gen_profiles.target_profile("Qwen/Qwen3.6-35B-A3B").methods["dflash"].draft_revision
 OTHER = "fedcba9876543210fedcba9876543210fedcba98"
 
 
@@ -117,7 +118,8 @@ def test_auto_dflash_downloads_pinned_source_exports_and_derives_target(env):
     result = prep.prepare(plan, genai_version=GENAI)
     spec = result.speculative
     assert spec is not None and spec.draft_revision == COMMIT
-    assert env.downloads == [("z-lab/Qwen3.6-35B-A3B-DFlash", COMMIT, None)]
+    # Configuration and weights only: repository code is never fetched.
+    assert env.downloads == [("z-lab/Qwen3.6-35B-A3B-DFlash", COMMIT, ["*.json", "*.safetensors"])]
     # Stock export lacks the hidden-state metadata: a derived sibling is used,
     # the ordinary target stays untouched for plain generation.
     assert spec.target_dir.name == "int4-dflash"
@@ -130,9 +132,17 @@ def test_auto_dflash_downloads_pinned_source_exports_and_derives_target(env):
     assert manifest["speculative"]["status"] == "ready"
 
 
-def test_recorded_revision_is_reused_without_resolving_again(env):
+def test_pinned_revision_needs_no_hub_lookup(env):
+    prep.prepare(_plan(env, mode="auto"), genai_version=GENAI)
+    assert env.resolved == []
+
+
+def test_unpinned_revision_is_resolved_once_then_reused_from_the_manifest(env):
     plan = _plan(env, mode="auto")
+    plan = dataclasses.replace(
+        plan, speculative=dataclasses.replace(plan.speculative, draft_revision=None))
     prep.prepare(plan, genai_version=GENAI)
+    assert env.resolved == ["z-lab/Qwen3.6-35B-A3B-DFlash"]
     env.resolved.clear()
     second = prep.prepare(plan, genai_version=GENAI)
     assert env.resolved == [] and second.speculative.draft_revision == COMMIT
@@ -147,6 +157,25 @@ def test_pinned_revision_mismatch_replaces_drafter_when_downloads_allowed(env):
     assert env.exports == [("z-lab/Qwen3.6-35B-A3B-DFlash", OTHER)]
     # The superseded drafter is moved aside, not deleted (rollback).
     assert any(p.name.startswith("int4.superseded-") for p in plan.speculative.draft_dir().parent.iterdir())
+
+
+def test_drafter_export_command_runs_no_repository_code(tmp_path, monkeypatch):
+    seen = {}
+
+    def run(cmd, env=None, check=False):
+        seen.update(cmd=cmd, env=env)
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(prep.subprocess, "run", run)
+    settings = resolve_plan(SimpleNamespace(
+        vlm_name="Qwen/Qwen3.6-35B-A3B", weight_format="int4", device="GPU",
+        speculative={"mode": "auto"})).speculative
+    with pytest.raises(prep.PreparationError, match="optimum-intel"):
+        prep._export_draft(tmp_path / "src", tmp_path / "int4", settings, "z-lab/x", COMMIT)
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("-c") + 1] == prep._DFLASH_EXPORT
+    assert cmd[cmd.index("--task") + 1] == "text-generation-with-past"
+    assert "--trust-remote-code" not in cmd and seen["env"]["HF_HUB_OFFLINE"] == "1"
 
 
 def test_export_failure_falls_back_in_auto_and_fails_in_on(env, monkeypatch):
@@ -176,11 +205,11 @@ def test_mismatched_drafter_fails_even_in_auto(env):
 
 def test_unqualified_plan_records_reason_without_work(env):
     result = prep.prepare(_plan(env, "Qwen/Qwen3.8-27B", "int4", mode="auto"), genai_version=GENAI)
-    assert result.speculative is None and "DFlash2" in result.speculative_error
+    assert result.speculative is None and "no catalog-declared" in result.speculative_error
     assert env.downloads == []
 
 
-# --- local and MTP sources ------------------------------------------------------
+# --- local sources --------------------------------------------------------------
 def test_local_drafter_is_validated_never_downloaded(env, tmp_path):
     missing = _plan(env, mode="on", draft_source="local", draft_model=str(tmp_path / "nope"))
     with pytest.raises(prep.PreparationError, match="never downloaded"):
@@ -189,20 +218,6 @@ def test_local_drafter_is_validated_never_downloaded(env, tmp_path):
     plan = _plan(env, mode="on", draft_source="local", draft_model=str(local))
     result = prep.prepare(plan, genai_version=GENAI)
     assert result.speculative.draft_dir == local and env.downloads == []
-
-
-def test_mtp_uses_target_head_and_fetches_only_head_files(env, monkeypatch):
-    plan = _plan(env, "Qwen/Qwen3.8-27B", "int4", mode="on", method="mtp")
-
-    def snapshot(repo, local_dir, revision, allow_patterns=None):
-        env.downloads.append((repo, revision, allow_patterns))
-        for name in prep.MTP_FILES:
-            (Path(local_dir) / name).write_bytes(b"x")
-
-    monkeypatch.setattr(prep, "_snapshot", snapshot)
-    result = prep.prepare(plan, genai_version=GENAI)
-    assert result.speculative.draft_dir == plan.target_dir
-    assert env.downloads == [("OpenVINO/Qwen3.8-27B-int4-ov", None, ["openvino_mtp_model.*"])]
 
 
 # --- DFlash compatibility and derivation ----------------------------------------

@@ -17,9 +17,6 @@ from components.context_bench import accuracy, metrics, settings as plan_setting
 
 _USABLE_STATUSES = ("ok", "memory_limit", "gpu_memory_limit", "measurement_error", "partial")
 
-_LOW_MTP_ACCEPTANCE_RATE = 0.6
-_HIGH_MTP_ACCEPTANCE_RATE = 0.7
-_MTP_TOKEN_SUGGESTION_CEILING = 8
 _DFLASH_TOKEN_SUGGESTION_CEILING = 15
 _DFLASH_WINDOW_SLACK = 2.0
 _DFLASH_FULL_WINDOW_FILL = 0.8
@@ -128,34 +125,11 @@ def _mtp_cell(case: dict, prefix: str = "", empty: str = "") -> str:
 
 
 def _mtp_tuning_hint(case: dict) -> str | None:
-    """The next k worth measuring, in either direction; never a correctness threshold."""
-    acceptance = metrics.finite_number(case.get("mtp_acceptance_rate"))
+    """The next DFlash window worth measuring, in either direction; never a correctness
+    threshold."""
     tokens = case.get("num_assistant_tokens")
-    if not case.get("mtp") or not isinstance(tokens, int):
-        return None
-    if case.get("speculative_strategy") == "dflash":
-        return _dflash_window_hint(case, tokens)
-    if acceptance is None:
-        return None
-    if acceptance < _LOW_MTP_ACCEPTANCE_RATE and tokens > 1:
-        return (
-            f"  hint: only {acceptance * 100:.0f}% of MTP candidates were accepted; compare "
-            f"k={max(1, math.ceil(tokens / 2))} -- fewer candidates per pass usually raises "
-            "acceptance."
-        )
-    if acceptance >= _HIGH_MTP_ACCEPTANCE_RATE and tokens < _MTP_TOKEN_SUGGESTION_CEILING:
-        tokens_per_step = metrics.finite_number(case.get("tokens_per_step"))
-        yield_now = f" for {tokens_per_step:.2f} tok/step" if tokens_per_step is not None else ""
-        return (
-            f"  hint: {acceptance * 100:.0f}% of MTP candidates were accepted{yield_now}; "
-            f"compare k={tokens + 1} -- rank by tokens/step (yield), not acceptance."
-        )
-    return None
-
-
-def _dflash_window_hint(case: dict, tokens: int) -> str | None:
     al = metrics.positive_number(case.get("tokens_per_step"))
-    if al is None:
+    if not case.get("mtp") or not isinstance(tokens, int) or al is None:
         return None
     if tokens > 1 and tokens + 1 > _DFLASH_WINDOW_SLACK * al:
         smaller = max(1, min(tokens - 1, math.ceil(al)))

@@ -16,8 +16,7 @@ Estimated demand, in bytes:
    estimate is unavailable rather than zero;
 3. plus fixed linear-attention state (unique IR state variables) times the reserved
    sequence / linear-attention rows;
-4. plus the MTP head's own KV layers, or the DFlash draft's KV (window-capped when the
-   draft declares a sliding window).
+4. plus the DFlash draft's KV (window-capped when the draft declares a sliding window).
 
 Any unknown contribution makes the whole estimate unavailable.
 """
@@ -46,11 +45,9 @@ _IR_TYPE_BYTES = {"f32": 4, "fp32": 4, "f16": 2, "fp16": 2, "bf16": 2, "i8": 1, 
 AUTO_CACHE_SAFETY = 1.3
 AUTO_CACHE_RESERVE_GB = 8.0
 AUTO_CACHE_MIN_GB = 2.0
-# Pool multipliers qualified for `cache_size: auto`, per speculative strategy. MTP's 2.0 is
-# the reference's empirical margin measured on Qwen3.8-27B (speculative decoding sizes a
-# second continuous-batching pipeline from the same cache_size). DFlash has no qualified
-# factor, so `auto` on a DFlash profile requires an explicit or runtime-managed pool.
-QUALIFIED_POOL_FACTORS = {None: 1.0, "mtp": 2.0}
+# Pool multipliers qualified for `cache_size: auto`, per speculative strategy. DFlash has no
+# qualified factor, so `auto` on a DFlash profile requires an explicit or runtime-managed pool.
+QUALIFIED_POOL_FACTORS = {None: 1.0}
 
 GENAI_DEFAULT_MAX_NUM_SEQS = 256
 
@@ -148,26 +145,6 @@ def is_hybrid(config: dict | None) -> bool:
     )
 
 
-def mtp_head_layers(model_dir) -> int | None:
-    """Full-attention layers in the MTP draft head, counted from its IR; 0 when absent,
-    None when present but unreadable."""
-    model_xml = os.path.join(str(model_dir), trial_runner.MTP_MODEL_FILE)
-    if not os.path.isfile(model_xml):
-        return 0
-    keys = set()
-    try:
-        with open(model_xml, "rb") as handle:
-            elements = [elem.attrib.get("variable_id", "")
-                        for _, elem in ET.iterparse(handle, events=("start",))]
-        for variable_id in elements:
-            match = re.search(r"past_key_values\.(\d+)\.key", variable_id)
-            if match:
-                keys.add(match.group(1))
-    except (ET.ParseError, OSError):
-        return None
-    return len(keys)
-
-
 def fixed_state_cache_bytes(model_dir) -> int | None:
     """Fixed linear-attention state size from the IR's unique conv/ssm state variables.
 
@@ -249,14 +226,8 @@ def theoretical_kv_bytes_per_token(config: dict, kv_cache_dtype_bytes: float = 2
     return 2 * growing_layers * num_kv_heads * bytes_per_row
 
 
-def _per_layer_kv_bytes(config: dict, dtype_bytes: float, quant_bytes: int) -> float | None:
-    cfg = dict(text_config(config))
-    cfg.update({"num_hidden_layers": 1, "layer_types": None})
-    return theoretical_kv_bytes_per_token(cfg, dtype_bytes, quant_bytes)
-
-
 def estimate_cache(model_config: dict | None, fixed_state_bytes: int | None, ov_config,
-                   tokens: int | None, state_rows: int = 1, mtp_layers: int | None = 0,
+                   tokens: int | None, state_rows: int = 1,
                    draft_config: dict | None = None, dflash: bool = False) -> dict:
     """Estimated persistent cache demand; ``{"gib": float|None, "reason": str|None, ...}``."""
     detail = {"gib": None, "reason": None, "tokens": tokens, "state_rows": state_rows,
@@ -283,11 +254,6 @@ def estimate_cache(model_config: dict | None, fixed_state_bytes: int | None, ov_
     total = per_token * tokens + (fixed_state_bytes or 0) * max(1, state_rows)
 
     speculative = 0.0
-    if mtp_layers is None:
-        detail["reason"] = "the MTP head IR could not be read"
-        return detail
-    if mtp_layers:
-        speculative += (_per_layer_kv_bytes(model_config, dtype, quant) or 0) * mtp_layers * tokens
     if dflash:
         draft_per_token = (theoretical_kv_bytes_per_token(draft_config, dtype, quant)
                            if draft_config else None)
@@ -303,10 +269,10 @@ def estimate_cache(model_config: dict | None, fixed_state_bytes: int | None, ov_
 
 
 def expected_kv_gb(model_config: dict | None, fixed_bytes: int | None, ov_config: dict,
-                   context_tokens: int, sequences: int = 1, mtp_layers: int = 0) -> float | None:
+                   context_tokens: int, sequences: int = 1) -> float | None:
     """Estimated persistent cache for `context_tokens` (GiB), or None when unknown."""
     return estimate_cache(model_config, fixed_bytes, ov_config, context_tokens,
-                          state_rows=sequences, mtp_layers=mtp_layers)["gib"]
+                          state_rows=sequences)["gib"]
 
 
 def state_rows(scheduler: dict | None) -> int:

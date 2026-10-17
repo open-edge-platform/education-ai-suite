@@ -25,6 +25,7 @@ from utils.locks import video_analytics_lock
 from components.va.va_pipeline_service import VideoAnalyticsPipelineService, PipelineOptions
 from components.va.media_service import ensure_media_service_running
 from utils.pipeline_catalog import FEATURE_STAGE
+from utils.processing_stats import stage_scope
 from utils.session_manager import PATH_SAFE_SESSION_ID, generate_session_id
 from dto.search_dto import SearchRequest
 from utils.session_state_manager import SessionState
@@ -921,7 +922,8 @@ def ocr_detect_file_endpoint(file: UploadFile = File(...)):
 
 @router.post("/ocr/extract-text", response_model=OCRResponse)
 def ocr_extract_text_endpoint(file: UploadFile = File(...), x_session_id: Optional[str] = Header(None, pattern=PATH_SAFE_SESSION_ID)):
-    return ocr_extract_text(file, x_session_id)
+    with stage_scope(x_session_id, "document_ocr"):
+        return ocr_extract_text(file, x_session_id)
 
 def register_routes(app: FastAPI):
     app.include_router(router)

@@ -15,8 +15,9 @@ config node into a :class:`TextGenPlan`:
   method without a qualified profile becomes plain generation under
   ``mode: auto`` and an actionable failure under ``mode: "on"``.
 
-Qualification of the profiles below on target hardware is still pending; the
-catalog records what each profile needs, not a claim that it passed.
+The only speculative profile is DFlash for Qwen3.6-35B-A3B INT4. ``dflash2``
+and ``mtp`` stay valid settings without a profile: plain generation under
+``auto``, an actionable failure under ``"on"``.
 """
 
 from __future__ import annotations
@@ -34,9 +35,6 @@ DRAFT_SOURCES = ("huggingface", "local", "target")
 SPECULATIVE_KEYS = frozenset({
     "mode", "method", "draft_source", "draft_model", "draft_revision", "num_assistant_tokens",
 })
-
-# MTP draft head shipped inside an MTP-enabled target export.
-MTP_FILES = ("openvino_mtp_model.xml", "openvino_mtp_model.bin")
 
 # Target rt_info GenAI reads to locate the hidden states a DFlash drafter consumes.
 DFLASH_TARGET_RT_INFO_KEY = "hidden_states_decoder_layers"
@@ -61,8 +59,6 @@ class SpeculativeProfile:
     """One target/method combination the serving runtime knows how to load."""
 
     method: str
-    # Why the profile cannot activate yet; ``None`` means loadable.
-    blocked_reason: Optional[str] = None
     precisions: tuple = ("int4", "int8")
     default_source: str = "huggingface"
     draft_repo: Optional[str] = None
@@ -92,13 +88,14 @@ class TargetProfile:
 
 _GPU_PAGED = {"GPU_ENABLE_LARGE_ALLOCATIONS": "YES", "KV_CACHE_PRECISION": "f16"}
 
-# Values from the pinned context_bench configurations (config_qwen3.6_35b.yaml,
-# config_qwen3.8_27b.yaml). cache_size is left runtime-managed: classroom
-# prompts vary far more than the fixed 8K benchmark context.
+# Values from the pinned context_bench configuration (config_qwen3.6_35b.yaml).
+# cache_size is left runtime-managed: classroom prompts vary far more than the
+# fixed 8K benchmark context.
 _QWEN36_DFLASH = SpeculativeProfile(
     method="dflash",
     precisions=("int4",),
     draft_repo="z-lab/Qwen3.6-35B-A3B-DFlash",
+    draft_revision="f181eece646affea2c38b2765f1aaa01a9734ccd",
     draft_export_weight_format="int4",
     # k=3 was best for classroom summaries at 8K; k=7 for code/math.
     num_assistant_tokens=3,
@@ -113,31 +110,6 @@ _QWEN36_DFLASH = SpeculativeProfile(
         "num_linear_attention_blocks": 17,
         "enable_prefix_caching": False,
     },
-)
-
-_QWEN38_MTP = SpeculativeProfile(
-    method="mtp",
-    default_source="target",
-    # k=2 gave the best end-to-end time in the 8K MTP sweep.
-    num_assistant_tokens=2,
-    num_assistant_tokens_range=(1, 6),
-    # The paged MTP strategy ships in the 2026.4 release.
-    min_genai_version="2026.4",
-    ov_properties={"ATTENTION_BACKEND": "PA", **_GPU_PAGED},
-    scheduler={
-        "max_num_batched_tokens": 32768,
-        "max_num_seqs": 1,
-        "enable_prefix_caching": False,
-    },
-)
-
-_QWEN38_DFLASH2 = SpeculativeProfile(
-    method="dflash2",
-    blocked_reason=(
-        "DFlash2 has no qualified OpenVINO exporter/runtime adapter yet; "
-        "use plain generation or method: mtp"
-    ),
-    draft_repo="z-lab/Qwen3.8-27B-DFlash2",
 )
 
 CATALOG: Mapping[str, TargetProfile] = {
@@ -165,8 +137,6 @@ CATALOG: Mapping[str, TargetProfile] = {
         ir_repos={"int4": "OpenVINO/Qwen3.8-27B-int4-ov",
                   "int8": "OpenVINO/Qwen3.8-27B-int8-ov"},
         tool_calls=True,
-        default_method="dflash2",
-        methods={"dflash2": _QWEN38_DFLASH2, "mtp": _QWEN38_MTP},
     ),
 }
 
@@ -188,17 +158,13 @@ class SpeculativeSettings:
 
     method: str
     source: str
-    draft_model: Optional[str]          # Hub repo id, local directory, or None (MTP)
+    draft_model: Optional[str]          # Hub repo id or local directory
     draft_revision: Optional[str]       # explicit/pinned commit; None = resolve once
     num_assistant_tokens: int
     profile: SpeculativeProfile
 
-    @property
-    def external_draft(self) -> bool:
-        return self.method in ("dflash", "dflash2")
-
     def draft_dir(self) -> Optional[Path]:
-        """Runtime IR directory of the drafter (target directory for MTP)."""
+        """Runtime IR directory of the drafter."""
         if self.source == "local":
             return resolve_local_dir(self.draft_model)
         if self.source == "huggingface" and self.draft_model:
@@ -208,8 +174,6 @@ class SpeculativeSettings:
 
     def describe(self) -> str:
         """Identity safe for health/logs: no local paths."""
-        if self.source == "target":
-            return "target-bundled MTP head"
         if self.source == "local":
             return f"local IR ({Path(str(self.draft_model)).name})"
         rev = f"@{self.draft_revision[:12]}" if self.draft_revision else ""
@@ -391,8 +355,6 @@ def resolve_plan(text_gen) -> TextGenPlan:
         num_assistant_tokens=k,
         profile=profile,
     )
-    if profile.blocked_reason:
-        return _unqualified(base, mode, method, profile.blocked_reason)
     if weight_format not in profile.precisions:
         return _unqualified(base, mode, method, (
             f"{resolved_method} is not qualified for {model_name} {weight_format} "

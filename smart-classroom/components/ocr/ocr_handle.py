@@ -35,11 +35,19 @@ class OcrHandler:
         self._lock = Lock()
 
     def extract_text(self, image) -> str:
-        return self._get_runner().submit("extract_text", image)
+        return self._submit("extract_text", image)
 
     def extract_text_with_scores(self, image):
         """Return (text, per_line_confidence_scores) for confidence-gated callers."""
-        return self._get_runner().submit("extract_text_with_scores", image)
+        return self._submit("extract_text_with_scores", image)
+
+    def _submit(self, method: str, image):
+        """Both public methods share one runner; each call is timed."""
+        from utils.processing_stats import submit_timed
+
+        runner = self._get_runner()
+        info = {"model": self._provider, "device": self._device}
+        return submit_timed(runner, "ocr", info, getattr(self._processor, method), image)
 
     def load(self) -> None:
         """Force the processor and runner to initialise (warmup)."""
@@ -99,13 +107,10 @@ class OcrHandler:
                         from model_manager.capability.runner import CapabilityRunner
                     except ImportError:
                         from model_manager.capability import CapabilityRunner
-                    from utils.processing_stats import timed_model_call
+                    from utils.processing_stats import run_admitted
 
                     self._runner = CapabilityRunner(
-                        timed_model_call(self._call_processor, "ocr", lambda: {
-                            "model": self._provider,
-                            "device": self._device,
-                        }),
+                        run_admitted,
                         max_concurrency=max_concurrency,
                         queue_max=queue_max,
                     )
@@ -114,11 +119,6 @@ class OcrHandler:
                     self._state = CapabilityState.UNLOADED
                     raise
         return self._runner
-
-    def _call_processor(self, method: str, *args, **kwargs):
-        """Dispatch a processor call by name so multiple public methods
-        (extract_text / extract_text_with_scores) share one runner."""
-        return getattr(self._processor, method)(*args, **kwargs)
 
     def _concurrency_config(self):
         """Return (max_concurrency, queue_max) from config, with fallback to defaults."""

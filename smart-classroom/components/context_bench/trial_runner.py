@@ -28,7 +28,7 @@ never mixed (see `metrics.select_timing`).
 
 Artifacts are only read: the tokenizer loads with ``local_files_only=True`` and
 ``trust_remote_code=False``, and a DFlash target lacking hidden-state metadata is rejected
-rather than repaired (prepare a derived target with `dflash_draft_head prepare-target`).
+rather than repaired (the serving preparation derives a `<weight_format>-dflash` target).
 
 OpenVINO / transformers are imported lazily inside the child functions so this module can
 be imported, and tested, without the OpenVINO stack.
@@ -115,8 +115,6 @@ ACK_RECORDED = "recorded"
 EVENTS = ("device", "loaded", "prompt", "iteration_start", "prefilled", "iteration", "probe",
           "done")
 
-MTP_MODEL_FILES = ("openvino_mtp_model.xml", "openvino_mtp_model.bin")
-MTP_MODEL_FILE = MTP_MODEL_FILES[0]
 DFLASH_TARGET_RT_INFO_KEY = "hidden_states_decoder_layers"
 LANGUAGE_MODEL_IRS = ("openvino_language_model.xml", "openvino_model.xml")
 
@@ -153,11 +151,6 @@ def sanitize_message(text, limit: int = 400, keep_newlines: bool = False) -> str
 # ---------------------------------------------------------------------------
 # Artifact checks (pure filesystem/XML reads)
 # ---------------------------------------------------------------------------
-def has_mtp_head(model_dir: str) -> bool:
-    """Whether this export ships the multi-token-prediction draft head (graph and weights)."""
-    return all(os.path.isfile(os.path.join(model_dir, filename)) for filename in MTP_MODEL_FILES)
-
-
 def dflash_config(draft_model_dir: str) -> dict:
     """The draft's `dflash_config` block from its config.json, or {} if it has none."""
     try:
@@ -232,76 +225,59 @@ def has_model_rt_info(xml_path: str, key: str) -> bool | None:
 def dflash_metadata_hint(model_dir: str, draft_dir: str) -> str:
     return (
         f"the target IR lacks model rt_info {DFLASH_TARGET_RT_INFO_KEY!r}. The benchmark never "
-        "repairs artifacts; point model.model_dirs at a derived target (the serving workflow "
-        "creates <weight_format>-dflash, e.g. models/openvino/Qwen3.6-35B-A3B/int4-dflash) or "
-        "prepare one explicitly: python -m components.context_bench.dflash_draft_head "
-        "prepare-target --target <target dir> --draft <draft dir> --output <new dir>"
+        "repairs artifacts; point model.model_dirs at the derived target the serving "
+        "preparation creates when DFlash is enabled (<weight_format>-dflash, e.g. "
+        "models/openvino/Qwen3.6-35B-A3B/int4-dflash)"
     )
 
 
 def validate_mtp(model_dir: str, device: str, mtp: dict | None,
-                 scheduler_config: dict | None, ov_config: dict | None = None) -> None:
-    """Reject a speculative (MTP or DFlash) profile this model/device/pipeline cannot run.
+                 scheduler_config: dict | None) -> None:
+    """Reject a DFlash profile this model/device/pipeline cannot run.
 
     GenAI enforces these too, but only after a multi-gigabyte load; these are pure
     filesystem and dict checks. A plain profile is never held to any of them.
     """
     if not (mtp or {}).get("enabled"):
         return
-    strategy = mtp.get("strategy") or "mtp"
-    draft_model_dir = mtp.get("model") or model_dir
+    draft_model_dir = mtp["model"]
     normalized_device = str(device).upper()
     if not re.fullmatch(r"(CPU|GPU)(\.\d+)?", normalized_device):
         raise ValueError(
-            f"{strategy} is enabled on {device}, but the paged speculative-decoding path "
+            f"dflash is enabled on {device}, but the paged speculative-decoding path "
             "supports CPU and GPU only"
         )
     draft_device = mtp.get("device")
     if draft_device and str(draft_device).upper() != normalized_device:
-        raise ValueError(f"{strategy} draft_model must use the same device as the target pipeline")
-    if strategy == "dflash":
-        for name in ("openvino_model.xml", "openvino_model.bin"):
-            if not os.path.isfile(os.path.join(draft_model_dir, name)):
-                raise ValueError(
-                    f"dflash draft model has no {name}; point dflash.model at the exported "
-                    "OpenVINO draft directory"
-                )
-        dflash_target_layer_ids(draft_model_dir)
-        block_size = dflash_block_size(draft_model_dir)
-        tokens = mtp.get("num_assistant_tokens")
-        if block_size and isinstance(tokens, int) and tokens > block_size - 1:
+        raise ValueError("dflash draft_model must use the same device as the target pipeline")
+    for name in ("openvino_model.xml", "openvino_model.bin"):
+        if not os.path.isfile(os.path.join(draft_model_dir, name)):
             raise ValueError(
-                f"dflash num_assistant_tokens={tokens} exceeds what this draft proposes per "
-                f"pass: its block_size={block_size} includes the seed token, so k <= "
-                f"{block_size - 1}"
+                f"dflash draft model has no {name}; point dflash.model at the exported "
+                "OpenVINO draft directory"
             )
-        if (scheduler_config or {}).get("enable_prefix_caching"):
-            raise ValueError(
-                "dflash does not support scheduler enable_prefix_caching; set it to false"
-            )
-        target_xml = language_model_ir(model_dir)
-        if target_xml is not None and has_model_rt_info(target_xml,
-                                                        DFLASH_TARGET_RT_INFO_KEY) is False:
-            raise ValueError(dflash_metadata_hint(model_dir, draft_model_dir))
-    if strategy == "mtp" and not has_mtp_head(model_dir):
-        missing = [
-            filename for filename in MTP_MODEL_FILES
-            if not os.path.isfile(os.path.join(model_dir, filename))
-        ]
+    dflash_target_layer_ids(draft_model_dir)
+    block_size = dflash_block_size(draft_model_dir)
+    tokens = mtp.get("num_assistant_tokens")
+    if block_size and isinstance(tokens, int) and tokens > block_size - 1:
         raise ValueError(
-            f"mtp is enabled but the target export is missing {missing}; this export "
-            "carries no draft head, so there is nothing to speculate with"
+            f"dflash num_assistant_tokens={tokens} exceeds what this draft proposes per "
+            f"pass: its block_size={block_size} includes the seed token, so k <= "
+            f"{block_size - 1}"
         )
+    if (scheduler_config or {}).get("enable_prefix_caching"):
+        raise ValueError(
+            "dflash does not support scheduler enable_prefix_caching; set it to false"
+        )
+    target_xml = language_model_ir(model_dir)
+    if target_xml is not None and has_model_rt_info(target_xml,
+                                                    DFLASH_TARGET_RT_INFO_KEY) is False:
+        raise ValueError(dflash_metadata_hint(model_dir, draft_model_dir))
     if not scheduler_config:
         raise ValueError(
-            f"{strategy} is enabled without a `scheduler` section, which leaves the profile on "
+            "dflash is enabled without a `scheduler` section, which leaves the profile on "
             "the stateful (SDPA) pipeline. OpenVINO GenAI only runs this speculative "
             "decoding path on paged attention (PA) -- give the profile a `scheduler` section"
-        )
-    if strategy == "mtp" and (ov_config or {}).get("ATTENTION_BACKEND") != "PA":
-        raise ValueError(
-            "mtp is enabled without ATTENTION_BACKEND=PA; the qualified Qwen MTP path "
-            "requires paged attention"
         )
 
 
@@ -390,8 +366,8 @@ def _load_pipeline(model_dir: str, device: str, ov_config: dict,
 
     Returns ``(pipeline, accepts_tokenized_input)``. An empty `scheduler_config` selects
     the stateful pipeline and no SchedulerConfig is instantiated; any key selects paged
-    attention. A plain profile passes no draft; MTP uses the target directory's bundled head
-    and DFlash the external draft directory, both via ``ov_genai.draft_model``.
+    attention. A plain profile passes no draft; DFlash passes its external draft directory
+    to ``ov_genai.draft_model``.
     """
     import openvino_genai as ov_genai
 
@@ -411,7 +387,7 @@ def _load_pipeline(model_dir: str, device: str, ov_config: dict,
 
     if (mtp or {}).get("enabled"):
         pipeline_args["draft_model"] = ov_genai.draft_model(
-            mtp.get("model") or model_dir, mtp.get("device") or device
+            mtp["model"], mtp.get("device") or device
         )
 
     if os.path.exists(os.path.join(model_dir, "openvino_language_model.xml")):
@@ -437,7 +413,7 @@ def prepare_pipeline_input(pipe, prompt: str, accepts_tokenized_input: bool):
 
 
 def generation_config(output_tokens: int, mtp: dict | None = None):
-    """A fresh greedy request for one generate call (plain, MTP or DFlash).
+    """A fresh greedy request for one generate call (plain or DFlash).
 
     Fresh per call: the model's generation_config.json may enable sampling, and reusing a
     pipeline-owned config risks retaining fields from an earlier request. The pipeline's own
@@ -754,7 +730,7 @@ def execute_case(case: dict, channel: _Channel) -> dict:
         channel.post("device", **diagnostics)
         # Before the clock starts: a profile this model cannot run is a configuration
         # error, not a load time worth reporting.
-        validate_mtp(model_dir, device, mtp, scheduler_config, ov_config)
+        validate_mtp(model_dir, device, mtp, scheduler_config)
         t0 = time.perf_counter()
         tokenizer = _load_tokenizer(model_dir)
         pipe, accepts_tokenized_input = _load_pipeline(

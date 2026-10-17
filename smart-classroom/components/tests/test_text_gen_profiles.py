@@ -71,24 +71,12 @@ def test_auto_method_selects_catalog_dflash_for_qwen36():
     assert spec.profile.scheduler["enable_prefix_caching"] is False
 
 
-def test_qwen38_auto_declares_dflash2_which_is_blocked_so_plain_in_auto():
-    plan = resolve_plan(_text_gen("Qwen/Qwen3.8-27B", "int8", {"mode": "auto"}))
-    assert plan.speculative is None
-    assert "DFlash2" in plan.plain_reason
-
-
-def test_qwen38_blocked_dflash2_fails_in_on():
+@pytest.mark.parametrize("method", ["auto", "dflash2", "mtp"])
+def test_unsupported_methods_are_plain_in_auto_and_fail_in_on(method):
+    plan = resolve_plan(_text_gen("Qwen/Qwen3.8-27B", "int8", {"mode": "auto", "method": method}))
+    assert plan.speculative is None and plan.plain_reason
     with pytest.raises(SpeculativeUnavailableError, match="mode: auto"):
-        resolve_plan(_text_gen("Qwen/Qwen3.8-27B", "int4", {"mode": "on", "method": "dflash2"}))
-
-
-def test_qwen38_explicit_mtp_uses_target_head():
-    plan = resolve_plan(_text_gen("Qwen/Qwen3.8-27B", "int4", {"mode": "on", "method": "mtp"}))
-    spec = plan.speculative
-    assert spec.method == "mtp" and spec.source == "target"
-    assert spec.draft_model is None and spec.draft_dir() is None
-    assert spec.profile.ov_properties["ATTENTION_BACKEND"] == "PA"
-    assert spec.describe() == "target-bundled MTP head"
+        resolve_plan(_text_gen("Qwen/Qwen3.8-27B", "int4", {"mode": "on", "method": method}))
 
 
 def test_qwen35_has_no_qualified_method():
@@ -142,7 +130,6 @@ def test_invalid_settings_raise(block, message):
 @pytest.mark.parametrize("block, message", [
     ({"mode": "auto", "method": "mtp", "draft_source": "huggingface"}, "bundled prediction head"),
     ({"mode": "auto", "method": "mtp", "draft_model": "z-lab/x"}, "draft_model must be null"),
-    ({"mode": "auto", "method": "mtp", "num_assistant_tokens": 7}, "supported range"),
     ({"mode": "auto", "method": "mtp", "draft_source": "target", "draft_revision": COMMIT},
      "must be null"),
 ])

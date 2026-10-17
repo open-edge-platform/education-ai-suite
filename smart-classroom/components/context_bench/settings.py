@@ -66,8 +66,7 @@ _BENCHMARK_KEYS = (
     "iteration_gap_sec", "timeout_sec", "max_system_memory_pct", "gpu_memory_budget_gb",
     "cache_dir", "output_dir", "record_text",
 )
-_PROFILE_KEYS = ("name", "ov", "scheduler", "mtp", "dflash")
-_MTP_KEYS = ("enabled", "num_assistant_tokens", "device")
+_PROFILE_KEYS = ("name", "ov", "scheduler", "dflash")
 _DFLASH_KEYS = ("enabled", "model", "num_assistant_tokens", "device")
 _ACCURACY_KEYS = (
     "suites", "baseline_profile", "seed", "embedding_model",
@@ -312,7 +311,7 @@ def _parse_args(argv=None):
                         "numbers converted); KEY= removes")
     parser.add_argument("--mtp-tokens", "--assistant-tokens", dest="mtp_tokens", type=int,
                         metavar="K", help="num_assistant_tokens for every profile that already "
-                        "enables MTP or DFlash; plain baselines stay plain")
+                        "enables DFlash; plain baselines stay plain")
     parser.add_argument("--accuracy", action="store_true",
                         help="run the accuracy suites from the config's `accuracy` section")
     parser.add_argument("--accuracy-suites", nargs="+", metavar="S",
@@ -389,7 +388,7 @@ def _validate_ov(name: str, ov: dict) -> dict:
         if key in _FORBIDDEN_OV_KEYS:
             raise ConfigError(
                 f"profile {name!r} ov.{key} is a speculative/runtime setting, not a plugin "
-                "property; use the profile's mtp/dflash/scheduler sections"
+                "property; use the profile's dflash/scheduler sections"
             )
         _scalar(value, f"profile {name!r} ov.{key}")
     return ov
@@ -427,55 +426,36 @@ def _validate_scheduler(name: str, scheduler: dict) -> dict:
     return scheduler
 
 
-def _resolve_speculative(name: str, entry: dict, scheduler: dict, ov: dict, mtp_tokens,
+def _resolve_speculative(name: str, entry: dict, scheduler: dict, mtp_tokens,
                          device: str | None) -> dict:
-    has_mtp = entry.get("mtp") is not None
-    has_dflash = entry.get("dflash") is not None
-    if has_mtp and has_dflash:
-        raise ConfigError(f"profile {name!r} cannot enable both mtp and dflash")
-    if not (has_mtp or has_dflash):
+    section = entry.get("dflash")
+    if section is None:
         return dict(SPECULATIVE_OFF)
-
-    kind = "dflash" if has_dflash else "mtp"
-    section = entry[kind]
-    shorthand = isinstance(section, bool)
-    if shorthand:
-        if kind == "dflash":
-            raise ConfigError(f"profile {name!r} dflash must be a mapping of {_DFLASH_KEYS}")
-        section = {"enabled": section}
-    section = _mapping(section, f"profile {name!r} {kind}")
-    _check_keys(section, _DFLASH_KEYS if kind == "dflash" else _MTP_KEYS, f"profile {name!r} {kind}")
+    section = _mapping(section, f"profile {name!r} dflash")
+    _check_keys(section, _DFLASH_KEYS, f"profile {name!r} dflash")
     enabled = section.get("enabled", bool(section))
-    _boolean(enabled, f"profile {name!r} {kind}.enabled")
+    _boolean(enabled, f"profile {name!r} dflash.enabled")
     if not enabled:
         return dict(SPECULATIVE_OFF)
 
-    if mtp_tokens is not None:
-        tokens = mtp_tokens
-    elif shorthand:
-        raise ConfigError(
-            f"profile {name!r} uses `{kind}: true`, which takes its candidate count from "
-            "--mtp-tokens/--assistant-tokens; pass it or write num_assistant_tokens"
-        )
-    else:
-        tokens = section.get("num_assistant_tokens")
+    tokens = mtp_tokens if mtp_tokens is not None else section.get("num_assistant_tokens")
     if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 1:
         raise ConfigError(
-            f"profile {name!r} {kind}.num_assistant_tokens must be an integer >= 1 (got "
+            f"profile {name!r} dflash.num_assistant_tokens must be an integer >= 1 (got "
             f"{tokens!r}); it is how many candidates the draft offers per verification pass"
         )
     draft_device = section.get("device")
     if draft_device is not None:
-        draft_device = _device(draft_device, f"profile {name!r} {kind}.device")
+        draft_device = _device(draft_device, f"profile {name!r} dflash.device")
         if device is not None and draft_device != device.upper():
             raise ConfigError(
-                f"profile {name!r} runs its {kind} draft on {draft_device} but the target on "
+                f"profile {name!r} runs its dflash draft on {draft_device} but the target on "
                 f"{device}; target and draft must share one CPU/GPU device (use --profiles to "
                 "leave this profile out)"
             )
     if not scheduler:
         raise ConfigError(
-            f"profile {name!r} enables {kind} on the stateful pipeline; speculative decoding "
+            f"profile {name!r} enables dflash on the stateful pipeline; speculative decoding "
             "requires a paged `scheduler` section"
         )
     chunk = scheduler.get("max_num_batched_tokens")
@@ -485,16 +465,7 @@ def _resolve_speculative(name: str, entry: dict, scheduler: dict, ov: dict, mtp_
             f"tokens one speculative step submits (num_assistant_tokens={tokens} candidates "
             "plus the token being verified)"
         )
-    resolved = {"enabled": True, "strategy": kind, "model": None,
-                "num_assistant_tokens": tokens, "device": draft_device}
-    if kind == "mtp":
-        if ov.get("ATTENTION_BACKEND") != "PA":
-            raise ConfigError(
-                f"profile {name!r} enables mtp without ov.ATTENTION_BACKEND: PA, which the "
-                "qualified Qwen MTP path requires"
-            )
-        return resolved
-    resolved["model"] = _string(section.get("model"), f"profile {name!r} dflash.model")
+    model = _string(section.get("model"), f"profile {name!r} dflash.model")
     linear_blocks = scheduler.get("num_linear_attention_blocks")
     required = scheduler["max_num_seqs"] + tokens + 1
     if linear_blocks is not None and linear_blocks < required:
@@ -503,7 +474,8 @@ def _resolve_speculative(name: str, entry: dict, scheduler: dict, ov: dict, mtp_
             f"{required} rows required by max_num_seqs={scheduler['max_num_seqs']} and dflash "
             f"num_assistant_tokens={tokens}"
         )
-    return resolved
+    return {"enabled": True, "strategy": "dflash", "model": model,
+            "num_assistant_tokens": tokens, "device": draft_device}
 
 
 def _resolve_profiles(raw_profiles, names_filter=None, ov_overrides=None, sched_overrides=None,
@@ -513,8 +485,7 @@ def _resolve_profiles(raw_profiles, names_filter=None, ov_overrides=None, sched_
     Overrides apply to selected profiles and validation runs after them: removing a
     required property is an error. `--mtp-tokens` only changes profiles that already
     speculate. Returns plain dicts with ``{name, ov, scheduler, mtp, pipeline_mode,
-    cache_pool}``; the speculative section keeps the internal name `mtp` for both MTP and
-    DFlash.
+    cache_pool}``; the DFlash section keeps the reference's internal name `mtp`.
     """
     notices = notices if notices is not None else []
     if not isinstance(raw_profiles, list) or not raw_profiles:
@@ -541,9 +512,8 @@ def _resolve_profiles(raw_profiles, names_filter=None, ov_overrides=None, sched_
         for key in ("ov", "scheduler"):
             if entry.get(key) is not None and not isinstance(entry[key], dict):
                 raise ConfigError(f"profile {name!r} ov and scheduler must be mappings")
-        for key in ("mtp", "dflash"):
-            if entry.get(key) is not None and not isinstance(entry[key], (dict, bool)):
-                raise ConfigError(f"profile {name!r} {key} must be a mapping")
+        if entry.get("dflash") is not None and not isinstance(entry["dflash"], dict):
+            raise ConfigError(f"profile {name!r} dflash must be a mapping of {_DFLASH_KEYS}")
         entries.append(entry)
         names.append(name)
     duplicates = sorted({name for name in names if names.count(name) > 1})
@@ -573,7 +543,7 @@ def _resolve_profiles(raw_profiles, names_filter=None, ov_overrides=None, sched_
             )
         ov = _validate_ov(name, ov)
         scheduler = _validate_scheduler(name, scheduler)
-        speculative = _resolve_speculative(name, entry, scheduler, ov, mtp_tokens, device)
+        speculative = _resolve_speculative(name, entry, scheduler, mtp_tokens, device)
         resolved.append({
             "name": name,
             "ov": ov,

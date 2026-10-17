@@ -89,7 +89,8 @@ def similarity(references: list, predictions: list,
     """WWB's embedding similarity for each (reference, prediction) pair, or why it is missing.
 
     `references` are the baseline profile's answers and `predictions` the ones being judged,
-    the same direction as WWB's `--base-model` / `--target-model` split.
+    the same direction as WWB's `--base-model` / `--target-model` split. WWB reads both as
+    DataFrames with an ``answers`` column; pandas is a WWB dependency, imported only here.
     """
     if len(references) != len(predictions):
         raise ValueError(
@@ -104,8 +105,11 @@ def similarity(references: list, predictions: list,
     if isinstance(evaluator, str):
         return unavailable(evaluator, version)
     try:
+        import pandas as pd
+
         with _offline():
-            raw = evaluator.evaluate(list(references), list(predictions))
+            raw = evaluator.evaluate(pd.DataFrame({"answers": list(references)}),
+                                     pd.DataFrame({"answers": list(predictions)}))
     except Exception as exc:  # noqa: BLE001 - an optional metric must not end the run
         return unavailable(f"who_what_benchmark raised {type(exc).__name__}: {exc}", version)
 

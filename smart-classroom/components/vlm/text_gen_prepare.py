@@ -13,7 +13,7 @@ Order of work (see the serving design, "Model Preparation"):
 1. **Select** -- :func:`components.vlm.text_gen_profiles.resolve_plan`.
 2. **Prepare** -- the target through the existing download/convert path; a Hub
    drafter at an immutable commit into a staging directory; an explicit local
-   drafter is validated, never replaced; MTP fetches only the target's head.
+   drafter is validated, never replaced.
 3. **Validate** -- required files, drafter metadata, vocabulary and target depth.
    Accelerated exports that need different target IR get a *derived* directory;
    the ordinary target is never modified.
@@ -42,7 +42,6 @@ from typing import Callable, Optional
 
 from components.vlm.text_gen_profiles import (
     DFLASH_TARGET_RT_INFO_KEY,
-    MTP_FILES,
     SpeculativeConfigError,
     SpeculativeSettings,
     SpeculativeUnavailableError,
@@ -68,6 +67,26 @@ _LANGUAGE_MODEL_XML = ("openvino_language_model.xml", "openvino_model.xml")
 # Revisions become path components and pins; only full commit hashes qualify.
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _DRAFT_IR_FILES = ("openvino_model.xml", "openvino_model.bin", "config.json")
+# Drafter checkpoint files fetched from the Hub: configuration and weights only,
+# never repository code.
+_DRAFT_SOURCE_PATTERNS = ["*.json", "*.safetensors"]
+
+# optimum-intel ships DFlash drafter classes but selects them only through
+# trust_remote_code; the export subprocess registers them instead, so no
+# repository code can run. They are subclassed because optimum-intel treats
+# classes defined under ``optimum.*`` as wrappers around another model.
+_DFLASH_EXPORT = """\
+import sys
+from transformers import AutoModel, AutoModelForCausalLM, Qwen3Config
+from optimum.exporters.openvino import model_patcher as mp
+class DFlashDraftModel(mp.Qwen3DFlashDraftModel): pass
+class DFlashForCausalLM(mp.Qwen3DFlashForCausalLM): pass
+AutoModel.register(Qwen3Config, DFlashDraftModel, exist_ok=True)
+AutoModelForCausalLM.register(Qwen3Config, DFlashForCausalLM, exist_ok=True)
+from optimum.commands.optimum_cli import main
+sys.argv = ["optimum-cli"] + sys.argv[1:]
+main()
+"""
 
 
 class PreparationError(RuntimeError):
@@ -82,7 +101,7 @@ class CompatibilityError(PreparationError):
 class PreparedSpeculative:
     settings: SpeculativeSettings
     target_dir: Path              # derived DFlash target, or the ordinary one
-    draft_dir: Path               # external drafter IR, or the target for MTP
+    draft_dir: Path               # external drafter IR
     draft_revision: Optional[str]
 
 
@@ -222,9 +241,6 @@ def check_tokenizer_runtime(model_dir: Path, installed: Optional[str]) -> None:
 # ----------------------------------------------------------------------------
 def _prepare_speculative(plan: TextGenPlan, target_dir: Path) -> PreparedSpeculative:
     settings = plan.speculative
-    if settings.method == "mtp":
-        _prepare_mtp_head(plan, target_dir)
-        return PreparedSpeculative(settings, target_dir, target_dir, None)
     if settings.method == "dflash":
         draft_dir, revision = _prepare_external_draft(plan)
         validate_dflash_pair(target_dir, draft_dir, settings.num_assistant_tokens)
@@ -232,28 +248,6 @@ def _prepare_speculative(plan: TextGenPlan, target_dir: Path) -> PreparedSpecula
         return PreparedSpeculative(settings, derived, draft_dir, revision)
     # Only reachable if the catalog grows a method without a preparation adapter.
     raise SpeculativeUnavailableError(f"no preparation adapter for {settings.method}")
-
-
-def _prepare_mtp_head(plan: TextGenPlan, target_dir: Path) -> None:
-    missing = [f for f in MTP_FILES if not (target_dir / f).is_file()]
-    if not missing:
-        return
-    repo = preconverted_repo(plan.model_name, plan.weight_format)
-    if repo is None:
-        raise PreparationError(
-            f"MTP head {', '.join(missing)} missing from the {plan.model_name} export"
-        )
-    with ArtifactLock(target_dir):
-        # Only the head and its metadata: never an unrelated external model.
-        _with_retries(lambda: _snapshot(repo, target_dir, None,
-                                        allow_patterns=["openvino_mtp_model.*"]),
-                      f"MTP head from {repo}")
-    missing = [f for f in MTP_FILES if not (target_dir / f).is_file()]
-    if missing:
-        raise PreparationError(
-            f"{repo} does not provide the MTP head ({', '.join(missing)}); this export "
-            "cannot run MTP"
-        )
 
 
 def _prepare_external_draft(plan: TextGenPlan) -> tuple:
@@ -306,7 +300,8 @@ def _download_source(repo: str, revision: str) -> Path:
                                        f"size of {repo}") * EXPORT_DISK_FACTOR)
     logger.info("Downloading drafter source %s@%s", repo, revision[:12])
     # Resumable: snapshot_download skips files already complete in local_dir.
-    _with_retries(lambda: _snapshot(repo, staging, revision), f"{repo}@{revision[:12]}")
+    _with_retries(lambda: _snapshot(repo, staging, revision, _DRAFT_SOURCE_PATTERNS),
+                  f"{repo}@{revision[:12]}")
     if not (staging / "config.json").is_file():
         raise PreparationError(f"{repo}@{revision[:12]} has no config.json")
     staging.replace(final)
@@ -317,27 +312,28 @@ def _export_draft(source_dir: Path, draft_dir: Path, settings: SpeculativeSettin
                   repo: str, revision: str) -> None:
     """Convert a drafter checkpoint to IR through the profile's recipe.
 
-    No ``--trust-remote-code``: repository code is never executed. A checkpoint
-    the installed exporter cannot convert natively fails here, which ``auto``
-    reports as a plain fallback.
+    No ``--trust-remote-code``: repository code is never executed (see
+    ``_DFLASH_EXPORT``). A checkpoint the installed exporter cannot convert
+    fails here, which ``auto`` reports as a plain fallback.
     """
     staging = draft_dir.with_name(draft_dir.name + ".partial")
     if staging.exists():
         shutil.rmtree(staging)
     fmt = settings.profile.draft_export_weight_format or "int4"
-    # The interpreter's own environment, as utils.ensure_model uses optimum-cli.
-    cli = shutil.which("optimum-cli", path=str(Path(sys.executable).parent))
-    launcher = [cli] if cli else [sys.executable, "-m", "optimum.commands.optimum_cli"]
-    cmd = launcher + ["export", "openvino", "--model", str(source_dir),
-                      "--weight-format", fmt, str(staging)]
+    # The interpreter's own environment; -X utf8 keeps the exporter's progress
+    # output printable on non-UTF-8 consoles. --all-layers as the reference draft.
+    cmd = [sys.executable, "-I", "-X", "utf8", "-c", _DFLASH_EXPORT,
+           "export", "openvino", "--model", str(source_dir),
+           "--task", "text-generation-with-past", "--weight-format", fmt, "--all-layers",
+           str(staging)]
     env = os.environ.copy()
     env["HF_HUB_OFFLINE"] = "1"   # convert only what was downloaded and pinned
     logger.info("Exporting drafter %s to OpenVINO IR (%s)", repo, fmt)
     completed = subprocess.run(cmd, env=env, check=False)
     if completed.returncode != 0:
         raise PreparationError(
-            f"drafter export of {repo} failed (exit {completed.returncode}); the installed "
-            "exporter may not support this checkpoint without remote code"
+            f"drafter export of {repo} failed (exit {completed.returncode}); it needs "
+            "optimum-intel>=2.2.0 (pip install -r requirements.txt)"
         )
     source_cfg = _read_json(source_dir / "config.json")
     exported_cfg = _read_json(staging / "config.json")

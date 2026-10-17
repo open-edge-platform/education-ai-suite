@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import contextvars
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
 
+from model_manager.capability.runner import CapabilityRunner, QueueFullError
 from utils import processing_stats as ps
 
 
@@ -57,19 +60,62 @@ def test_finish_is_idempotent_and_unadmitted_call_has_no_latency(stats):
     assert record["status"] == "rejected" and record["latency_ms"] is None
 
 
-def test_timed_model_call_records_success_and_failure(stats):
-    with patch.object(ps, "STATS", stats):
-        ok = ps.timed_model_call(lambda x: x * 2, "asr", lambda: {"model": "whisper"})
-        assert ok(4) == 8
+def test_submit_timed_records_queue_wait_rejection_and_failure(stats):
+    runner = CapabilityRunner(ps.run_admitted, max_concurrency=1, queue_max=2)
+    admitted, release = threading.Event(), threading.Event()
 
-        def boom():
-            raise RuntimeError("x")
+    def hold():
+        admitted.set()
+        release.wait(5)
+        return "held"
 
-        with pytest.raises(RuntimeError):
-            ps.timed_model_call(boom, "ocr", lambda: {})()
-    calls = stats.records()[1]
-    assert [(c["capability"], c["status"]) for c in calls] == [("asr", "ok"), ("ocr", "failed")]
-    assert calls[1]["error_class"] == "RuntimeError"
+    def boom():
+        raise ValueError("x")
+
+    with patch.object(ps, "STATS", stats), ps.stage_scope("s1", "transcribe"), \
+            ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(contextvars.copy_context().run,
+                            ps.submit_timed, runner, "asr", {"model": "whisper"}, hold)
+        assert admitted.wait(5)
+        queued = pool.submit(contextvars.copy_context().run,
+                             ps.submit_timed, runner, "asr", {}, lambda x: x * 2, 4)
+        while runner._current_queue < 2:
+            pass
+        with pytest.raises(QueueFullError):
+            ps.submit_timed(runner, "ocr", {}, hold)
+        threading.Timer(0.2, release.set).start()
+        assert first.result(5) == "held" and queued.result(5) == 8
+        with pytest.raises(ValueError):
+            ps.submit_timed(runner, "ocr", {}, boom)
+    calls = {(c["capability"], c["status"]): c for c in stats.records()[1]}
+    assert set(calls) == {("asr", "ok"), ("ocr", "rejected"), ("ocr", "failed")}
+    rejected = calls[("ocr", "rejected")]
+    assert rejected["latency_ms"] is None and rejected["stage"] == "transcribe"
+    waited = [c for c in stats.records()[1] if c["capability"] == "asr"]
+    assert max(c["queue_wait_ms"] for c in waited) >= 150
+    assert all(c["session_id"] == "s1" for c in waited)
+    assert calls[("ocr", "failed")]["error_class"] == "ValueError"
+
+
+def _advance_like_starlette(iterator):
+    """Each chunk on a worker thread in a fresh context, as iterate_in_threadpool."""
+    out = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        while True:
+            try:
+                out.append(pool.submit(contextvars.Context().run, next, iterator).result())
+            except StopIteration:
+                return out
+
+
+def test_context_iterator_keeps_the_stage_for_every_chunk():
+    def body():
+        with ps.stage_scope("s1", "transcribe"):
+            for _ in range(3):
+                yield ps.current_stage()
+
+    assert _advance_like_starlette(body())[1:] == [(None, None)] * 2
+    assert _advance_like_starlette(ps.ContextIterator(body())) == [("s1", "transcribe")] * 3
 
 
 def test_stage_scope_attributes_calls_and_resets(stats):

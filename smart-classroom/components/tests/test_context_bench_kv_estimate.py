@@ -113,13 +113,6 @@ class TestReservations(unittest.TestCase):
         self.assertIsNone(detail["gib"])
         self.assertIn("standalone prompt length", detail["reason"])
 
-    def test_mtp_head_adds_its_own_layers_of_target_shaped_kv(self):
-        plain = estimate_cache(HYBRID, FIXED, {}, 160000)["gib"]
-        with_head = estimate_cache(HYBRID, FIXED, {}, 160000, mtp_layers=1)["gib"]
-        per_token = theoretical_kv_bytes_per_token(HYBRID)
-        self.assertAlmostEqual(with_head - plain, per_token / 8 * 160000 / GIB, places=6)
-        self.assertIsNone(estimate_cache(HYBRID, FIXED, {}, 8000, mtp_layers=None)["gib"])
-
     def test_external_draft_kv_is_included_and_window_capped(self):
         draft = {"num_hidden_layers": 2, "num_key_value_heads": 4, "head_dim": 128}
         windowed = {**draft, "sliding_window": 4096}
@@ -262,15 +255,6 @@ class TestCasePreflight(unittest.TestCase):
         self.assertEqual(caught.exception.category, "cache_unknown")
         self.assertIn("dflash", caught.exception.message)
 
-    def test_auto_for_mtp_uses_the_qualified_factor(self):
-        for name in ("openvino_mtp_model.xml", "openvino_mtp_model.bin"):
-            (self.model_dir / name).write_text("<net><layers/></net>", encoding="utf-8")
-        raw = self._scheduler(cache_size="auto")
-        raw["profiles"][0]["ov"]["ATTENTION_BACKEND"] = "PA"
-        raw["profiles"][0]["mtp"] = {"num_assistant_tokens": 2}
-        _, _, prepared = self._preflight(raw)
-        self.assertEqual(prepared["scheduler"]["cache_size"], 4)  # max(2, 1.3 x est) x 2.0
-
     def test_missing_target_ir_is_missing_ir(self):
         (self.model_dir / "openvino_tokenizer.xml").unlink()
         with self.assertRaises(benchmark._Rejected) as caught:
@@ -286,7 +270,7 @@ class TestCasePreflight(unittest.TestCase):
         with self.assertRaises(benchmark._Rejected) as caught:
             self._preflight(raw)
         self.assertEqual(caught.exception.category, "missing_ir")
-        self.assertIn("prepare-target", caught.exception.message)
+        self.assertIn("<weight_format>-dflash", caught.exception.message)
         self.assertEqual((self.model_dir / "openvino_model.xml").read_bytes(), before)
 
     def test_dflash_vocabulary_mismatch_is_rejected(self):
@@ -314,14 +298,6 @@ class TestIrReads(unittest.TestCase):
     def test_missing_ir_state_is_unknown(self):
         with tempfile.TemporaryDirectory() as root:
             self.assertIsNone(fixed_state_cache_bytes(root))
-
-    def test_mtp_head_layers_are_counted_from_the_ir(self):
-        xml = ('<net><layers><layer><data variable_id="past_key_values.0.keypresent.0.key"/></layer>'
-               '<layer><data variable_id="past_key_values.0.valuepresent.0.value"/></layer></layers></net>')
-        with tempfile.TemporaryDirectory() as root:
-            self.assertEqual(sizing.mtp_head_layers(root), 0)
-            Path(root, "openvino_mtp_model.xml").write_text(xml, encoding="utf-8")
-            self.assertEqual(sizing.mtp_head_layers(root), 1)
 
     def test_weight_precision_comes_from_the_ir_not_the_label(self):
         block = ('<net><layers/><rt_info><nncf><weight_compression><mode value="int4_asym"/>'
@@ -406,7 +382,7 @@ class TestShippedConfigs(unittest.TestCase):
                     for line in settings.plan_grid(planned):
                         self.assertIn(line.strip(), documented)
                     kind = "Accuracy run (--accuracy)" if flags else "Throughput run (default)"
-                    self.assertTrue(any(line.startswith(f"{kind}: {len(planned)} cases")
+                    self.assertTrue(any(line.startswith(f"{kind}: {len(planned)} case")
                                         for line in documented), kind)
 
     def test_the_guide_shows_each_default_plan(self):
@@ -447,7 +423,7 @@ class TestShippedConfigs(unittest.TestCase):
         cpu = self._load("config_qwen3.6_35b.yaml", "--device", "CPU")
         self.assertTrue(all(p["mtp"]["device"] in (None, "CPU") for p in cpu["profiles"]))
 
-    def test_qwen38_config_sweeps_mtp_against_one_plain_baseline(self):
+    def test_qwen38_config_is_one_plain_paged_baseline(self):
         for label in self.WEIGHTS["config_qwen3.8_27b.yaml"]:
             with self.subTest(weights=label):
                 resolved = self._load("config_qwen3.8_27b.yaml", "--weight-format", label)
@@ -455,15 +431,9 @@ class TestShippedConfigs(unittest.TestCase):
                 self.assertEqual((resolved["context_tokens"], resolved["output_tokens"],
                                   resolved["iteration_gap_sec"]), ((8000,), 64, 0.0))
                 self.assertEqual(resolved["throughput_tasks"], ("summary_2s",))
-                plain = [p for p in resolved["profiles"] if not p["mtp"]["enabled"]]
-                self.assertEqual([p["name"] for p in plain], ["paged_min"])
-                swept = [p["mtp"]["num_assistant_tokens"] for p in resolved["profiles"]
-                         if p["mtp"]["enabled"]]
-                self.assertEqual(swept, [1, 2, 3, 4, 6])
-                for profile in resolved["profiles"]:
-                    self.assertEqual(profile["ov"], plain[0]["ov"])
-                    self.assertEqual(profile["scheduler"], plain[0]["scheduler"])
-                    self.assertEqual(profile["ov"]["ATTENTION_BACKEND"], "PA")
+                self.assertEqual([(p["name"], p["pipeline_mode"], p["mtp"]["enabled"])
+                                  for p in resolved["profiles"]],
+                                 [("paged_min", settings.PIPELINE_PAGED, False)])
 
     def test_qwen35_config_is_plain_only(self):
         resolved = self._load("config_qwen3.5_9b.yaml")

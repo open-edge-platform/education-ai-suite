@@ -145,6 +145,21 @@ def test_disconnect_cancels_native_generation_and_holds_slot_until_it_stops(stat
     assert record["output_tokens"] < 10_000
 
 
+def test_close_before_first_token_cancels_and_releases_slot():
+    pipe = _Pipe(delay=0.01)
+    runner = CapabilityRunner(_vlm(pipe).generate, max_concurrency=1, queue_max=1)
+    stream = runner.submit("hi", stream=True, max_new_tokens=10_000)
+    stream.close()  # response closed before it ever advanced the stream
+    stream.close()  # idempotent
+    assert pipe.finished.wait(5), "native generation kept running after an early close"
+    deadline = time.time() + 5
+    while runner._current_queue and time.time() < deadline:
+        time.sleep(0.01)
+    assert runner._current_queue == 0, "slot leaked by a stream closed before its first token"
+    with pytest.raises(StopIteration):
+        next(stream)
+
+
 def test_slot_is_not_released_while_native_work_continues():
     gate = threading.Event()
 

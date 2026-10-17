@@ -70,7 +70,6 @@ When adapting the reference, update package imports, test imports, launcher comm
 | `scoring.py` | Pure scoring functions for retrieval, lexical overlap and token divergence; no model inference. |
 | `accuracy.py` | Build probe sets, dispatch scoring, group results and pair generated answers with the selected baseline. Score in the parent after child exit, outside resource sampling. |
 | `wwb_adapter.py` | Optional, version-qualified who_what_benchmark semantic-similarity adapter. Missing package/model or unsupported result shape makes only similarity unavailable. |
-| `dflash_draft_head.py` | Optional explicit preparation utility for a derived draft with its own quantized output head. Never run it implicitly inside a timed benchmark or overwrite serving artifacts. |
 | Model-specific YAML and PowerShell launchers | Keep benchmark settings separate from application YAML. Colocate `run_benchmark.ps1` with the package; forward arguments and Python exit status. Use the backend venv and the application's pinned `requirements.txt` from `setup-smart-classroom.ps1`; install nothing during planning/trials or by weakening TLS/execution policy. |
 
 ### Control Flow
@@ -114,11 +113,10 @@ Load benchmark YAML with a safe parser into plain mappings, apply CLI overrides,
 | `benchmark.max_system_memory_pct` | Finite percentage in `(0, 100]`, tool default 80; the pinned configurations explicitly use 100. This is an evaluation budget, not an OS memory limit. |
 | `benchmark.gpu_memory_budget_gb` | Required finite positive number for GPU runs, in GiB despite the legacy suffix. Operator-supplied platform budget; never derive a pass threshold from the driver's advertised total. CPU-only runs do not require GPU telemetry or enforce this budget. |
 | `benchmark.cache_dir`, `output_dir` | Optional compiled-blob cache directory, default null; required output base directory. A cache must not enable prompt-prefix reuse. Record whether compiled artifacts were already cached. |
-| `profiles` | Required non-empty list; each entry accepts only `name`, `ov`, `scheduler`, `mtp`, `dflash`. Names are unique non-empty strings; `ov` and `scheduler` are mappings. Reject misplaced `cache_size` at profile level. |
+| `profiles` | Required non-empty list; each entry accepts only `name`, `ov`, `scheduler`, `dflash`; any other key, including the reference's `mtp` (MTP is not supported), is an error. Names are unique non-empty strings; `ov` and `scheduler` are mappings. Reject misplaced `cache_size` at profile level. |
 | `profile.ov` | OpenVINO/GenAI property mapping, preserved without speculative settings leaking into plugin properties. Unknown runtime properties produce `unsupported`, not silent removal. |
 | `profile.scheduler` | Absent/empty selects stateful generation; a non-empty resolved mapping selects paged/continuous-batching generation. Every paged profile, including CLI overrides, requires positive integer `max_num_batched_tokens`, `max_num_seqs`, and boolean `enable_prefix_caching: false`. |
-| `profile.mtp` | Mapping with only `enabled`, `num_assistant_tokens`, `device`; a non-empty mapping implies enabled unless explicitly false. Preserve boolean shorthand only when an enabled profile receives its candidate count from the CLI. |
-| `profile.dflash` | Mapping with only `enabled`, `model`, `num_assistant_tokens`, `device`; `model` is a required local draft IR directory when enabled. A profile cannot contain both `mtp` and `dflash`. |
+| `profile.dflash` | Mapping with only `enabled`, `model`, `num_assistant_tokens`, `device`; a non-empty mapping implies enabled unless explicitly false; `model` is a required local draft IR directory when enabled. |
 | `accuracy` | Read only with `--accuracy`; accept `suites`, `baseline_profile`, integer `seed`, optional `embedding_model`, and the `retrieval`/`generation` mappings described in Section 6. `baseline_profile` is optional, as in the reference; when set it must be one of the profiles being run. Without it there are no deltas and generation reports only fact coverage. |
 | `speculative_reference` | Optional display-only metadata: `source`, positive `num_assistant_tokens`, and per-task `dataset`, positive `acceptance_length`, `speedup`, optional `throughput`. Published numbers never affect status or ranking. |
 | `benchmark.record_text` | **Integration addition**, boolean, default false. Opt-in persistence of synthetic generated answers for offline rescoring/fork inspection; never enable for private classroom material. Scores and timings are retained regardless. |
@@ -127,11 +125,11 @@ Load benchmark YAML with a safe parser into plain mappings, apply CLI overrides,
 
 Reject unknown benchmark/model keys and task-option keys, non-finite numbers, malformed mappings and wrong scalar types. `--pipeline-config KEY=VALUE` merges string values into each selected profile's `ov`; `--scheduler-config KEY=VALUE` converts recognized boolean/numeric scalar values. `KEY=` removes a property. Validate after overrides: removing a required property is an error, not permission to restore it silently. Warn when an override changes the pipeline mode.
 
-Normalize either speculative section to `{enabled, strategy, model, num_assistant_tokens, device}` inside the resolved profile, retaining the reference's internal `mtp` field name for the port. Disabled means `enabled: false` and null remaining fields; enabled `strategy` is `mtp` or `dflash`. `--mtp-tokens K` and its alias `--assistant-tokens K` change only already-enabled profiles, including DFlash, and must leave plain baselines plain. Benchmark profile settings are deliberately separate from the production `models.text_gen.speculative` policy: a requested accelerated case either runs that mechanism or reports failure, **never falls back to plain and keeps the accelerated label**.
+Normalize the `dflash` section to `{enabled, strategy, model, num_assistant_tokens, device}` inside the resolved profile, retaining the reference's internal `mtp` field name for the port. Disabled means `enabled: false` and null remaining fields; enabled `strategy` is `dflash`. `--mtp-tokens K` and its alias `--assistant-tokens K` change only already-enabled profiles, including DFlash, and must leave plain baselines plain. Benchmark profile settings are deliberately separate from the production `models.text_gen.speculative` policy: a requested accelerated case either runs that mechanism or reports failure, **never falls back to plain and keeps the accelerated label**.
 
 ### Example Configuration
 
-The following parser/plan fixture uses two profiles, a stock draft, sustained load (zero gap), an 80% RAM budget and reduced accuracy suites without semantic similarity. Paths identify prepared artifacts; the 59 GiB GPU budget is machine-specific. Section 10 lists the full reference matrices. These example settings are not performance results.
+The following example uses two profiles, a stock draft, sustained load (zero gap), an 80% RAM budget and reduced accuracy suites without semantic similarity. Paths identify prepared artifacts; the 59 GiB GPU budget is machine-specific. Section 10 lists the full reference matrices. These example settings are not performance results.
 
 ```yaml
 model:
@@ -210,16 +208,15 @@ Read model architecture from `config.json`, including nested `text_config` for V
 | Case | Checks before loading |
 | --- | --- |
 | Plain | No external drafter or bundled head is passed to the constructor; fresh generation config has zero assistant tokens. Stateful profiles do not instantiate a scheduler. |
-| MTP | Both `openvino_mtp_model.xml` and its BIN exist in the target directory; `ATTENTION_BACKEND: PA` is required for the qualified Qwen MTP path. |
 | DFlash | External draft graph/weights/config exist; target hidden-state outputs/locators and draft vocabulary match the qualified export. `dflash_config.target_layer_ids` is a non-empty list of unique non-negative integers within the target depth. With trained `block_size`, require `k <= block_size - 1`. |
 | Hybrid DFlash scheduler | Use one live sequence for the supplied profiles. Require sufficient linear-attention rows: `num_linear_attention_blocks >= max_num_seqs + k + 1`; 17 covers the reference sweep through k=15. Keep the same scheduler reservation on the plain baseline. |
 | All speculative cases | Target/draft use the same CPU/GPU device and a paged scheduler with `max_num_batched_tokens >= k + 1` for positive integer k. Use greedy generation, one returned sequence, static `assistant_confidence_threshold = 0.0`, prefix caching disabled and a qualified runtime API. No sampling, fallback or mechanism substitution. |
 
-Keep draft dispatch in `_load_pipeline`: `ov_genai.draft_model(draft_directory, device)` uses the target directory for MTP and the external directory for DFlash. The reference has no DFlash2 adapter; its separate exporter/runtime qualification follows the serving design's [model profiles](vlm-llm-serving-design.md#2-model-profiles) and [generation policy](vlm-llm-serving-design.md#6-generation-and-failure-policy).
+Keep draft dispatch in `_load_pipeline`: `ov_genai.draft_model(draft_directory, device)` with DFlash's external draft directory. The reference's MTP path is not ported and the reference has no DFlash2 adapter; their qualification follows the serving design's [model profiles](vlm-llm-serving-design.md#2-model-profiles) and [generation policy](vlm-llm-serving-design.md#6-generation-and-failure-policy).
 
 ### Artifact Safety
 
-Load tokenizer data with `local_files_only=True` and `trust_remote_code=False`; never enable remote code in preparation hints. Unlike the reference's in-place metadata backfill, prepare `hidden_states_decoder_layers` and any `dflash_draft_head` transformation explicitly in a new artifact directory, using structured IR/XML APIs and source/output hashes. Refuse an existing output and leave serving artifacts unchanged. Missing metadata during benchmarking is a preflight failure, not a trigger to repair files.
+Load tokenizer data with `local_files_only=True` and `trust_remote_code=False`; never enable remote code in preparation hints. Unlike the reference's in-place metadata backfill, the benchmark never writes artifacts: when a target lacks `hidden_states_decoder_layers`, the serving preparation (`text_gen_prepare.ensure_dflash_target`) derives a separate `<weight_format>-dflash` target and leaves the ordinary one unchanged. Missing metadata during benchmarking is a preflight failure, not a trigger to repair files.
 
 ## 5. Execution and Child-Process Protocol
 
@@ -317,7 +314,7 @@ Retain reference field names. Use ms for latency, seconds for generation/load du
 | `decode_throughput` | `1000 / other_tokens_avg_latency` when TPOT is positive. |
 | `e2e_throughput` | `(input_size + output_size) / generation_time`; includes input work and must not be presented as output-token throughput. |
 | `verification_steps`, `tokens_per_step` | Steps from the qualified runtime counter or guarded `raw_metrics.m_new_token_times` compatibility path. Acceptance length (AL) is `(output_size - 1) / (verification_steps - 1)`, excluding prefill; unavailable unless both exceed one. Plain generation should yield 1.00 when counts are available. |
-| `mtp_draft_tokens`, `mtp_accepted_tokens`, `mtp_rejected_tokens`, `mtp_acceptance_rate` | Legacy names shared by MTP/DFlash. Prefer valid runtime counters/rate; DFlash may require `get_num_draft_processed_tokens()` when its draft count is zero. Derive rejected count as drafted minus accepted only for consistent counts. |
+| `mtp_draft_tokens`, `mtp_accepted_tokens`, `mtp_rejected_tokens`, `mtp_acceptance_rate` | Legacy names from the reference's MTP path, used for DFlash. Prefer valid runtime counters/rate; DFlash may require `get_num_draft_processed_tokens()` when its draft count is zero. Derive rejected count as drafted minus accepted only for consistent counts. |
 | `mtp_acceptance_estimated` | Boolean: true only when the rate uses a qualified `(AL - 1) / k` estimate instead of measured acceptance. Label the estimate and never use it as a correctness threshold; if neither source is available, the rate is null and this flag is false. |
 | `mtp_draft_to_main_ratio` | Runtime draft/target inference-duration ratio. May include target prefill; not a per-decode-pass cost or an image-encoding speedup. |
 | `first_decode_ms`, `steady_pass_ms`, `steady_tpot` | Use matching runtime per-pass duration/committed-token arrays. Convert raw microseconds to ms; exclude prefill, report the first decode pass separately, then median remaining pass duration and remaining total duration / committed tokens. Require at least two remaining passes. |
@@ -346,7 +343,7 @@ The configured budget governs status, while `gpu_budget_driver_gb` is descriptiv
 Cache sizing remains a preflight estimate, not capacity certification:
 
 1. Compute growing KV bytes per token as `2 * full_attention_layers * kv_heads * (head_dim * element_bytes + quantization_overhead_per_row)`. Read top-level or `text_config` architecture; an inconsistent `layer_types` list yields unknown, not an underestimate. Use the actual supported KV precision and its quantization metadata.
-2. Add fixed linear-attention state from unique IR state variables, multiplied by reserved sequence/linear-attention rows. Include decode growth up to the output ceiling, qualified MTP-head KV and DFlash state/verification reservations. For context zero, use the actual standalone prompt length, never zero tokens. If that length or any required state contribution is unknown at preflight, report the estimate as unavailable rather than a lower bound sufficient for pool sizing.
+2. Add fixed linear-attention state from unique IR state variables, multiplied by reserved sequence/linear-attention rows. Include decode growth up to the output ceiling and DFlash draft KV/verification reservations. For context zero, use the actual standalone prompt length, never zero tokens. If that length or any required state contribution is unknown at preflight, report the estimate as unavailable rather than a lower bound sufficient for pool sizing.
 3. `scheduler.cache_size` has three forms: omitted means runtime-managed, a positive integer GiB value is fixed, and `auto` requests estimation. Validate every fixed pool before loading. A stateful profile has no scheduler pool.
 4. For qualified known demand, adapt the reference heuristic: `needed = max(2, 1.3 * estimated_cache_gib) * pool_factor`, `pool = ceil(needed)`, `ceiling = floor(gpu_memory_budget_gb - target_and_draft_weight_gib - 8)`. Require `pool <= ceiling`; do not silently clamp below demand. The factor 2 used by the reference for speculative pools is empirical and must be qualified per profile, not assumed universal.
 5. Record an impossible estimated pool as a case `error` in preflight, distinct from a measured memory-limit violation. For unknown architecture/reservations or CPU `auto`, require an explicit or runtime-managed pool. Never silently remove `auto` and change the requested pipeline mode.
@@ -418,7 +415,7 @@ Choose status in this order: explicit runtime/artifact failure; no measured outp
 | Model configuration | Pinned reference matrix | Port coverage |
 | --- | --- | --- |
 | Qwen3.6-35B-A3B | INT4; `paged_min` versus DFlash k=3/5/7/15; contexts 0/8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30-second idle gap. | Retain the matched settings and task list (35 cases) and distinguish stock/derived draft artifacts. The application-summary task runs on its own with a 1024-token ceiling. |
-| Qwen3.8-27B | INT8; `paged_min` versus MTP k=1/2/3/4/6; 8K context; default `summary_2s`; 64-token ceiling; default zero gap. | One configuration; `--weight-format int4` selects the INT4 artifact through the derived path. Do not infer DFlash2 support from MTP. |
+| Qwen3.8-27B | INT8; `paged_min` versus MTP k=1/2/3/4/6; 8K context; default `summary_2s`; 64-token ceiling; default zero gap. | Plain `paged_min` only (one case): serving does not support MTP or DFlash2 for this model, so the MTP sweep is not ported. `--weight-format int4` selects the INT4 artifact through the derived path. |
 | Qwen3.5-9B | No dedicated configuration in this pinned directory. | One plain configuration (paged versus stateful, INT4 default, `--weight-format int8`); speculative support requires independent qualification. |
 
 Both pinned configurations use one warmup and three measured iterations. Serving qualification follows the companion [model profiles](vlm-llm-serving-design.md#2-model-profiles).
@@ -428,7 +425,7 @@ Both pinned configurations use one warmup and three measured iterations. Serving
 1. Port the pure modules and five test families into the Section 2 layout. Update imports and launchers to `components.context_bench`, and verify root/config/environment path resolution before loading models.
 2. Port the plain child runner and parent sampler/supervisor. Implement lifecycle, null-metric, coverage, structured-output and exit-code corrections first; validate them with fake queues, clocks, samplers and processes.
 3. Add the model/precision configurations listed above with explicit artifact identities and qualified runtime dependencies.
-4. Add MTP/DFlash adapters and derived-artifact preparation under the Section 4 compatibility and safety rules.
+4. Add the DFlash adapter under the Section 4 compatibility and safety rules; derived artifacts come from the serving preparation.
 5. Add parent-side accuracy and optional WWB scoring, text-policy controls, launcher/docs, then run short hardware smoke tests before repeated and long-context matrices. Do not change the main application or its defaults as part of the benchmark port.
 
 ### Hardware-Independent Tests
@@ -436,12 +433,12 @@ Both pinned configurations use one warmup and three measured iterations. Serving
 | Test family | Required checks |
 | --- | --- |
 | `test_context_bench_context_builder.py` | No double templating; bounded correction passes and final-prompt reuse; exact positive-context equality; standalone context zero; too-small budget/non-convergence; VLM runtime-count mismatch; multi-insert placement and 16-token probe tolerance. |
-| `test_context_bench_kv_estimate.py` | Hybrid/full-attention counting, nested VLM config, malformed metadata, quantized KV overhead, per-sequence/verification reservations, MTP and external-draft contributions, fixed-pool preflight, infeasible/unknown auto budget and no implicit backend change. |
+| `test_context_bench_kv_estimate.py` | Hybrid/full-attention counting, nested VLM config, malformed metadata, quantized KV overhead, per-sequence/verification reservations, external-draft contributions, fixed-pool preflight, infeasible/unknown auto budget and no implicit backend change. |
 | `test_context_bench_metrics.py` | Unit conversion, valid per-field runtime fallback, null/non-finite handling, EOS with zero/one/many tokens, warmup exclusion, nearest-rank percentiles, median TPOT reciprocal, AL excluding prefill, steady-pass minimums, matched-baseline filtering and missing-telemetry ranking. |
 | `test_context_bench_trial_lifecycle.py` | Package imports and root/config/environment resolution from the new location; CLI/launcher argument forwarding; one load/final prompt per case; full-budget warmup; fresh request state; milestone resets; event deduplication and acknowledgements; delayed parent/checkpoint; partial records; terminal-result/exit race; timeout/Ctrl-C cleanup; sampler synchronization; atomic evidence and exit propagation. |
 | `test_context_bench_accuracy.py` | Seed determinism, task/option validation, exact probe counts, truth surviving filler truncation, scorer golden cases and article handling, baseline-last ordering, prompt-hash mismatch, skipped-probe denominators, truncation flags, missing optional WWB, no generated-code execution and text redaction. |
 
-Use deterministic fixtures: 101 input tokens, five output tokens, 0.3-second generation and matched-source 100-ms TTFT yield 50-ms fallback TPOT, 20 decode tok/s, 1010 prefill tok/s and approximately 353.333 e2e tok/s. For 45 output tokens and 14 target passes, AL is `44/13`, not `45/14`. Assert the Section 3 example's case/probe counts and that planning performs no inference, service startup, downloads, remote execution or artifact writes.
+Use deterministic fixtures: 101 input tokens, five output tokens, 0.3-second generation and matched-source 100-ms TTFT yield 50-ms fallback TPOT, 20 decode tok/s, 1010 prefill tok/s and approximately 353.333 e2e tok/s. For 45 output tokens and 14 target passes, AL is `44/13`, not `45/14`. Assert that planning performs no inference, service startup, downloads, remote execution or artifact writes.
 
 ### Acceptance Workflow
 

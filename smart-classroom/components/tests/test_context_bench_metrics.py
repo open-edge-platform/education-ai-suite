@@ -396,9 +396,9 @@ def _raw():
         "profiles": [
             {"name": "paged_min", "ov": {"ATTENTION_BACKEND": "PA"},
              "scheduler": {"max_num_batched_tokens": 8192, "max_num_seqs": 1, "enable_prefix_caching": False}},
-            {"name": "mtp_k3", "ov": {"ATTENTION_BACKEND": "PA"},
+            {"name": "dflash_k3", "ov": {"ATTENTION_BACKEND": "PA"},
              "scheduler": {"max_num_batched_tokens": 8192, "max_num_seqs": 1, "enable_prefix_caching": False},
-             "mtp": {"num_assistant_tokens": 3}},
+             "dflash": {"model": "models/d", "num_assistant_tokens": 3}},
         ],
     }
 
@@ -493,9 +493,6 @@ class TestSettingsValidation(unittest.TestCase):
         resolved = self._load(_raw(), "--profiles", "paged_min",
                               "--pipeline-config", "KV_CACHE_PRECISION=u8", "ATTENTION_BACKEND=")
         self.assertEqual(resolved["profiles"][0]["ov"], {"KV_CACHE_PRECISION": "u8"})
-        # Removing a property the MTP profile requires is an error, never a silent restore.
-        with self.assertRaisesRegex(settings.ConfigError, "ATTENTION_BACKEND"):
-            self._load(_raw(), "--pipeline-config", "ATTENTION_BACKEND=")
         self.assertEqual(self._load(_raw(), "--scheduler-config", "cache_size=auto")["profiles"][0]["cache_pool"], "auto")
 
     def test_an_override_that_changes_the_pipeline_is_announced(self):
@@ -517,17 +514,18 @@ class TestSettingsValidation(unittest.TestCase):
 
     def test_speculative_rules(self):
         cases = [
-            (lambda p: p.update(mtp={"num_assistant_tokens": 0}), "integer >= 1"),
-            (lambda p: p.update(mtp={"num_assistant_tokens": True}), "integer >= 1"),
-            (lambda p: p.update(mtp={"num_assistant_tokens": 3, "k": 3}), "unknown key"),
-            (lambda p: p.update(mtp=True), "--mtp-tokens"),
-            (lambda p: p.update(mtp={"num_assistant_tokens": 3}, dflash={"model": "d", "num_assistant_tokens": 3}),
-             "both mtp and dflash"),
-            (lambda p: (p.update(mtp={"num_assistant_tokens": 3}), p.pop("scheduler")), "stateful pipeline"),
-            (lambda p: (p.update(mtp={"num_assistant_tokens": 9}), p["scheduler"].update(max_num_batched_tokens=3)),
-             "max_num_batched_tokens=3"),
-            (lambda p: (p.update(mtp={"num_assistant_tokens": 3}), p["ov"].pop("ATTENTION_BACKEND")), "ATTENTION_BACKEND"),
-            (lambda p: p.update(mtp={"num_assistant_tokens": 3, "device": "CPU"}), "share one CPU/GPU device"),
+            (lambda p: p.update(dflash={"model": "d", "num_assistant_tokens": 0}), "integer >= 1"),
+            (lambda p: p.update(dflash={"model": "d", "num_assistant_tokens": True}), "integer >= 1"),
+            (lambda p: p.update(dflash={"model": "d", "num_assistant_tokens": 3, "k": 3}), "unknown key"),
+            (lambda p: p.update(dflash=True), "must be a mapping"),
+            # MTP is not supported: the section is an unknown profile key.
+            (lambda p: p.update(mtp={"num_assistant_tokens": 3}), r"unknown key\(s\): mtp"),
+            (lambda p: (p.update(dflash={"model": "d", "num_assistant_tokens": 3}), p.pop("scheduler")),
+             "stateful pipeline"),
+            (lambda p: (p.update(dflash={"model": "d", "num_assistant_tokens": 9}),
+                        p["scheduler"].update(max_num_batched_tokens=3)), "max_num_batched_tokens=3"),
+            (lambda p: p.update(dflash={"model": "d", "num_assistant_tokens": 3, "device": "CPU"}),
+             "share one CPU/GPU device"),
             (lambda p: p.update(dflash={"num_assistant_tokens": 7}), "dflash.model"),
             (lambda p: (p.update(dflash={"model": "d", "num_assistant_tokens": 7}),
                         p["scheduler"].update(num_linear_attention_blocks=8)), "num_linear_attention_blocks=8"),
@@ -541,7 +539,7 @@ class TestSettingsValidation(unittest.TestCase):
     def test_speculative_normalization_and_disabled_sections(self):
         raw = _raw()
         raw["profiles"][0]["dflash"] = {"model": "models/d", "num_assistant_tokens": 7, "device": "GPU"}
-        raw["profiles"][1]["mtp"] = {"enabled": False, "num_assistant_tokens": 3}
+        raw["profiles"][1]["dflash"] = {"enabled": False, "model": "models/d", "num_assistant_tokens": 3}
         dflash, disabled = self._load(raw)["profiles"]
         self.assertEqual(dflash["mtp"], {"enabled": True, "strategy": "dflash", "model": "models/d",
                                          "num_assistant_tokens": 7, "device": "GPU"})

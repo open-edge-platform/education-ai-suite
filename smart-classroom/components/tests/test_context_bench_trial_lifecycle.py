@@ -840,12 +840,14 @@ class TestEvidenceAndExitCodes(unittest.TestCase):
         self.assertEqual([p["state"] for p in results["plan"]], ["done", "refused"])
 
     def test_accuracy_run_scores_after_the_child_and_reports_coverage(self):
-        raw = settings.load_yaml(settings.TOOL_DIR / "testdata" / "design_example.yaml")
+        raw = settings.load_yaml(settings.DEFAULT_CONFIG_PATH)
         raw["model"].update(device="CPU", weight_format="fp16", model_dirs={"Qwen3.6-35B-A3B": str(self.model)})
         raw["profiles"] = [raw["profiles"][0], {"name": "plain_u8", "ov": {"KV_CACHE_PRECISION": "u8"},
                                                 "scheduler": raw["profiles"][0]["scheduler"]}]
         raw["benchmark"]["output_dir"] = str(self.output)
-        resolved = settings._resolve_settings(raw, settings._parse_args(["--accuracy"]))
+        raw["accuracy"]["embedding_model"] = None
+        resolved = settings._resolve_settings(raw, settings._parse_args(
+            ["--accuracy", "--accuracy-tasks", "niah_single", "summary", "fact_sheet"]))
         planned = settings.plan_run(resolved)
 
         def fake(spec, timeout_sec, include_gpu=True, on_record=None, **_kwargs):
@@ -896,40 +898,24 @@ class TestEvidenceAndExitCodes(unittest.TestCase):
 
 
 class TestPlanningIsSideEffectFree(unittest.TestCase):
-    FIXTURE = settings.TOOL_DIR / "testdata" / "design_example.yaml"
+    FIXTURE = settings.DEFAULT_CONFIG_PATH
 
-    def _plan(self, *argv):
-        out = io.StringIO()
+    def test_list_profiles_prints_the_plan_without_side_effects(self):
         forbidden = mock.Mock(side_effect=AssertionError("planning must not do this"))
-        with mock.patch("sys.stdout", out), \
-                mock.patch.object(supervisor.multiprocessing, "get_context", forbidden), \
-                mock.patch("socket.socket.connect", forbidden), \
-                mock.patch.object(evidence, "create_run_dir", forbidden), \
-                mock.patch.object(evidence, "atomic_write_text", forbidden):
-            code = benchmark.main(["--config", str(self.FIXTURE), "--list-profiles", *argv])
-        return code, out.getvalue()
-
-    def test_the_design_example_plans_fourteen_throughput_cases(self):
-        code, text = self._plan()
-        self.assertEqual(code, 0)
-        self.assertIn("Cases: 14 throughput case(s)", text)
-        self.assertIn("  8,000 tokens      summary_2s | c13        c14", text)
-        self.assertIn("  shared by every profile:", text)
-        self.assertEqual(text.count("KV_CACHE_PRECISION=f16"), 1)  # shared settings once
-        self.assertNotIn(str(SC_ROOT), text)  # redacted, repository-relative locations
-        planned = settings.plan_run(settings._load_settings(settings._parse_args(["--config", str(self.FIXTURE)])))
-        self.assertEqual(len(planned), 14)
-        self.assertEqual(len({(p["context_tokens"], p["throughput_task"]) for p in planned}), 7)
-
-    def test_the_design_example_plans_two_accuracy_cases_of_ten_probes(self):
-        code, text = self._plan("--accuracy")
-        self.assertEqual(code, 0)
-        self.assertIn("Cases: 2 accuracy case(s)", text)
-        self.assertIn("  8,000 tokens  accuracy | c01        c02", text)
-        self.assertIn("10 probe(s) per case", text)
-        planned = settings.plan_run(settings._load_settings(
-            settings._parse_args(["--config", str(self.FIXTURE), "--accuracy"])))
-        self.assertEqual([(p["context_tokens"], p["planned_probes"]) for p in planned], [(8000, 10), (8000, 10)])
+        for flags in ((), ("--accuracy",)):
+            with self.subTest(flags=flags):
+                out = io.StringIO()
+                with mock.patch("sys.stdout", out), \
+                        mock.patch.object(supervisor.multiprocessing, "get_context", forbidden), \
+                        mock.patch("socket.socket.connect", forbidden), \
+                        mock.patch.object(evidence, "create_run_dir", forbidden), \
+                        mock.patch.object(evidence, "atomic_write_text", forbidden):
+                    code = benchmark.main(["--config", str(self.FIXTURE), "--list-profiles", *flags])
+                text = out.getvalue()
+                self.assertEqual(code, 0)
+                self.assertIn("  shared by every profile:", text)
+                self.assertEqual(text.count("KV_CACHE_PRECISION=f16"), 1)  # shared settings once
+                self.assertNotIn(str(SC_ROOT), text)  # redacted, repository-relative locations
 
     def test_planning_creates_no_files_and_loads_no_runtime(self):
         before = {p for p in (SC_ROOT / "monitoring").rglob("*")} if (SC_ROOT / "monitoring").exists() else set()

@@ -27,7 +27,6 @@ _PRECONVERTED_OV_MODELS = {
     ("Qwen/Qwen3.5-9B", "int4"): "OpenVINO/Qwen3.5-9B-int4-ov",
     ("Qwen/Qwen3.5-9B", "int8"): "OpenVINO/Qwen3.5-9B-int8-ov",
     ("Qwen/Qwen3.6-35B-A3B", "int4"): "OpenVINO/Qwen3.6-35B-A3B-int4-ov",
-    # MTP-enabled exports: openvino_mtp_model.* matches the patterns below.
     ("Qwen/Qwen3.8-27B", "int4"): "OpenVINO/Qwen3.8-27B-int4-ov",
     ("Qwen/Qwen3.8-27B", "int8"): "OpenVINO/Qwen3.8-27B-int8-ov",
 }

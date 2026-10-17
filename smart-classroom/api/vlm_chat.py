@@ -117,13 +117,19 @@ def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
         }
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
-    # First chunk announces the assistant role (OpenAI convention).
-    yield _chunk({"role": "assistant"})
-    for token in token_iter:
-        if token:
-            yield _chunk({"content": token})
-    yield _chunk({}, finish_reason="stop")
-    yield "data: [DONE]\n\n"
+    try:
+        # First chunk announces the assistant role (OpenAI convention).
+        yield _chunk({"role": "assistant"})
+        for token in token_iter:
+            if token:
+                yield _chunk({"content": token})
+        yield _chunk({}, finish_reason="stop")
+        yield "data: [DONE]\n\n"
+    finally:
+        # Stops native generation if we stopped reading early.
+        close = getattr(token_iter, "close", None)
+        if close is not None:
+            close()
 
 
 @router.post("/v1/chat/completions")
@@ -166,7 +172,9 @@ async def _chat_completions(request: Request):
 
     try:
         if chat_req.stream:
-            token_iter = handler.generate(
+            # Admission waits on a threading semaphore: keep it off the event loop.
+            token_iter = await run_in_threadpool(
+                handler.generate,
                 prompt,
                 images=image_tensors,
                 stream=True,
@@ -257,7 +265,7 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
     )
     try:
         if chat_req.stream:
-            token_iter = handler.generate(stream=True, **kwargs)
+            token_iter = await run_in_threadpool(handler.generate, stream=True, **kwargs)
             parser = tc.ToolStreamParser(tools, choice, parallel=parallel,
                                          reasoning_open=bool(info.get("reasoning_open")))
             return StreamingResponse(
@@ -314,7 +322,7 @@ def _tool_sse_stream(token_iter, parser: "tc.ToolStreamParser", info: dict,
         }
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
-    index = 0
+    calls = []
     try:
         yield _chunk({"role": "assistant"})
         for token in token_iter:
@@ -322,10 +330,14 @@ def _tool_sse_stream(token_iter, parser: "tc.ToolStreamParser", info: dict,
                 if kind == "content":
                     yield _chunk({"content": value})
                 else:
-                    yield _chunk({"tool_calls": [{"index": index, **value}]})
-                    index += 1
+                    calls.append(value)
         for _, value in parser.finish(bool(info.get("truncated"))):
             yield _chunk({"content": value})
+        if parser.finish_reason == "tool_calls":
+            # Held until the turn is known complete: like the non-streaming
+            # parser, a truncated turn publishes none of its calls.
+            for index, call in enumerate(calls):
+                yield _chunk({"tool_calls": [{"index": index, **call}]})
         yield _chunk({}, finish_reason=parser.finish_reason)
     except tc.ToolOutputError as exc:
         # Terminate with an error instead of claiming a tool-call finish.

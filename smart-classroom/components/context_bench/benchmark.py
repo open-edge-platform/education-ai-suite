@@ -5,8 +5,8 @@
 Answers, per (model, precision, device, context, task, profile):
 
   * can this machine process the context within the configured memory budgets, and
-  * which runtime profile -- KV precision, stateful vs paged pipeline, scheduler, MTP or
-    DFlash speculative decoding and its window -- gives the best measured latency;
+  * which runtime profile -- KV precision, stateful vs paged pipeline, scheduler, DFlash
+    speculative decoding and its window -- gives the best measured latency;
 
 and, with ``--accuracy``, how a profile affects synthetic retrieval accuracy and generation
 fidelity relative to a baseline profile. It never loads the classroom application, starts
@@ -97,7 +97,6 @@ from components.context_bench.sizing import (  # noqa: F401
     kv_cache_dtype_bytes,
     kv_quantization_param_bytes,
     load_model_config,
-    mtp_head_layers,
     precision_matches_label,
     state_rows,
     text_config,
@@ -224,7 +223,6 @@ def _model_static(settings, model: str, model_dir: Path, redactor) -> dict:
         "weight_disk_gb": weight_disk_gb(model_dir),
         "model_config": config,
         "fixed_state_bytes": fixed_state_cache_bytes(model_dir),
-        "mtp_layers": mtp_head_layers(model_dir),
         "weight_precision": precision,
         "precision_label_mismatch": not precision_matches_label(precision, settings["weight_format"]),
         "layout": "vlm" if (model_dir / "openvino_language_model.xml").is_file() else "llm",
@@ -257,15 +255,7 @@ def _preflight_case(planned: dict, settings, static: dict) -> dict:
     prepared = {"warnings": [], "draft_dir": None, "draft_weight_precision": None,
                 "draft_identity": None, "draft_weight_gb": 0.0}
     draft_config = None
-    if mtp.get("enabled") and mtp["strategy"] == "mtp":
-        if not trial_runner.has_mtp_head(str(model_dir)):
-            raise _Rejected("missing_ir", (
-                f"profile {profile['name']!r} enables MTP but the target export has no "
-                f"{' / '.join(trial_runner.MTP_MODEL_FILES)}; prepare the target together with "
-                "its bundled MTP head (serving workflow, draft_source: target)"
-            ))
-        prepared["draft_weight_precision"] = ir_weight_precision(model_dir, (trial_runner.MTP_MODEL_FILE,))
-    elif mtp.get("enabled") and mtp["strategy"] == "dflash":
+    if mtp.get("enabled"):
         draft_dir = resolve_path(mtp["model"])
         prepared["draft_dir"] = draft_dir
         missing = check_draft_layout(draft_dir)
@@ -317,8 +307,7 @@ def _preflight_case(planned: dict, settings, static: dict) -> dict:
     estimate = estimate_cache(
         static["model_config"], static["fixed_state_bytes"], ov,
         _token_budget(planned, settings, mtp), state_rows=state_rows(scheduler),
-        mtp_layers=static["mtp_layers"] if mtp.get("strategy") == "mtp" else 0,
-        draft_config=draft_config, dflash=mtp.get("strategy") == "dflash",
+        draft_config=draft_config, dflash=bool(mtp.get("enabled")),
     )
     prepared.update({"estimate": estimate, "ceiling_gb": None})
     if pool == POOL_FIXED:

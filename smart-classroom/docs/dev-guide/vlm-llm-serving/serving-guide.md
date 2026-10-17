@@ -26,7 +26,7 @@ The target is selected as before, under `models.text_gen` in
 | `Qwen/Qwen3-VL-8B-Instruct` (default) | `int4`, `int8` | none (plain) |
 | `Qwen/Qwen3.5-9B` | `int4`, `int8` | none (plain) |
 | `Qwen/Qwen3.6-35B-A3B` | `int4` | `dflash` |
-| `Qwen/Qwen3.8-27B` | `int4`, `int8` | `mtp` (bundled head); `dflash2` declared but not qualified |
+| `Qwen/Qwen3.8-27B` | `int4`, `int8` | none (plain) |
 
 Pre-converted OpenVINO IR is downloaded on first start into
 `models/openvino/<model>/<weight_format>`. Other models keep the existing
@@ -47,8 +47,8 @@ models:
     weight_format: int4
     speculative:
       mode: auto          # "off" | auto | "on"
-      method: auto        # auto | dflash | dflash2 | mtp
-      draft_source: null  # null | huggingface | local | target
+      method: dflash      # auto | dflash | dflash2 | mtp
+      draft_source: null  # null | huggingface | local
       draft_model: null
       draft_revision: null
       num_assistant_tokens: null
@@ -61,11 +61,10 @@ but quoting avoids surprises).
 | --- | --- |
 | `mode: auto` | Accelerate when the profile is qualified and its artifacts prepare and warm up; otherwise plain generation, with the reason in `/health`. |
 | `mode: "on"` | Acceleration is required at startup; any reason it cannot run is a startup failure with guidance. |
-| `method: auto` | The catalog's declared method for the target (`dflash` for Qwen3.6, `dflash2` for Qwen3.8 — which is not qualified, so `auto` stays plain there). Choose `mtp` explicitly for Qwen3.8. |
+| `method` | `dflash` is the only method with a profile, for Qwen3.6 INT4; `auto` selects it there. `dflash2` and `mtp` are valid settings without a profile yet: plain generation under `auto`, a startup failure under `"on"`. |
 | `draft_source: local` | `draft_model` names an existing OpenVINO IR directory (relative paths resolve from `smart-classroom/`). It is validated, never downloaded or replaced. |
-| `draft_source: target` | MTP only: the target export's `openvino_mtp_model.xml/.bin`. `draft_model` and `draft_revision` must be null. |
-| `draft_revision` | A full 40-character commit. `null` uses the catalog pin; while the catalog has none, the first preparation resolves the current commit, records it in the manifest and reuses it afterwards. |
-| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default (DFlash 3, MTP 2). Range: DFlash 1–15, MTP 1–6. |
+| `draft_revision` | A full 40-character commit. `null` uses the catalog pin (`f181eece646a…` for the Qwen3.6 drafter). |
+| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 3. Range 1–15. |
 
 Invalid settings (unknown method or key, contradictory source, cross-model
 drafter, out-of-range `k`) fail validation at startup in every mode; they never
@@ -94,10 +93,13 @@ deleted.
 | DFlash target with hidden-state metadata | `models/openvino/<model>/<weight_format>-dflash` (only when the stock export lacks `hidden_states_decoder_layers`; weights are hard-linked, the ordinary target is untouched) |
 | Manifest | `models/openvino/.manifests/<model>-<weight_format>.json` |
 
-The DFlash drafter is a source checkpoint; it is exported with `optimum-cli`
-without `--trust-remote-code`. If the installed exporter cannot convert it
-natively, preparation fails — `auto` then continues with plain generation and
-reports the reason.
+The DFlash drafter is a source checkpoint, downloaded at the catalog's pinned
+commit: configuration and weight files only, never repository code. It is
+exported with the DFlash classes built into optimum-intel 2.2.0 (installed by
+`requirements.txt`), without `--trust-remote-code`; the first start spends a
+few minutes on this export. If the export fails, `auto` continues with plain
+generation and reports the reason; an IR exported separately can be used with
+`draft_source: local`.
 
 ## Model Preparation
 

@@ -32,7 +32,7 @@ import uuid
 from collections import deque
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,30 @@ def stage_scope(session_id, stage):
 def current_stage() -> tuple:
     """Return ``(session_id, stage)`` for the open stage, or ``(None, None)``."""
     return _STAGE.get() or (None, None)
+
+
+class ContextIterator:
+    """Advance a sync iterator inside one persistent context.
+
+    Starlette advances a sync streaming body through separate threadpool calls,
+    each in a fresh context copy, so a ``stage_scope`` opened inside the
+    generator would only cover its first chunk.
+    """
+
+    def __init__(self, iterator: Iterator) -> None:
+        self._iterator = iterator
+        self._context = contextvars.copy_context()
+
+    def __iter__(self) -> "ContextIterator":
+        return self
+
+    def __next__(self):
+        return self._context.run(next, self._iterator)
+
+    def close(self) -> None:
+        close = getattr(self._iterator, "close", None)
+        if close is not None:
+            self._context.run(close)
 
 
 class ModelCall:
@@ -158,30 +182,32 @@ def _ms(seconds: float) -> float:
     return round(seconds * 1000.0, 3)
 
 
-def timed_model_call(fn: Callable, capability: str, describe: Callable[[], dict]) -> Callable:
-    """Wrap a non-streaming owner callable so every invocation is recorded.
+def run_admitted(call: ModelCall, fn: Callable, *args, **kwargs):
+    """``CapabilityRunner`` callable for :func:`submit_timed`; runs after admission."""
+    call.started()
+    try:
+        result = fn(*args, **kwargs)
+    except BaseException as exc:
+        call.finish("failed" if isinstance(exc, Exception) else "cancelled", exc)
+        raise
+    call.finish("ok")
+    return result
 
-    Meant to be the function handed to ``CapabilityRunner``: the runner calls it
-    only after admission, so the measured latency excludes queue wait.
-    ``describe`` returns the model identity fields at call time.
+
+def submit_timed(runner, capability: str, info: dict, fn: Callable, *args, **kwargs):
+    """Submit a non-streaming ``fn`` through a runner built on :func:`run_admitted`.
+
+    As for text generation, the record exists before submission, so queue wait
+    is measured and a rejected submission is still recorded; it is attributed
+    to the stage open in the caller's context.
     """
-
-    def _wrapped(*args, **kwargs):
-        try:
-            info = describe() or {}
-        except Exception:  # noqa: BLE001 - statistics never break a call
-            info = {}
-        call = ModelCall(capability, **info)
-        call.started()
-        try:
-            result = fn(*args, **kwargs)
-        except BaseException as exc:
-            call.finish("failed" if isinstance(exc, Exception) else "cancelled", exc)
-            raise
-        call.finish("ok")
-        return result
-
-    return _wrapped
+    call = ModelCall(capability, **info)
+    try:
+        return runner.submit(call, fn, *args, **kwargs)
+    except BaseException as exc:
+        # No-op when run_admitted already finished the record.
+        call.finish("rejected" if type(exc).__name__ == "QueueFullError" else "failed", exc)
+        raise
 
 
 class ProcessingStats:

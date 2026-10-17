@@ -51,31 +51,25 @@
 #             against planted ground truth, and 4 generation probes (summary, fact_sheet)
 #             scored against paged_min's answer to the identical prompt.
 #
-# Artifacts come from the serving preparation workflow (never downloaded here):
+# Artifacts come from the serving preparation (never downloaded here): start the app once
+# with models.text_gen vlm_name: Qwen/Qwen3.6-35B-A3B, weight_format: int4 and speculative
+# mode: auto, method: dflash, and it prepares both:
 #   target  models/openvino/Qwen3.6-35B-A3B/int4            (OpenVINO/Qwen3.6-35B-A3B-int4-ov)
-#   draft   models/openvino/Qwen3.6-35B-A3B-DFlash/int4     (stock z-lab DFlash export)
+#   draft   models/openvino/Qwen3.6-35B-A3B-DFlash/int4     (z-lab/Qwen3.6-35B-A3B-DFlash export)
 # Without the draft every dflash_k* case ends `missing_ir` at preflight while paged_min runs.
-# DFlash also needs the target IR's `hidden_states_decoder_layers` rt_info. When the stock
-# export lacks it, preflight reports `missing_ir`; point `model_dirs` at the derived target the
-# serving workflow creates (models/openvino/Qwen3.6-35B-A3B/int4-dflash, same weights,
-# annotated XML) or prepare one explicitly with
-#   python -m components.context_bench.dflash_draft_head prepare-target --target ... --draft ... --output ...
-# `paged_min` then runs on the same weights, so the comparison stays matched.
-#
-# The reference measurements below used a derived draft with its own int4 lm_head
-# (classroom_summary k=3 20.4 -> 18.6 ms/token, acceptance unchanged). Build it with
-#   python -m components.context_bench.dflash_draft_head build-head --target <target> \
-#       --draft models/openvino/Qwen3.6-35B-A3B-DFlash/int4 --output models/openvino/Qwen3.6-35B-A3B-DFlash/int4-int4head
-# and point `&dflash_draft` at the output. Keep stock and derived drafts in separate runs so
-# their results are never mixed.
+# DFlash also needs the target IR's `hidden_states_decoder_layers` rt_info, which the current
+# export carries. For an older export without it, serving derives
+# models/openvino/Qwen3.6-35B-A3B/int4-dflash (same weights, annotated XML): point `model_dirs`
+# there, and `paged_min` runs on the same weights, so the comparison stays matched.
 #
 # Read ACCEPTANCE LENGTH (AL), not the accepted %: speedup ~= AL / pass cost, and the
 # accepted % ((AL - 1) / k) falls with k by construction. The draft's block_size=16 includes
 # the seed token, so k=15 is the largest valid window; 17 linear-attention rows cover
 # max_num_seqs + k + 1 through k=15 and are kept on the baseline so schedulers match exactly.
 #
-# Reference measurements (pinned upstream, Arc B390 iGPU, 2026-10-08, int4-head draft) are
-# historical observations, not qualification results for this port:
+# Reference measurements (pinned upstream, Arc B390 iGPU, 2026-10-08) are historical
+# observations, not qualification results for this port; they used a derived int4-head draft
+# that is not shipped here:
 #   code none: k=7 2.40x (AL 5.94); math 8K: k=7 2.07x (AL 5.74); summary_2s 8K: k=3 1.32x (AL 3.14)
 
 model:
