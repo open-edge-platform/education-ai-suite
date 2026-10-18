@@ -400,7 +400,11 @@ class TestOptionalWwb(unittest.TestCase):
         class TextSimilarity:
             def __init__(self, model_id):
                 import os
+
+                import huggingface_hub.constants
                 self.offline = os.environ.get("HF_HUB_OFFLINE")
+                # What huggingface_hub actually consults once imported.
+                self.hub_offline = huggingface_hub.constants.HF_HUB_OFFLINE
 
             def evaluate(self, gt, prediction):
                 # WWB's input contract: DataFrames read through their `answers` column.
@@ -433,7 +437,10 @@ class TestOptionalWwb(unittest.TestCase):
         result = wwb_adapter.similarity(["a", "b"], ["c", "d"])
         self.assertEqual(result.values, [0.95, 0.85], result.reason)
         self.assertEqual(seen, [(["a", "b"], ["c", "d"])])  # baseline first, in input order
-        self.assertEqual(wwb_adapter._EVALUATOR_CACHE[wwb_adapter.DEFAULT_EMBEDDING_MODEL].offline, "1")
+        evaluator = wwb_adapter._EVALUATOR_CACHE[wwb_adapter.DEFAULT_EMBEDDING_MODEL]
+        self.assertEqual((evaluator.offline, evaluator.hub_offline), ("1", True))
+        import huggingface_hub.constants
+        self.assertFalse(huggingface_hub.constants.HF_HUB_OFFLINE)  # restored afterwards
         self._install(lambda gt, pred: [0.1])
         self.assertFalse(wwb_adapter.similarity(["a", "b"], ["c", "d"]).available)
         self._install(lambda gt, pred: object())

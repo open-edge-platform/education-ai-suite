@@ -45,9 +45,6 @@ _IR_TYPE_BYTES = {"f32": 4, "fp32": 4, "f16": 2, "fp16": 2, "bf16": 2, "i8": 1, 
 AUTO_CACHE_SAFETY = 1.3
 AUTO_CACHE_RESERVE_GB = 8.0
 AUTO_CACHE_MIN_GB = 2.0
-# Pool multipliers qualified for `cache_size: auto`, per speculative strategy. DFlash has no
-# qualified factor, so `auto` on a DFlash profile requires an explicit or runtime-managed pool.
-QUALIFIED_POOL_FACTORS = {None: 1.0}
 
 GENAI_DEFAULT_MAX_NUM_SEQS = 256
 
@@ -286,11 +283,11 @@ def state_rows(scheduler: dict | None) -> int:
     return scheduler.get("max_num_seqs", GENAI_DEFAULT_MAX_NUM_SEQS)
 
 
-def auto_cache_size_gb(estimated_gib: float | None, weight_gib: float, budget_gb: float | None,
-                       pool_factor: float = 1.0) -> dict:
+def auto_cache_size_gb(estimated_gib: float | None, weight_gib: float,
+                       budget_gb: float | None) -> dict:
     """Size a `cache_size: auto` pool, or say why it cannot be sized.
 
-    ``needed = max(2, 1.3 * estimate) * factor``, ``pool = ceil(needed)``,
+    ``needed = max(2, 1.3 * estimate)``, ``pool = ceil(needed)``,
     ``ceiling = floor(budget - weights - 8)``. A pool above the ceiling is infeasible; it is
     never clamped below demand. Returns ``{"pool", "ceiling", "status", "reason"}``.
     """
@@ -300,7 +297,7 @@ def auto_cache_size_gb(estimated_gib: float | None, weight_gib: float, budget_gb
     if budget_gb is None:
         return {"pool": None, "ceiling": None, "status": "unknown",
                 "reason": "no GPU memory budget to size against"}
-    needed = max(AUTO_CACHE_MIN_GB, AUTO_CACHE_SAFETY * estimated_gib) * pool_factor
+    needed = max(AUTO_CACHE_MIN_GB, AUTO_CACHE_SAFETY * estimated_gib)
     pool = int(math.ceil(needed))
     ceiling = int(math.floor(budget_gb - weight_gib - AUTO_CACHE_RESERVE_GB))
     if pool > ceiling:

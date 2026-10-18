@@ -131,13 +131,12 @@ class TestReservations(unittest.TestCase):
 
 class TestPoolSizing(unittest.TestCase):
     def test_auto_formula_and_ceiling(self):
-        sized = auto_cache_size_gb(4.9, weight_gib=8.8, budget_gb=59, pool_factor=1.0)
+        sized = auto_cache_size_gb(4.9, weight_gib=8.8, budget_gb=59)
         self.assertEqual(sized["status"], "ok")
         self.assertEqual(sized["pool"], 7)  # ceil(1.3 * 4.9)
         self.assertEqual(sized["ceiling"], 42)  # floor(59 - 8.8 - 8)
         self.assertIsInstance(sized["pool"], int)
         self.assertEqual(auto_cache_size_gb(0.01, 1.0, 59)["pool"], 2)
-        self.assertEqual(auto_cache_size_gb(0.01, 1.0, 59, pool_factor=2.0)["pool"], 4)
 
     def test_an_infeasible_pool_is_reported_not_clamped(self):
         sized = auto_cache_size_gb(40.0, weight_gib=33.0, budget_gb=59)
@@ -409,7 +408,7 @@ class TestShippedConfigs(unittest.TestCase):
         self.assertEqual([p["mtp"]["num_assistant_tokens"] for p in profiles[1:]], [3, 5, 7, 15])
         for profile in profiles[1:]:
             self.assertEqual(profile["mtp"]["strategy"], "dflash")
-            self.assertEqual(profile["mtp"]["model"], "models/openvino/Qwen3.6-35B-A3B-DFlash/int4")
+            self.assertEqual(profile["mtp"]["model"], "models/openvino/Qwen3.6-35B-A3B-DFlash/int4-lmhead")
             self.assertEqual(profile["ov"], baseline["ov"])
             self.assertEqual(profile["scheduler"], baseline["scheduler"])
             self.assertGreaterEqual(profile["scheduler"]["num_linear_attention_blocks"],
@@ -421,7 +420,7 @@ class TestShippedConfigs(unittest.TestCase):
         self.assertEqual(resolved["throughput_tasks"], ("code", "math", "chat", "summary_2s"))
         # The draft follows the target device, so --device overrides every profile at once.
         cpu = self._load("config_qwen3.6_35b.yaml", "--device", "CPU")
-        self.assertTrue(all(p["mtp"]["device"] in (None, "CPU") for p in cpu["profiles"]))
+        self.assertEqual(cpu["device"], "CPU")
 
     def test_qwen38_config_is_one_plain_paged_baseline(self):
         for label in self.WEIGHTS["config_qwen3.8_27b.yaml"]:
@@ -443,8 +442,8 @@ class TestShippedConfigs(unittest.TestCase):
 
     def test_profiles_that_resolve_identically_are_refused(self):
         with self.assertRaisesRegex(settings.ConfigError, "resolve to the same configuration"):
-            self._load("config_qwen3.6_35b.yaml", "--mtp-tokens", "5")
-        one = self._load("config_qwen3.6_35b.yaml", "--mtp-tokens", "5",
+            self._load("config_qwen3.6_35b.yaml", "--assistant-tokens", "5")
+        one = self._load("config_qwen3.6_35b.yaml", "--assistant-tokens", "5",
                          "--profiles", "paged_min", "dflash_k7")
         self.assertEqual([p["mtp"]["num_assistant_tokens"] for p in one["profiles"]], [None, 5])
 

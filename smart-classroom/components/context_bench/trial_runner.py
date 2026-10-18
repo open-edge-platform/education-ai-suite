@@ -98,7 +98,6 @@ STAGE_LOADED = "loaded"
 STAGE_PROMPT_BUILT = "prompt_built"
 STAGE_PREFILLED = "prefilled"
 STAGE_DECODED = "decoded"
-MILESTONES = (STAGE_START, STAGE_LOADED, STAGE_PROMPT_BUILT, STAGE_PREFILLED, STAGE_DECODED)
 
 # The stage a failure belongs to, given the last completed milestone: an exception is thrown
 # by the step *after* it.
@@ -222,63 +221,12 @@ def has_model_rt_info(xml_path: str, key: str) -> bool | None:
     return False
 
 
-def dflash_metadata_hint(model_dir: str, draft_dir: str) -> str:
-    return (
-        f"the target IR lacks model rt_info {DFLASH_TARGET_RT_INFO_KEY!r}. The benchmark never "
-        "repairs artifacts; point model.model_dirs at the derived target the serving "
-        "preparation creates when DFlash is enabled (<weight_format>-dflash, e.g. "
-        "models/openvino/Qwen3.6-35B-A3B/int4-dflash)"
-    )
-
-
-def validate_mtp(model_dir: str, device: str, mtp: dict | None,
-                 scheduler_config: dict | None) -> None:
-    """Reject a DFlash profile this model/device/pipeline cannot run.
-
-    GenAI enforces these too, but only after a multi-gigabyte load; these are pure
-    filesystem and dict checks. A plain profile is never held to any of them.
-    """
-    if not (mtp or {}).get("enabled"):
-        return
-    draft_model_dir = mtp["model"]
-    normalized_device = str(device).upper()
-    if not re.fullmatch(r"(CPU|GPU)(\.\d+)?", normalized_device):
-        raise ValueError(
-            f"dflash is enabled on {device}, but the paged speculative-decoding path "
-            "supports CPU and GPU only"
-        )
-    draft_device = mtp.get("device")
-    if draft_device and str(draft_device).upper() != normalized_device:
-        raise ValueError("dflash draft_model must use the same device as the target pipeline")
-    for name in ("openvino_model.xml", "openvino_model.bin"):
-        if not os.path.isfile(os.path.join(draft_model_dir, name)):
-            raise ValueError(
-                f"dflash draft model has no {name}; point dflash.model at the exported "
-                "OpenVINO draft directory"
-            )
-    dflash_target_layer_ids(draft_model_dir)
-    block_size = dflash_block_size(draft_model_dir)
-    tokens = mtp.get("num_assistant_tokens")
-    if block_size and isinstance(tokens, int) and tokens > block_size - 1:
-        raise ValueError(
-            f"dflash num_assistant_tokens={tokens} exceeds what this draft proposes per "
-            f"pass: its block_size={block_size} includes the seed token, so k <= "
-            f"{block_size - 1}"
-        )
-    if (scheduler_config or {}).get("enable_prefix_caching"):
-        raise ValueError(
-            "dflash does not support scheduler enable_prefix_caching; set it to false"
-        )
-    target_xml = language_model_ir(model_dir)
-    if target_xml is not None and has_model_rt_info(target_xml,
-                                                    DFLASH_TARGET_RT_INFO_KEY) is False:
-        raise ValueError(dflash_metadata_hint(model_dir, draft_model_dir))
-    if not scheduler_config:
-        raise ValueError(
-            "dflash is enabled without a `scheduler` section, which leaves the profile on "
-            "the stateful (SDPA) pipeline. OpenVINO GenAI only runs this speculative "
-            "decoding path on paged attention (PA) -- give the profile a `scheduler` section"
-        )
+DFLASH_METADATA_HINT = (
+    f"the target IR lacks model rt_info {DFLASH_TARGET_RT_INFO_KEY!r}. The benchmark never "
+    "repairs artifacts; point model.model_dirs at the derived target the serving "
+    "preparation creates when DFlash is enabled (<weight_format>-dflash, e.g. "
+    "models/openvino/Qwen3.6-35B-A3B/int4-dflash)"
+)
 
 
 def classify_error(exc: BaseException) -> str:
@@ -387,7 +335,7 @@ def _load_pipeline(model_dir: str, device: str, ov_config: dict,
 
     if (mtp or {}).get("enabled"):
         pipeline_args["draft_model"] = ov_genai.draft_model(
-            mtp["model"], mtp.get("device") or device
+            mtp["model"], device
         )
 
     if os.path.exists(os.path.join(model_dir, "openvino_language_model.xml")):
@@ -728,9 +676,6 @@ def execute_case(case: dict, channel: _Channel) -> dict:
 
     try:
         channel.post("device", **diagnostics)
-        # Before the clock starts: a profile this model cannot run is a configuration
-        # error, not a load time worth reporting.
-        validate_mtp(model_dir, device, mtp, scheduler_config)
         t0 = time.perf_counter()
         tokenizer = _load_tokenizer(model_dir)
         pipe, accepts_tokenized_input = _load_pipeline(

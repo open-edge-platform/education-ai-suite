@@ -63,7 +63,7 @@ When adapting the reference, update package imports, test imports, launcher comm
 | `settings.py` | CLI and config validation (`_parse_args`, `_load_settings`, `_resolve_profiles`), task prompts, case planning with IDs (`plan_run`, `plan_grid`) and `--list-profiles`. Imports no inference packages. |
 | `sizing.py`, `supervisor.py` | KV/cache-pool estimates; child process spawning, IPC acknowledgements and memory sampling. |
 | `evidence.py`, `report.py` | Run directory, redaction and atomic `results.json`; rendering `report.txt` and console lines from the same snapshot. |
-| `trial_runner.py` | `run_case` loads once, runs throughput iterations or accuracy probes, emits progress/results, and exits the child. Keep `_load_pipeline`, `prepare_pipeline_input`, `generation_config`, `read_perf_metrics`, `validate_mtp` and error classification independently testable. |
+| `trial_runner.py` | `run_case` loads once, runs throughput iterations or accuracy probes, emits progress/results, and exits the child. Keep `_load_pipeline`, `prepare_pipeline_input`, `generation_config`, `read_perf_metrics` and error classification independently testable; artifact and profile checks run once, in the parent's preflight. |
 | `context_builder.py` | Render native chat templates, size synthetic transcript prompts, place accuracy inserts and count the actual inference input. Keep prompt construction outside measured generation. |
 | `metrics.py` | Build iteration records, normalize units, compute throughput/speculative statistics and aggregate measured iterations. No runtime loading, report I/O or scoring dependencies. |
 | `tasks.py` | Define `ProbeSpec`, task registry, deterministic planted values, questions and per-probe output budgets. |
@@ -125,7 +125,7 @@ Load benchmark YAML with a safe parser into plain mappings, apply CLI overrides,
 
 Reject unknown benchmark/model keys and task-option keys, non-finite numbers, malformed mappings and wrong scalar types. `--pipeline-config KEY=VALUE` merges string values into each selected profile's `ov`; `--scheduler-config KEY=VALUE` converts recognized boolean/numeric scalar values. `KEY=` removes a property. Validate after overrides: removing a required property is an error, not permission to restore it silently. Warn when an override changes the pipeline mode.
 
-Normalize the `dflash` section to `{enabled, strategy, model, num_assistant_tokens, device}` inside the resolved profile, retaining the reference's internal `mtp` field name for the port. Disabled means `enabled: false` and null remaining fields; enabled `strategy` is `dflash`. `--mtp-tokens K` and its alias `--assistant-tokens K` change only already-enabled profiles, including DFlash, and must leave plain baselines plain. Benchmark profile settings are deliberately separate from the production `models.text_gen.speculative` policy: a requested accelerated case either runs that mechanism or reports failure, **never falls back to plain and keeps the accelerated label**.
+Normalize the `dflash` section to `{enabled, strategy, model, num_assistant_tokens}` (the draft runs on the target's device) inside the resolved profile, retaining the reference's internal `mtp` field name for the port. Disabled means `enabled: false` and null remaining fields; enabled `strategy` is `dflash`. `--assistant-tokens K` changes only already-enabled profiles, including DFlash, and must leave plain baselines plain. Benchmark profile settings are deliberately separate from the production `models.text_gen.speculative` policy: a requested accelerated case either runs that mechanism or reports failure, **never falls back to plain and keeps the accelerated label**.
 
 ### Example Configuration
 
@@ -168,7 +168,7 @@ profiles:
     ov: *qwen36_ov
     scheduler: *qwen36_scheduler
     dflash:
-      model: models/openvino/Qwen3.6-35B-A3B-DFlash/int4
+      model: models/openvino/Qwen3.6-35B-A3B-DFlash/int4-lmhead
       num_assistant_tokens: 7
 
 accuracy:
@@ -326,7 +326,7 @@ Exclude warmup from timing aggregates. Per homogeneous case, retain valid count,
 
 Rank only complete, budget-measured `ok` cases with valid timing, using median TPOT ascending then TTFT ascending; print a separate fastest-TTFT result. Match speculative/plain pairs on target artifact/precision, actual prompt hash/count, device/platform/runtime, task, generation ceiling/greedy settings, warmup/iteration/gap plan and **fully resolved** `ov`/scheduler mappings. The draft mechanism/count is the changed variable. A stateful or differently quantized row is not the DFlash baseline. If auto sizing produces different scheduler settings, mark the comparison confounded and require an explicitly matched-pool rerun for isolated speculative speedup.
 
-Report decode speedup as plain TPOT / speculative TPOT, total-call speedup separately as plain generation time / speculative generation time, and steady speedup from `steady_tpot` only when both have it. The speculative sweep includes k, AL, accepted fraction, pass ms and pass cost relative to a baseline step; AL/pass-cost is explanatory, not an independent measurement. Pick a best window per task, not by acceptance percentage alone. Warn on output forks or nondeterministic repetitions; a numerical speedup with differing outputs remains an observation, not a lossless-acceleration qualification. Never pool mixed accuracy-probe lengths into the repeated-prompt speedup leaderboard.
+Report decode speedup as plain TPOT / speculative TPOT, total-call speedup separately as plain / speculative generation time per output token (greedy outputs can fork to different lengths), and steady speedup from `steady_tpot` only when both have it. The speculative sweep includes k, AL, accepted fraction, pass ms and pass cost relative to a baseline step; AL/pass-cost is explanatory, not an independent measurement. Pick a best window per task, not by acceptance percentage alone. Warn on output forks or nondeterministic repetitions; a numerical speedup with differing outputs remains an observation, not a lossless-acceleration qualification. Never pool mixed accuracy-probe lengths into the repeated-prompt speedup leaderboard.
 
 ## 8. Memory Sampling and Cache Sizing
 

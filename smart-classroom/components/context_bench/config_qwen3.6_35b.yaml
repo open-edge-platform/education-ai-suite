@@ -55,7 +55,10 @@
 # with models.text_gen vlm_name: Qwen/Qwen3.6-35B-A3B, weight_format: int4 and speculative
 # mode: auto, method: dflash, and it prepares both:
 #   target  models/openvino/Qwen3.6-35B-A3B/int4            (OpenVINO/Qwen3.6-35B-A3B-int4-ov)
-#   draft   models/openvino/Qwen3.6-35B-A3B-DFlash/int4     (z-lab/Qwen3.6-35B-A3B-DFlash export)
+#   draft   models/openvino/Qwen3.6-35B-A3B-DFlash/int4-lmhead
+#           the z-lab/Qwen3.6-35B-A3B-DFlash export plus its own int4 lm_head, requantized from
+#           the target's int8 head (2-6% cheaper verification passes, acceptance unchanged);
+#           the stock export without the head sits beside it in .../int4
 # Without the draft every dflash_k* case ends `missing_ir` at preflight while paged_min runs.
 # DFlash also needs the target IR's `hidden_states_decoder_layers` rt_info, which the current
 # export carries. For an older export without it, serving derives
@@ -67,10 +70,15 @@
 # the seed token, so k=15 is the largest valid window; 17 linear-attention rows cover
 # max_num_seqs + k + 1 through k=15 and are kept on the baseline so schedulers match exactly.
 #
-# Reference measurements (pinned upstream, Arc B390 iGPU, 2026-10-08) are historical
-# observations, not qualification results for this port; they used a derived int4-head draft
-# that is not shipped here:
-#   code none: k=7 2.40x (AL 5.94); math 8K: k=7 2.07x (AL 5.74); summary_2s 8K: k=3 1.32x (AL 3.14)
+# Speedup ~= AL / pass cost, and the pass cost is set by the hardware: verifying k + 1 tokens
+# on this MoE pulls in more experts than one decode step. Acceptance lengths match across
+# machines; pass costs do not. Observations (not qualification results), both int4-head draft:
+#   Arc B390 iGPU (Panther Lake), OpenVINO 2026.5 dev, 2026-10-08:
+#     baseline 22.1 ms/token; k=7 pass 2.5x a decode step; code none k=7 2.32x, chat none 1.34x,
+#     summary_2s 8K k=3 1.31x
+#   Arc 140T iGPU (Arrow Lake H), OpenVINO 2026.4.1, 2026-10-18:
+#     baseline 35.2 ms/token; k=7 pass 3.2x a decode step; code none k=7 1.96x, chat none
+#     1.00x, summary_2s 8K k=3 0.80x (DFlash slows short and open-ended answers here)
 
 model:
   provider: openvino
@@ -167,7 +175,7 @@ profiles:
     ov: *ov_qwen36_paged
     scheduler: *scheduler_qwen36
     dflash:
-      model: &dflash_draft models/openvino/Qwen3.6-35B-A3B-DFlash/int4
+      model: &dflash_draft models/openvino/Qwen3.6-35B-A3B-DFlash/int4-lmhead
       num_assistant_tokens: 3
 
   - name: dflash_k5

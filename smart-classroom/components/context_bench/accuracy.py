@@ -381,12 +381,14 @@ def _resummarize_generation(case: dict) -> None:
     if summary is None:
         return
     rows = [p for p in case.get("_probes", []) if p.get("suite") == SUITE_GENERATION]
-    deltas = summary.get("deltas")
     rebuilt = summarize_suite(SUITE_GENERATION, rows)
+    # Planned counts come from the probe specs, which only the first summary saw. Deltas
+    # are recomputed by fill_deltas after every fidelity pass.
     rebuilt["planned"] = summary.get("planned", rebuilt["planned"])
     rebuilt["missing"] = max(0, rebuilt["planned"] - len(rows))
-    if deltas is not None:
-        rebuilt["deltas"] = deltas
+    for task, entry in rebuilt["per_task"].items():
+        entry["planned"] = (summary.get("per_task") or {}).get(task, {}).get(
+            "planned", entry["planned"])
     case["accuracy"][SUITE_GENERATION] = rebuilt
 
 

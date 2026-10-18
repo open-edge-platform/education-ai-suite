@@ -281,15 +281,18 @@ class TestRankingAndMatching(unittest.TestCase):
         self.assertTrue(report._confounded({"cache_pool": "auto", "cache_size_gb": 4},
                                            {"cache_pool": "auto", "cache_size_gb": 8}))
 
-    def test_speedups_are_reported_separately_and_from_tpot_and_generation_time(self):
-        cases = [_case("paged_min", 24.0, generation_time=10.0, steady_tpot=23.5, steady_pass_ms=23.5,
-                       throughput_task="math"),
+    def test_speedups_are_reported_separately_and_from_tpot_and_per_token_call_time(self):
+        # The speculative answer is shorter (forked), so its generation time alone would
+        # overstate the speedup; the total-call figure is per output token.
+        cases = [_case("paged_min", 24.0, generation_time=10.0, latency=25.0, steady_tpot=23.5,
+                       steady_pass_ms=23.5, first_decode_ms=140.0, throughput_task="math"),
                  _case("dflash_k3", 12.0, mtp=True, speculative_strategy="dflash", num_assistant_tokens=3,
-                       tokens_per_step=3.6, generation_time=8.0, steady_tpot=11.75, steady_pass_ms=52.0,
-                       throughput_task="math")]
+                       tokens_per_step=3.6, generation_time=5.0, latency=20.0, steady_tpot=11.75,
+                       steady_pass_ms=52.0, first_decode_ms=210.0, throughput_task="math")]
         line = report._mtp_speedup(cases)
         self.assertIn("decode speedup 2.00x", line)
-        self.assertIn("total-call speedup 1.25x", line)
+        self.assertIn("total-call speedup 1.25x (generation time per output token)", line)
+        self.assertIn("first decode pass (210 vs 140 ms)", line)
         self.assertIn("2.00x.", line)  # steady 23.5 / 11.75
         rows = report._window_sweep_rows(cases)
         self.assertAlmostEqual(rows[0]["pass_cost"], 52.0 / 23.5)
@@ -506,7 +509,7 @@ class TestSettingsValidation(unittest.TestCase):
         self.assertTrue(any("moved profile" in n for n in resolved["notices"]))
 
     def test_candidate_count_override_changes_only_speculative_profiles(self):
-        resolved = self._load(_raw(), "--mtp-tokens", "5")
+        resolved = self._load(_raw(), "--assistant-tokens", "5")
         plain, swept = resolved["profiles"]
         self.assertEqual(plain["mtp"], dict(settings.SPECULATIVE_OFF))
         self.assertEqual(swept["mtp"]["num_assistant_tokens"], 5)
@@ -524,8 +527,9 @@ class TestSettingsValidation(unittest.TestCase):
              "stateful pipeline"),
             (lambda p: (p.update(dflash={"model": "d", "num_assistant_tokens": 9}),
                         p["scheduler"].update(max_num_batched_tokens=3)), "max_num_batched_tokens=3"),
+            # The draft always runs on the target's device.
             (lambda p: p.update(dflash={"model": "d", "num_assistant_tokens": 3, "device": "CPU"}),
-             "share one CPU/GPU device"),
+             r"unknown key\(s\): device"),
             (lambda p: p.update(dflash={"num_assistant_tokens": 7}), "dflash.model"),
             (lambda p: (p.update(dflash={"model": "d", "num_assistant_tokens": 7}),
                         p["scheduler"].update(num_linear_attention_blocks=8)), "num_linear_attention_blocks=8"),
@@ -538,11 +542,11 @@ class TestSettingsValidation(unittest.TestCase):
 
     def test_speculative_normalization_and_disabled_sections(self):
         raw = _raw()
-        raw["profiles"][0]["dflash"] = {"model": "models/d", "num_assistant_tokens": 7, "device": "GPU"}
+        raw["profiles"][0]["dflash"] = {"model": "models/d", "num_assistant_tokens": 7}
         raw["profiles"][1]["dflash"] = {"enabled": False, "model": "models/d", "num_assistant_tokens": 3}
         dflash, disabled = self._load(raw)["profiles"]
         self.assertEqual(dflash["mtp"], {"enabled": True, "strategy": "dflash", "model": "models/d",
-                                         "num_assistant_tokens": 7, "device": "GPU"})
+                                         "num_assistant_tokens": 7})
         self.assertEqual(disabled["mtp"], dict(settings.SPECULATIVE_OFF))
 
     def test_profile_filter_and_empty_matrix(self):

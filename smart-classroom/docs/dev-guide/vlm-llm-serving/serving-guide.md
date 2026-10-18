@@ -90,6 +90,7 @@ deleted.
 | Target IR | `models/openvino/<model>/<weight_format>` |
 | DFlash drafter source (pinned commit) | `models/hf/<org>__<repo>/<commit>` |
 | DFlash drafter IR | `models/openvino/<drafter>/int4` |
+| DFlash drafter with its own lm_head (the one loaded) | `models/openvino/<drafter>/int4-lmhead`: the target's int8 lm_head requantized to int4 and attached to the drafter, so the runtime no longer reads the full int8 head on every draft pass (2-7% cheaper verification passes). Rebuilt when the target or drafter IR changes; if it cannot be built, the drafter above is loaded instead. Not applied to `draft_source: local`. |
 | DFlash target with hidden-state metadata | `models/openvino/<model>/<weight_format>-dflash` (only when the stock export lacks `hidden_states_decoder_layers`; weights are hard-linked, the ordinary target is untouched) |
 | Manifest | `models/openvino/.manifests/<model>-<weight_format>.json` |
 

@@ -15,20 +15,19 @@ reason attached; no other metric is affected and no run fails.
 
 WWB's evaluator return shape has varied between versions (a metrics DataFrame, a
 ``(mean, per_sample)`` pair, a plain dict) and is not a published API, so `_as_similarities`
-normalizes the shapes seen so far and refuses anything else. The installed package version
-is recorded with every result.
+normalizes the shapes seen so far and refuses anything else.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import sys
 from dataclasses import dataclass
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 _MODULE_CANDIDATES = ("whowhatbench.whowhat_metrics", "whowhatbench")
-_DISTRIBUTION = "whowhatbench"
 
 # One loaded embedding model per id: it is hundreds of megabytes and every case in the sweep
 # scores against the same one.
@@ -46,37 +45,35 @@ class SimilarityResult:
     """
 
     values: list | None
-    mean: float | None
     reason: str | None = None
-    version: str | None = None
 
     @property
     def available(self) -> bool:
         return self.values is not None
 
 
-def unavailable(reason: str, version: str | None = None) -> SimilarityResult:
-    return SimilarityResult(values=None, mean=None, reason=reason, version=version)
-
-
-def installed_version() -> str | None:
-    """The installed whowhatbench distribution version, read without importing it."""
-    try:
-        from importlib import metadata
-
-        return metadata.version(_DISTRIBUTION)
-    except Exception:  # noqa: BLE001 - absent or unreadable metadata is "unknown"
-        return None
+def unavailable(reason: str) -> SimilarityResult:
+    return SimilarityResult(values=None, reason=reason)
 
 
 @contextlib.contextmanager
 def _offline():
-    """Force Hugging Face offline mode while the evaluator loads its embedding model."""
+    """Force Hugging Face offline mode while the evaluator loads its embedding model.
+
+    huggingface_hub reads HF_HUB_OFFLINE once, at import, so once it is loaded (the
+    tokenizer path imports it early) the cached flag is switched as well.
+    """
     previous = {key: os.environ.get(key) for key in _OFFLINE_ENV}
     os.environ.update(_OFFLINE_ENV)
+    constants = sys.modules.get("huggingface_hub.constants")
+    cached = getattr(constants, "HF_HUB_OFFLINE", None)
+    if constants is not None:
+        constants.HF_HUB_OFFLINE = True
     try:
         yield
     finally:
+        if constants is not None:
+            constants.HF_HUB_OFFLINE = cached
         for key, value in previous.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -97,13 +94,12 @@ def similarity(references: list, predictions: list,
             f"similarity needs paired inputs; got {len(references)} references "
             f"and {len(predictions)} predictions"
         )
-    version = installed_version()
     if not references:
-        return unavailable("no probes to score", version)
+        return unavailable("no probes to score")
 
     evaluator = _evaluator(model_id)
     if isinstance(evaluator, str):
-        return unavailable(evaluator, version)
+        return unavailable(evaluator)
     try:
         import pandas as pd
 
@@ -111,17 +107,15 @@ def similarity(references: list, predictions: list,
             raw = evaluator.evaluate(pd.DataFrame({"answers": list(references)}),
                                      pd.DataFrame({"answers": list(predictions)}))
     except Exception as exc:  # noqa: BLE001 - an optional metric must not end the run
-        return unavailable(f"who_what_benchmark raised {type(exc).__name__}: {exc}", version)
+        return unavailable(f"who_what_benchmark raised {type(exc).__name__}: {exc}")
 
     values = _as_similarities(raw, len(references))
     if values is None:
         return unavailable(
             f"could not read a similarity out of {type(raw).__name__} -- "
-            "who_what_benchmark's return shape is not one this adapter recognizes",
-            version,
+            "who_what_benchmark's return shape is not one this adapter recognizes"
         )
-    return SimilarityResult(values=values, mean=round(sum(values) / len(values), 4),
-                            version=version)
+    return SimilarityResult(values=values)
 
 
 def _evaluator(model_id: str):

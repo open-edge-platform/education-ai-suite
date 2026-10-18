@@ -220,6 +220,16 @@ class _MemorySampler(threading.Thread):
         self._stop_event.set()
 
 
+def _post_load_growth(records: dict, key: str, loaded_mem: dict | None, loaded_key: str):
+    """Growth over the loaded reading, from the windows after load (warm-up, iterations,
+    probes); the case-wide peak would count the load spike itself."""
+    if not loaded_mem:
+        return None
+    peaks = [r.get(key) for group in ("iteration", "probe") for r in records[group].values()
+             if isinstance(r.get(key), (int, float))]
+    return _delta(max(peaks), loaded_mem.get(loaded_key)) if peaks else None
+
+
 def _delta(higher: float | None, lower: float | None) -> float | None:
     if higher is None or lower is None:
         return None
@@ -498,9 +508,9 @@ def _run_case_subprocess(spec: dict, timeout_sec: float, *, include_gpu: bool = 
         "peak_ram_pct": sampler.peak_ram_pct,
         "min_available_ram_gb": sampler.min_available_ram,
         "peak_gpu_gb": sampler.peak_gpu if include_gpu else None,
-        "post_load_peak_ram_gb": _delta(sampler.peak_ram, loaded_mem["ram_gb"]) if loaded_mem else None,
-        "post_load_peak_gpu_gb": (_delta(sampler.peak_gpu, loaded_mem["gpu_gb"])
-                                  if loaded_mem and include_gpu else None),
+        "post_load_peak_ram_gb": _post_load_growth(records, "peak_ram_gb", loaded_mem, "ram_gb"),
+        "post_load_peak_gpu_gb": (_post_load_growth(records, "peak_gpu_gb", loaded_mem, "gpu_gb")
+                                  if include_gpu else None),
         "memory_samples": sampler.samples,
         "memory_sample_interval_s": sample_interval,
         "gpu_budget_driver_gb": (state["device"] or {}).get("gpu_budget_gb"),

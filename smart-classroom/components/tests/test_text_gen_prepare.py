@@ -276,7 +276,7 @@ def test_tokenizer_exported_by_newer_runtime_is_refused(tmp_path):
     prep.check_tokenizer_runtime(tmp_path / "missing", "2026.3.0.0")
 
 
-# --- locking and CLI --------------------------------------------------------------
+# --- locking ------------------------------------------------------------------------
 def test_artifact_lock_excludes_and_recovers_stale(tmp_path):
     artifact = tmp_path / "a"
     with prep.ArtifactLock(artifact):
@@ -288,3 +288,80 @@ def test_artifact_lock_excludes_and_recovers_stale(tmp_path):
     with prep.ArtifactLock(artifact, timeout_s=0):
         pass
     assert not stale.exists()
+
+
+# --- drafter with its own lm_head -------------------------------------------------
+def _write_head_pair(tmp_path, asymmetric: bool):
+    """A tiny target whose lm_head uses optimum-intel's int8 chain, and a drafter
+    that ends at last_hidden_state; returns (target_dir, draft_dir, dequantized head)."""
+    np = pytest.importorskip("numpy")
+    ov = pytest.importorskip("openvino")
+    import openvino.opset13 as ops
+
+    vocab, hidden = 64, 256
+    rng = np.random.default_rng(0)
+    scale = (rng.random((vocab, 1)) * 0.02 + 0.01).astype(np.float16)
+    x = ops.parameter([1, 2, hidden], ov.Type.f32)
+    if asymmetric:
+        weight = rng.integers(0, 256, (vocab, hidden), dtype=np.uint8)
+        zero_point = rng.integers(100, 156, (vocab, 1), dtype=np.uint8)
+        decompressed = ops.subtract(ops.convert(ops.constant(weight), ov.Type.f16),
+                                    ops.convert(ops.constant(zero_point), ov.Type.f16))
+        dense = (weight.astype(np.float32) - zero_point) * scale.astype(np.float32)
+    else:
+        weight = rng.integers(-127, 128, (vocab, hidden), dtype=np.int8)
+        decompressed = ops.convert(ops.constant(weight), ov.Type.f16)
+        dense = weight.astype(np.float32) * scale.astype(np.float32)
+    head = ops.convert(ops.multiply(decompressed, ops.constant(scale)), ov.Type.f32)
+    matmul = ops.matmul(x, head, False, True)
+    matmul.set_friendly_name("__module.model.lm_head/ov_ext::linear/MatMul")
+    target = tmp_path / "target"
+    ov.save_model(ov.Model([ops.result(matmul)], [x]), str(target / "openvino_language_model.xml"),
+                  compress_to_fp16=False)
+
+    h = ops.parameter([1, -1, hidden], ov.Type.f32)
+    last = ops.result(ops.multiply(h, ops.constant(np.float32(2.0))))
+    last.output(0).get_tensor().set_names({"last_hidden_state"})
+    draft = tmp_path / "draft" / "int4"
+    ov.save_model(ov.Model([last], [h]), str(draft / "openvino_model.xml"))
+    (draft / "config.json").write_text("{}", encoding="utf-8")
+    return target, draft, dense
+
+
+@pytest.mark.parametrize("asymmetric", [False, True])
+def test_draft_head_reproduces_the_target_head_in_int4(tmp_path, asymmetric):
+    np = pytest.importorskip("numpy")
+    ov = pytest.importorskip("openvino")
+    target, draft, dense = _write_head_pair(tmp_path, asymmetric)
+    derived = prep.ensure_draft_head(target, draft)
+    assert derived == draft.with_name("int4-lmhead")
+    assert (derived / "config.json").is_file() and (derived / ".derived.json").is_file()
+    model = ov.Core().read_model(str(derived / "openvino_model.xml"))
+    assert [o.get_names() for o in model.outputs] == [{"logits"}]
+    probe = np.random.default_rng(1).standard_normal((1, 3, dense.shape[1])).astype(np.float32)
+    exact = {"INFERENCE_PRECISION_HINT": "f32", "DYNAMIC_QUANTIZATION_GROUP_SIZE": "0"}
+    got = ov.Core().compile_model(model, "CPU", exact)(probe)[0]
+    # Exactly the int4 codes and scales written (low nibble first)...
+    packed, scales = prep._requantize_int4(
+        *prep._target_lm_head(target / "openvino_language_model.xml"))
+    nibbles = np.stack([packed & 0x0F, packed >> 4], axis=-1).reshape(*packed.shape[:2], -1)
+    codes = np.where(nibbles > 7, nibbles.astype(np.int16) - 16, nibbles).astype(np.float32)
+    int4 = (codes * scales.astype(np.float32)).reshape(dense.shape)
+    expected = (2.0 * probe) @ int4.T
+    assert np.abs(got - expected).max() / np.abs(expected).max() < 1e-3
+    # ...which stay within int4 rounding of the int8 head.
+    assert np.abs(int4 - dense).max() <= np.abs(dense).max() / 7
+    # Reused while target and drafter are unchanged; a drafter with logits is kept as-is.
+    stamp = (derived / ".derived.json").stat().st_mtime_ns
+    assert prep.ensure_draft_head(target, draft) == derived
+    assert (derived / ".derived.json").stat().st_mtime_ns == stamp
+    assert prep.ensure_draft_head(target, derived) == derived
+
+
+def test_draft_head_failure_keeps_the_stock_drafter(tmp_path):
+    pytest.importorskip("openvino")
+    target, draft, _ = _write_head_pair(tmp_path, asymmetric=False)
+    xml = target / "openvino_language_model.xml"
+    xml.write_text(xml.read_text(encoding="utf-8").replace("lm_head", "other"), encoding="utf-8")
+    assert prep.ensure_draft_head(target, draft) == draft
+    assert not draft.with_name("int4-lmhead").exists()

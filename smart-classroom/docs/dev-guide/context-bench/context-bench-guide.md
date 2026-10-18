@@ -63,7 +63,7 @@ files. Missing files are reported per case as `missing_ir` with a hint.
 
 | Config | Model / precision | Profiles | Default run |
 | --- | --- | --- | --- |
-| `config_qwen3.6_35b.yaml` (default) | Qwen3.6-35B-A3B INT4, `models/openvino/Qwen3.6-35B-A3B/int4` | `paged_min`, `dflash_k3/5/7/15` (draft `models/openvino/Qwen3.6-35B-A3B-DFlash/int4`) | 35 cases: contexts 0 and 8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30 s gap. `--accuracy`: 5 cases |
+| `config_qwen3.6_35b.yaml` (default) | Qwen3.6-35B-A3B INT4, `models/openvino/Qwen3.6-35B-A3B/int4` | `paged_min`, `dflash_k3/5/7/15` (draft `models/openvino/Qwen3.6-35B-A3B-DFlash/int4-lmhead`) | 35 cases: contexts 0 and 8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30 s gap. `--accuracy`: 5 cases |
 | `config_qwen3.8_27b.yaml` | Qwen3.8-27B INT8 (`--weight-format int4` for INT4), `models/openvino/Qwen3.8-27B/<weight_format>` | `paged_min` (plain only) | 1 case: 8000; `summary_2s`; 64 tokens; no gap. `--accuracy`: 1 case |
 | `config_qwen3.5_9b.yaml` | Qwen3.5-9B INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3.5-9B/<weight_format>` | `paged_min`, `stateful` (plain only) | 4 cases: 8000; `summary_2s`, `classroom_summary`; 1024 tokens; no gap. `--accuracy`: 2 cases |
 
@@ -149,8 +149,11 @@ Qwen3.6-35B-A3B INT4 with the z-lab drafter. The Qwen3.8 and Qwen3.5 configs are
 
 Start the application once with `models.text_gen.vlm_name: Qwen/Qwen3.6-35B-A3B`,
 `weight_format: int4` and `speculative: {mode: auto, method: dflash}`; the serving
-preparation then exports the drafter to `models/openvino/Qwen3.6-35B-A3B-DFlash/int4`, the
-`dflash.model` of the config. DFlash also requires the target IR to carry the model-level
+preparation then exports the drafter to `models/openvino/Qwen3.6-35B-A3B-DFlash/int4` and
+derives `.../int4-lmhead`, the `dflash.model` of the config: the same drafter with its own int4
+lm_head, requantized from the target's int8 head, so the runtime no longer reads the full int8
+head on every draft pass (2-6% cheaper verification passes in the A/B, acceptance unchanged).
+To measure the stock drafter, point `dflash.model` at `.../int4`. DFlash also requires the target IR to carry the model-level
 rt_info `hidden_states_decoder_layers` (the current `OpenVINO/Qwen3.6-35B-A3B-int4-ov` export
 does). For an older export without it, serving derives
 `models/openvino/Qwen3.6-35B-A3B/int4-dflash` (same weights, annotated XML); the benchmark
@@ -181,7 +184,7 @@ YAML > tool default; resolved values are never written back.
 
 Overrides: `--pipeline-config KEY=VALUE` (strings into `ov`), `--scheduler-config KEY=VALUE`
 (booleans/numbers converted), `KEY=` removes a key; validation runs afterwards and a pipeline
-change is announced (moving a stateful profile to paged needs all three required scheduler keys). `--assistant-tokens K` (alias `--mtp-tokens`) changes only profiles that already
+change is announced (moving a stateful profile to paged needs all three required scheduler keys). `--assistant-tokens K` changes only profiles that already
 speculate. A requested speculative case either runs that mechanism or fails; it never falls
 back to plain generation.
 

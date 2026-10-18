@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 
 from components.context_bench import accuracy, metrics, settings as plan_settings, tasks
+from components.context_bench.settings import POOL_AUTO, context_label
 
 _USABLE_STATUSES = ("ok", "memory_limit", "gpu_memory_limit", "measurement_error", "partial")
 
@@ -65,10 +66,6 @@ def _one_line(text, limit: int) -> str:
     flat = " ".join(str(text or "").split())
     flat = flat.encode("ascii", "backslashreplace").decode("ascii")
     return flat if len(flat) <= limit else flat[: limit - 3] + "..."
-
-
-def context_label(context) -> str:
-    return f"{context:,} tokens" if context else "no transcript (task prompt only)"
 
 
 def _heading(text: str) -> list:
@@ -187,9 +184,6 @@ def _confounded(candidate: dict, baseline: dict) -> bool:
     return auto and candidate.get("cache_size_gb") != baseline.get("cache_size_gb")
 
 
-POOL_AUTO = "auto"
-
-
 def _ratio(numerator, denominator) -> float | None:
     numerator = metrics.positive_number(numerator)
     denominator = metrics.positive_number(denominator)
@@ -216,7 +210,7 @@ def _mtp_speedup(cases: list) -> str | None:
         return None
     spec, plain = pair
     decode = _ratio(plain["other_tokens_avg_latency"], spec["other_tokens_avg_latency"])
-    total = _ratio(plain.get("generation_time"), spec.get("generation_time"))
+    total = _ratio(plain.get("latency"), spec.get("latency"))
     steady = _ratio(plain.get("steady_tpot"), spec.get("steady_tpot"))
     line = (
         f"{metrics.strategy_label(spec)} decode speedup {decode:.2f}x -- `{spec['profile']}` "
@@ -224,7 +218,7 @@ def _mtp_speedup(cases: list) -> str | None:
         f"ms/token against `{plain['profile']}` at {_fmt(plain['other_tokens_avg_latency'])} ms/token"
     )
     if total:
-        line += f"; total-call speedup {total:.2f}x (generation time)"
+        line += f"; total-call speedup {total:.2f}x (generation time per output token)"
     if metrics.finite_number(spec.get("tokens_per_step")) is not None:
         line += f", acceptance length {spec['tokens_per_step']:.2f} tokens per verification pass"
     acceptance = metrics.finite_number(spec.get("mtp_acceptance_rate"))
@@ -237,18 +231,22 @@ def _mtp_speedup(cases: list) -> str | None:
                  f"{cost[0] / cost[1]:.2f}x a baseline decode step")
     line += f". TTFT {_ttft_seconds(spec)}s vs {_ttft_seconds(plain)}s."
     if steady:
-        line += (f" Steady state excluding the first decode pass: {_fmt(spec['steady_tpot'])} vs "
-                 f"{_fmt(plain['steady_tpot'])} ms/token, {steady:.2f}x.")
+        firsts = (spec.get("first_decode_ms"), plain.get("first_decode_ms"))
+        first = (f" ({_fmt(firsts[0], '{:.0f}')} vs {_fmt(firsts[1], '{:.0f}')} ms)"
+                 if all(metrics.positive_number(v) for v in firsts) else "")
+        line += (f" Steady state excluding the first decode pass{first}: "
+                 f"{_fmt(spec['steady_tpot'])} vs {_fmt(plain['steady_tpot'])} ms/token, "
+                 f"{steady:.2f}x.")
     if _confounded(spec, plain):
         line += (" CONFOUNDED: auto sizing produced different cache pools; rerun with an "
                  "explicit matched cache_size for an isolated speedup.")
     return line
 
 
-def _fork_detail(case: dict, baseline: dict, width: int = 40) -> str:
+def _fork_detail(case: dict, baseline: dict, width: int = 40) -> str | None:
     ours, theirs = case.get("output_text"), baseline.get("output_text")
     if not isinstance(ours, str) or not isinstance(theirs, str):
-        return f"  `{case['profile']}`: output text not recorded, fork position unknown"
+        return None
     at = next((i for i, (a, b) in enumerate(zip(ours, theirs)) if a != b),
               min(len(ours), len(theirs)))
     return (
@@ -274,6 +272,7 @@ def _mtp_output_check(cases: list) -> str | None:
         return None
     mismatches = [(c, b) for c, b in pairs if c["output_sha256"] != b["output_sha256"]]
     if mismatches:
+        details = [d for c, b in mismatches if (d := _fork_detail(c, b))]
         return (
             "WARNING: greedy speculative output differs from the baseline for "
             + ", ".join(f"`{c['profile']}`" for c, _ in mismatches)
@@ -281,7 +280,8 @@ def _mtp_output_check(cases: list) -> str | None:
             "scores k + 1 tokens on a different kernel path, so a near-tie can flip. A numerical "
             "speedup with differing outputs is an observation, not a lossless-acceleration "
             "qualification."
-            + "".join("\n" + _fork_detail(c, b) for c, b in mismatches)
+            + ("".join("\n" + d for d in details) if details else
+               " Set benchmark.record_text: true to show where each output forks.")
         )
     return "Greedy output check: all matched speculative profiles match their baseline exactly."
 
@@ -313,7 +313,7 @@ def _window_sweep_rows(at_context: list) -> list:
                 "pass_cost": _ratio(*cost) if cost else None,
                 "decode_speedup": _ratio(baseline.get("other_tokens_avg_latency"),
                                          case.get("other_tokens_avg_latency")),
-                "total_speedup": _ratio(baseline.get("generation_time"), case.get("generation_time")),
+                "total_speedup": _ratio(baseline.get("latency"), case.get("latency")),
                 "steady_speedup": _ratio(baseline.get("steady_tpot"), case.get("steady_tpot")),
                 "confounded": _confounded(case, baseline),
             })
@@ -327,7 +327,7 @@ def _window_sweep_section(at_context: list, context: int, reference: dict | None
         return []
     lines = _heading(f"{context_label(context)} -- SPECULATIVE WINDOW SWEEP (acceptance length vs pass cost)")
     lines += [
-        "| Task | Profile | k | AL tok/pass | AL source | Accepted | Pass ms | Pass cost (= break-even AL) "
+        "| Task | Profile | k | AL tok/pass | Accepted source | Accepted | Pass ms | Pass cost (= break-even AL) "
         "| Decode speedup | Total-call speedup | Steady speedup |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
@@ -388,8 +388,8 @@ def _reference_lines(rows: list, reference: dict | None) -> list:
         f"Published reference at k={k} (display only; never ranked): {reference['source']}",
         "",
         "| Task | Reference dataset | AL ref | AL measured | Speedup ref | Speedup measured "
-        "| Steady speedup measured |",
-        "|---|---|---|---|---|---|---|",
+        "| Steady speedup measured | Decode tok/s ref | Decode tok/s measured |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for task in names:
         ref, row = reference["tasks"][task], at_k.get(task)
@@ -398,7 +398,8 @@ def _reference_lines(rows: list, reference: dict | None) -> list:
             f"| {task} | {ref['dataset']} | {ref['acceptance_length']:.2f} "
             f"| {_fmt(case.get('tokens_per_step'), '{:.2f}')} | {ref['speedup']:.2f}x "
             f"| {_fmt(row['decode_speedup'] if row else None, '{:.2f}x')} "
-            f"| {_fmt(row['steady_speedup'] if row else None, '{:.2f}x')} |"
+            f"| {_fmt(row['steady_speedup'] if row else None, '{:.2f}x')} "
+            f"| {_fmt(ref.get('throughput'))} | {_fmt(case.get('decode_throughput'))} |"
         )
     missing = [task for task in names if task not in at_k]
     if missing:
@@ -746,8 +747,8 @@ def _header(snapshot: dict) -> list:
         f"Time (UTC): started {snapshot.get('started_utc')}, ended {snapshot.get('ended_utc') or '--'}",
         f"Coverage  : {counts.get('planned', 0)} planned, {counts.get('processed', 0)} processed, "
         f"{counts.get('ok', 0)} ok, {counts.get('failed', 0)} not ok, "
-        f"{counts.get('not_run', 0)} not run, {counts.get('skipped_matrix_points', 0)} matrix "
-        "point(s) skipped",
+        f"{counts.get('not_run', 0)} not run, {counts.get('skipped_matrix_points', 0)} "
+        "case(s) skipped by the matrix",
         f"Tool      : commit {(snapshot.get('tool') or {}).get('commit') or 'unknown'} | config "
         f"{(snapshot.get('source_config') or {}).get('path')} sha256 "
         f"{((snapshot.get('source_config') or {}).get('sha256') or 'unknown')[:16]}",

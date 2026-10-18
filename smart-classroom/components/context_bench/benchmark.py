@@ -18,7 +18,7 @@ Each case runs serially in a fresh spawned child (`trial_runner`); the parent sa
 (`supervisor`), checkpoints versioned evidence (`results.json`) atomically before trials,
 after every record and case and in ``finally``, and renders `report.txt` from the same
 snapshot (`report`). Configuration, schema and planning live in `settings`; IR introspection
-and cache sizing in `sizing`; their public names are re-exported here.
+and cache sizing in `sizing`.
 
     python -m components.context_bench.benchmark --list-profiles
     .\\components\\context_bench\\run_benchmark.ps1 --config components/context_bench/config_qwen3.8_27b.yaml
@@ -44,73 +44,43 @@ import traceback
 from pathlib import Path
 
 from components.context_bench import accuracy, evidence, metrics, report, scoring, trial_runner
-from components.context_bench.settings import (  # noqa: F401 - re-exported entry points
-    APP_CONFIG_PATH,
-    DEFAULT_CONFIG_PATH,
+from components.context_bench.settings import (
     MODE_ACCURACY,
     MODE_THROUGHPUT,
     PIPELINE_PAGED,
-    PIPELINE_STATEFUL,
     POOL_AUTO,
     POOL_FIXED,
-    POOL_NONE,
-    POOL_RUNTIME,
     SC_ROOT,
-    THROUGHPUT_TASKS,
     TOOL_DIR,
     ConfigError,
-    FrozenDict,
     _parse_args,
-    _parse_overrides,
-    _resolve_accuracy,
-    _resolve_profiles,
-    _resolve_reference,
-    _resolve_settings,
-    context_label,
     format_config,
-    format_speculative,
     is_gpu,
-    load_yaml,
-    model_ir_dir,
-    pipeline_mode,
     plan_run,
     print_plan,
     resolve_path,
-    run_tasks,
     skipped_matrix_points,
-    task_sha256,
     thaw,
-    throughput_task_prompt,
 )
-from components.context_bench.settings import _load_settings  # noqa: F401
-from components.context_bench.sizing import (  # noqa: F401
-    GENAI_DEFAULT_MAX_NUM_SEQS,
-    QUALIFIED_POOL_FACTORS,
-    _KV_PRECISION_BYTES,
+from components.context_bench.settings import _load_settings
+from components.context_bench.sizing import (
     auto_cache_size_gb,
     check_draft_layout,
     check_ir_layout,
     estimate_cache,
-    expected_kv_gb,
     fixed_state_cache_bytes,
     ir_weight_precision,
-    kv_cache_dtype_bytes,
-    kv_quantization_param_bytes,
     load_model_config,
     precision_matches_label,
     state_rows,
     text_config,
-    theoretical_kv_bytes_per_token,
     validate_fixed_cache_size,
     weight_disk_gb,
 )
-from components.context_bench.supervisor import (  # noqa: F401
+from components.context_bench.supervisor import (
     CaseInterrupted,
     ChildCleanupError,
-    _MemorySampler,
-    _read_mem,
     _run_case_subprocess,
-    _TimeWeightedMean,
     _wait_for_memory_settle,
 )
 
@@ -122,7 +92,7 @@ EXIT_INTERRUPTED = 130
 _BACKEND_VENV_PYTHON = SC_ROOT.parent / "smartclassroom" / "Scripts" / "python.exe"
 _LAUNCHER_SCRIPT = TOOL_DIR / "run_benchmark.ps1"
 _SETUP_SCRIPT = SC_ROOT / "setup-smart-classroom.ps1"
-_REQUIRED_MODULES = ("openvino", "openvino_genai", "transformers", "psutil")
+_REQUIRED_MODULES = ("openvino", "openvino_genai", "transformers", "jinja2", "psutil")
 _RUNTIME_PACKAGES = ("openvino", "openvino-genai", "openvino-tokenizers", "transformers",
                      "tokenizers", "psutil", "PyYAML", "numpy", "whowhatbench")
 
@@ -192,14 +162,13 @@ def _environment() -> dict:
         "memory_gb": memory_gb,
         "packages": evidence.package_versions(_RUNTIME_PACKAGES),
         "device_names": [],
-        "driver": None,
     }
 
 
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
-def _preparation_hint(model: str, model_dir: Path, settings, missing: list, redact) -> str:
+def _preparation_hint(model: str, model_dir: Path, missing: list, redact) -> str:
     return (
         f"{model}: IR at {redact(model_dir)} is incomplete (missing {', '.join(missing)}). "
         "Prepare it with the serving preparation workflow (start-smart-classroom.ps1, which "
@@ -213,7 +182,7 @@ def _model_static(settings, model: str, model_dir: Path, redactor) -> dict:
     missing = check_ir_layout(model_dir)
     static = {"model_dir": model_dir, "missing": missing}
     if missing:
-        static["hint"] = _preparation_hint(model, model_dir, settings, missing, redactor.redact)
+        static["hint"] = _preparation_hint(model, model_dir, missing, redactor.redact)
         static["identity"] = {"location": redactor.redact(model_dir), "artifact_id": None}
         return static
     precision = ir_weight_precision(model_dir)
@@ -289,8 +258,8 @@ def _preflight_case(planned: dict, settings, static: dict) -> dict:
             ))
         target_xml = trial_runner.language_model_ir(str(model_dir))
         has_metadata = trial_runner.has_model_rt_info(target_xml, trial_runner.DFLASH_TARGET_RT_INFO_KEY)
-        if not has_metadata:
-            hint = trial_runner.dflash_metadata_hint(str(model_dir), str(draft_dir))
+        if has_metadata is False:  # None: unreadable XML, left to the runtime to judge
+            hint = trial_runner.DFLASH_METADATA_HINT
             derived = model_dir.with_name(model_dir.name + "-dflash")
             if derived.is_dir():
                 hint += (f" A derived target already exists at "
@@ -327,14 +296,13 @@ def _preflight_case(planned: dict, settings, static: dict) -> dict:
                 "cache_size: auto is not supported on CPU; set an explicit cache_size or omit "
                 "it for a runtime-managed pool"
             ))
-        factor = QUALIFIED_POOL_FACTORS.get(mtp.get("strategy") if mtp.get("enabled") else None)
-        if factor is None:
+        if mtp.get("enabled"):
             raise _Rejected("cache_unknown", (
-                f"cache_size: auto has no qualified pool factor for {mtp.get('strategy')}; set an "
-                "explicit cache_size or omit it for a runtime-managed pool"
+                "cache_size: auto has no qualified pool factor for dflash; set "
+                "an explicit cache_size or omit it for a runtime-managed pool"
             ))
         sized = auto_cache_size_gb(estimate["gib"], static["weight_disk_gb"] + prepared["draft_weight_gb"],
-                                   settings.get("gpu_memory_budget_gb"), factor)
+                                   settings.get("gpu_memory_budget_gb"))
         prepared["ceiling_gb"] = sized["ceiling"]
         if sized["status"] == "infeasible":
             raise _Rejected("cache_infeasible", sized["reason"])
@@ -376,7 +344,7 @@ def _new_case(planned: dict, settings, static: dict, redactor) -> dict:
         "mtp": bool(mtp["enabled"]),
         "speculative_strategy": mtp["strategy"],
         "num_assistant_tokens": mtp["num_assistant_tokens"],
-        "mtp_device": (mtp["device"] or settings["device"]) if mtp["enabled"] else None,
+        "mtp_device": settings["device"] if mtp["enabled"] else None,
         "draft_location": redactor.redact(resolve_path(mtp["model"])) if mtp.get("model") else None,
         "effective_ov": dict(profile["ov"]),
         "effective_scheduler": dict(profile["scheduler"]),

@@ -67,7 +67,7 @@ _BENCHMARK_KEYS = (
     "cache_dir", "output_dir", "record_text",
 )
 _PROFILE_KEYS = ("name", "ov", "scheduler", "dflash")
-_DFLASH_KEYS = ("enabled", "model", "num_assistant_tokens", "device")
+_DFLASH_KEYS = ("enabled", "model", "num_assistant_tokens")
 _ACCURACY_KEYS = (
     "suites", "baseline_profile", "seed", "embedding_model",
     accuracy.SUITE_RETRIEVAL, accuracy.SUITE_GENERATION,
@@ -96,7 +96,6 @@ SPECULATIVE_OFF = {
     "strategy": None,
     "model": None,
     "num_assistant_tokens": None,
-    "device": None,
 }
 
 _SUITE_DEFAULTS = {
@@ -309,7 +308,7 @@ def _parse_args(argv=None):
     parser.add_argument("--scheduler-config", nargs="+", metavar="KEY=VALUE",
                         help="merge into every selected profile's `scheduler` (booleans and "
                         "numbers converted); KEY= removes")
-    parser.add_argument("--mtp-tokens", "--assistant-tokens", dest="mtp_tokens", type=int,
+    parser.add_argument("--assistant-tokens", dest="mtp_tokens", type=int,
                         metavar="K", help="num_assistant_tokens for every profile that already "
                         "enables DFlash; plain baselines stay plain")
     parser.add_argument("--accuracy", action="store_true",
@@ -426,8 +425,7 @@ def _validate_scheduler(name: str, scheduler: dict) -> dict:
     return scheduler
 
 
-def _resolve_speculative(name: str, entry: dict, scheduler: dict, mtp_tokens,
-                         device: str | None) -> dict:
+def _resolve_speculative(name: str, entry: dict, scheduler: dict, mtp_tokens) -> dict:
     section = entry.get("dflash")
     if section is None:
         return dict(SPECULATIVE_OFF)
@@ -444,15 +442,6 @@ def _resolve_speculative(name: str, entry: dict, scheduler: dict, mtp_tokens,
             f"profile {name!r} dflash.num_assistant_tokens must be an integer >= 1 (got "
             f"{tokens!r}); it is how many candidates the draft offers per verification pass"
         )
-    draft_device = section.get("device")
-    if draft_device is not None:
-        draft_device = _device(draft_device, f"profile {name!r} dflash.device")
-        if device is not None and draft_device != device.upper():
-            raise ConfigError(
-                f"profile {name!r} runs its dflash draft on {draft_device} but the target on "
-                f"{device}; target and draft must share one CPU/GPU device (use --profiles to "
-                "leave this profile out)"
-            )
     if not scheduler:
         raise ConfigError(
             f"profile {name!r} enables dflash on the stateful pipeline; speculative decoding "
@@ -475,15 +464,15 @@ def _resolve_speculative(name: str, entry: dict, scheduler: dict, mtp_tokens,
             f"num_assistant_tokens={tokens}"
         )
     return {"enabled": True, "strategy": "dflash", "model": model,
-            "num_assistant_tokens": tokens, "device": draft_device}
+            "num_assistant_tokens": tokens}
 
 
 def _resolve_profiles(raw_profiles, names_filter=None, ov_overrides=None, sched_overrides=None,
-                      mtp_tokens=None, device: str | None = None, notices: list | None = None) -> list:
+                      mtp_tokens=None, notices: list | None = None) -> list:
     """Validate every profile's structure, select by name, then resolve the selection.
 
     Overrides apply to selected profiles and validation runs after them: removing a
-    required property is an error. `--mtp-tokens` only changes profiles that already
+    required property is an error. `--assistant-tokens` only changes profiles that already
     speculate. Returns plain dicts with ``{name, ov, scheduler, mtp, pipeline_mode,
     cache_pool}``; the DFlash section keeps the reference's internal name `mtp`.
     """
@@ -491,7 +480,7 @@ def _resolve_profiles(raw_profiles, names_filter=None, ov_overrides=None, sched_
     if not isinstance(raw_profiles, list) or not raw_profiles:
         raise ConfigError("`profiles` must be a non-empty list of profile mappings")
     if mtp_tokens is not None:
-        _integer(mtp_tokens, "--mtp-tokens", 1)
+        _integer(mtp_tokens, "--assistant-tokens", 1)
 
     entries, names = [], []
     for index, entry in enumerate(raw_profiles):
@@ -543,7 +532,7 @@ def _resolve_profiles(raw_profiles, names_filter=None, ov_overrides=None, sched_
             )
         ov = _validate_ov(name, ov)
         scheduler = _validate_scheduler(name, scheduler)
-        speculative = _resolve_speculative(name, entry, scheduler, mtp_tokens, device)
+        speculative = _resolve_speculative(name, entry, scheduler, mtp_tokens)
         resolved.append({
             "name": name,
             "ov": ov,
@@ -566,7 +555,7 @@ def _profile_signature(profile: dict) -> str:
 def _reject_identical_profiles(profiles: list) -> None:
     """Two selected profiles that resolve to one configuration would run every case twice.
 
-    Typically `--mtp-tokens K` over a k-sweep: every speculative profile becomes k=K.
+    Typically `--assistant-tokens K` over a k-sweep: every speculative profile becomes k=K.
     """
     seen: dict = {}
     for profile in profiles:
@@ -854,7 +843,7 @@ def _resolve_settings(raw: dict, args, config_path: str | None = None,
     profiles = _resolve_profiles(
         raw["profiles"], args.profiles,
         _parse_overrides(args.pipeline_config), _parse_overrides(args.scheduler_config),
-        args.mtp_tokens, device, notices,
+        args.mtp_tokens, notices,
     )
     accuracy_cfg = _resolve_accuracy(raw.get("accuracy"), args, profiles, notices)
     reference = _resolve_reference(raw.get("speculative_reference"))
@@ -973,9 +962,6 @@ _DOMAIN_TASKS = {
         ),
     },
 }
-
-_SUMMARY_MODES = ("dialog", "teacher", "hybrid")
-
 
 def _classroom_summary_request(model_name: str, app_config_path=None) -> dict:
     """The application's current summarizer request applied to synthetic content.
@@ -1164,8 +1150,7 @@ def format_config(config) -> str:
 def format_speculative(mtp, device: str | None = None, redact=None) -> str:
     if not (mtp or {}).get("enabled"):
         return "off"
-    draft_device = mtp.get("device") or device
-    where = f" on {draft_device}" if draft_device else ""
+    where = f" on {device}" if device else ""
     model = mtp.get("model")
     if model:
         location = redact(resolve_path(model)) if redact else model

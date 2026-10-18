@@ -492,8 +492,8 @@ def format_iteration(record: dict) -> str:
 
 
 def strategy_label(record: dict) -> str:
-    """Display name of a record's speculative-decoding strategy."""
-    return "dFlash" if record.get("speculative_strategy") == "dflash" else "Speculative"
+    """Display name of a record's speculative-decoding strategy (DFlash is the only one)."""
+    return "dFlash"
 
 
 def format_mtp(record: dict) -> str:
