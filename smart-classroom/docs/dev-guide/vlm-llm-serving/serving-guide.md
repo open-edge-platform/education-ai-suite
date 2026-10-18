@@ -9,7 +9,7 @@ How to select a text-generation model, enable speculative decoding, prepare
 models ahead of time, call tools through port 8000 and read processing-time
 statistics. The requirements behind these features are in
 [vlm-llm-serving-design.md](vlm-llm-serving-design.md); the offline benchmark is
-described in [context-bench-design.md](context-bench-design.md).
+described in [context-bench-design.md](../context-bench/context-bench-design.md).
 
 > **Qualification status.** The model profiles below are implemented, but
 > hardware qualification (the ARL/PTL matrix in the design) and tool-call
@@ -173,26 +173,9 @@ Local paths are never reported; a local drafter appears as `local IR (<dir name>
 
 ## Processing-Time Statistics
 
-`GET /processing-stats` (optional `session_id` header, `?raw=true` for the
-bounded raw records) returns:
-
-* `stages` — per workflow stage (from the existing stage tracker): successful
-  `duration_sec` count/total/mean/min/max/p50/p95, plus failed and cancelled
-  counts and elapsed time.
-* `model_calls_by_stage` / `model_calls_by_model` — per text_gen, ASR and OCR
-  invocation, grouped by capability, model, precision, device, effective
-  decoding method (and stage): `latency_ms` (after admission), `queue_wait_ms`,
-  `first_output_ms`, runtime `ttft_ms`/`tpot_ms`/`decode_tps`, token counts.
-
-Calls made inside a classroom stage (Summary, Mindmap, topic segmentation,
-report, ...) carry that stage. Calls arriving over `/v1/chat/completions` take
-their stage from the optional `X-SC-Stage` header (lowercase identifier; the
-content-search Q&A, video captioning and grading clients send `qa`,
-`video_captioning` and `grading`) and default to `chat_api`.
-
-Each model call is also appended to `<session>/logs/model_calls.jsonl`. Records
-hold timing metadata only — no prompts, transcripts, images or tool arguments.
-Unavailable values are `null`, never zero; percentiles use nearest rank, and
-groups with fewer than 20 samples carry `small_sample: true`. Workflow stages
-overlap, so do not sum stage durations to estimate end-to-end latency. The
-existing `performance.*` fields written by ASR, Summary and Report are unchanged.
+`GET /processing-stats` reports workflow-stage and per-model-call timing:
+queue wait, latency, TTFT, decode throughput and DFlash acceptance, attributed
+to the stage that made each call. Each session's records are also written to
+its `logs/` folder, and `Scripts/processing_stats_report.py` turns them into a
+Markdown report with a timeline. See
+[processing-time-statistics.md](processing-time-statistics.md).

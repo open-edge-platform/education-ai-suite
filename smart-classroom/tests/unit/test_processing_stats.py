@@ -36,7 +36,7 @@ def test_nearest_rank_p95_on_twenty_samples():
 
 def test_model_call_separates_queue_wait_latency_and_cancellation(stats):
     times = iter([10.0, 10.5, 10.8, 11.0, 12.0])
-    with patch.object(ps.time, "monotonic", lambda: next(times)):
+    with patch.object(ps.time, "perf_counter", lambda: next(times)):
         call = ps.ModelCall("text_gen", model="m", stream=True, recorder=stats)  # 10.0
         call.started()                                                          # 10.5
         call.first_output()                                                     # 10.8

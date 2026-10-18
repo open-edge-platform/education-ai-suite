@@ -5,7 +5,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Query
 
 from utils.processing_stats import STATS
 
@@ -14,7 +14,8 @@ router = APIRouter()
 
 @router.get("/processing-stats")
 def get_processing_stats(
-    session_id: Optional[str] = Header(None, alias="session_id", max_length=128),
+    session_id: Optional[str] = Query(None, max_length=128,
+                                      description="Only this session's records"),
     raw: bool = Query(False, description="Include the bounded raw records"),
 ):
     """Per-stage and per-model distributions (count, total, mean, min/max, p50, p95).

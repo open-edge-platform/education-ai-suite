@@ -109,7 +109,7 @@ class ModelCall:
         session_id, stage = current_stage()
         self._recorder = recorder or STATS
         self._lock = threading.Lock()
-        self._submitted = time.monotonic()
+        self._submitted = time.perf_counter()
         self._started: Optional[float] = None
         self._first: Optional[float] = None
         self._cancelled: Optional[float] = None
@@ -132,17 +132,17 @@ class ModelCall:
     def started(self) -> None:
         with self._lock:
             if self._started is None:
-                self._started = time.monotonic()
+                self._started = time.perf_counter()
 
     def first_output(self) -> None:
         with self._lock:
             if self._first is None and self._started is not None:
-                self._first = time.monotonic()
+                self._first = time.perf_counter()
 
     def client_cancelled(self) -> None:
         with self._lock:
             if self._cancelled is None:
-                self._cancelled = time.monotonic()
+                self._cancelled = time.perf_counter()
 
     def update_runtime(self, values: dict) -> None:
         """Merge runtime-reported metrics; ``None`` values are dropped, not zeroed."""
@@ -154,7 +154,7 @@ class ModelCall:
             if self._finished:
                 return
             self._finished = True
-            end = time.monotonic()
+            end = time.perf_counter()
             record = dict(self.record)
             if self._cancelled is not None and status == "ok":
                 status = "cancelled"
@@ -280,7 +280,8 @@ _CALL_OK = {"ok"}
 _CALL_CANCELLED = {"cancelled"}
 
 _CALL_METRICS = ("latency_ms", "queue_wait_ms", "first_output_ms", "ttft_ms",
-                 "tpot_ms", "decode_tps", "input_tokens", "output_tokens")
+                 "tpot_ms", "decode_tps", "input_tokens", "output_tokens",
+                 "draft_tokens", "accepted_tokens")
 
 
 def distribution(values: Iterable) -> dict:
