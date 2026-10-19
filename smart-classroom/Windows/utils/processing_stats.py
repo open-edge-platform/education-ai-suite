@@ -348,9 +348,27 @@ def call_groups(records: list, keys: tuple) -> list:
         entry = dict(zip(keys, group_key))
         for metric in _CALL_METRICS:
             entry[metric] = distribution(r.get(metric) for r in ok)
+        entry["acceptance"] = _acceptance(ok)
         entry.update(_outcomes(rows, _CALL_OK, _CALL_CANCELLED, "latency_ms"))
         out.append(entry)
     return out
+
+
+def _acceptance(calls: list) -> dict:
+    """Accepted/drafted draft tokens over the calls that report both counters.
+
+    The runtime reports the counters independently, so summing each over all
+    calls would count a missing accepted count as zero.
+    """
+    def count(value):
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+    pairs = [(count(r.get("accepted_tokens")), count(r.get("draft_tokens"))) for r in calls]
+    pairs = [(a, d) for a, d in pairs if a is not None and d]
+    accepted, drafted = sum(a for a, _ in pairs), sum(d for _, d in pairs)
+    return {"calls": len(pairs), "accepted": accepted if pairs else None,
+            "drafted": drafted if pairs else None,
+            "rate": round(accepted / drafted, 4) if pairs else None}
 
 
 # One writer at a time: on Windows an append through separate handles is not

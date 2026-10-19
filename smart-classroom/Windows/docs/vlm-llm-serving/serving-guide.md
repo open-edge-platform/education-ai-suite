@@ -62,8 +62,8 @@ but quoting avoids surprises).
 | `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 3. Range 1–15. |
 
 Invalid settings (unknown method or key, contradictory source, cross-model
-drafter, out-of-range `k`) fail validation at startup in every mode; they never
-silently fall back.
+drafter, out-of-range `k`) fail validation at startup under `auto` and `"on"`;
+they never silently fall back. Under `"off"` the other fields are not read.
 
 While a speculative pipeline is active:
 

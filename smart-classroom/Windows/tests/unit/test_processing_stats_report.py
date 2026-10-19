@@ -120,6 +120,11 @@ def test_acceptance_needs_both_counters():
                    draft_tokens=100)]
     row = next(line for line in rep.calls_table(calls).splitlines() if "text_gen" in line)
     assert "| — |" in row
+    # 75/100 plus a call without an accepted count is 75/100 over 1 of 2 calls, not 75/200.
+    calls.append(_call("text_gen", "summarize", "2026-10-17T15:57:45.000+00:00", 1_000.0,
+                       draft_tokens=100, accepted_tokens=75))
+    row = next(line for line in rep.calls_table(calls).splitlines() if "text_gen" in line)
+    assert "75 / 100 (75%), 1 of 2 calls" in row
 
 
 def test_cli_writes_the_report(tmp_path):

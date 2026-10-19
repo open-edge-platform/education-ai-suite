@@ -97,7 +97,9 @@ def build_text_of_token_length(tokenizer: Tokenizer, target_tokens: int,
 
     `corpus` replaces the classroom dialog for the aggregation tasks (`cwe`/`fwe`), whose
     context *is* the data being counted. Their word lists carry the intended frequency ratio
-    within one repetition, so slicing the repeated text cannot reorder the answer.
+    within one repetition, but the cut-off last repetition adds to the words near its start,
+    which can reorder the answer in a small context; the probe runner checks the sized list
+    (`tasks.word_list_ranking_holds`) and skips a probe whose answer no longer holds.
     """
     if target_tokens <= 0:
         return ""

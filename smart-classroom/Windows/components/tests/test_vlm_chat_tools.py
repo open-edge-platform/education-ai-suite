@@ -247,6 +247,54 @@ def test_truncated_tool_turn_reports_length(client_for):
     assert choice["finish_reason"] == "length" and "tool_calls" not in choice["message"]
 
 
+class _FailingStream:
+    """Yields one token, then fails as the runner does on a native error."""
+
+    def __init__(self):
+        self.closed = False
+        self._sent = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self._sent:
+            self._sent = True
+            return "partial "
+        from model_manager.capability.runner import OomError
+        raise OomError("GPU out of memory at C:/models/x")
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.mark.parametrize("tools", [False, True])
+def test_a_generation_failure_mid_stream_ends_with_an_error_and_done(client_for, tools):
+    stream = _FailingStream()
+    handler = FakeHandler()
+    handler.generate = lambda prompt=None, **kwargs: (
+        kwargs["finish_info"].update(reasoning_open=False, prefill="")
+        if "finish_info" in kwargs else None) or stream
+    payload = {"stream": True, "messages": [{"role": "user", "content": "w?"}]}
+    if tools:
+        payload["tools"] = TOOLS
+    with client_for(handler).stream("POST", "/v1/chat/completions", json=payload) as r:
+        assert r.status_code == 200
+        events = _sse(r)
+    errors = [e["error"] for e in events if isinstance(e, dict) and "error" in e]
+    assert errors == [{"message": "generation failed", "type": "server_error", "code": None}]
+    assert events[-1] == "[DONE]" and stream.closed
+
+
+@pytest.mark.parametrize("field", ["max_tokens", "max_completion_tokens"])
+@pytest.mark.parametrize("value", [0, -1])
+def test_non_positive_token_limits_are_rejected(client_for, field, value):
+    handler = FakeHandler()
+    r = client_for(handler).post("/v1/chat/completions", json={
+        field: value, "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 400 and handler.calls == []
+
+
 def test_streamed_complete_call_is_withheld_when_the_turn_is_truncated(client_for):
     client = client_for(FakeHandler(CALL + "\nAlso", truncated=True))
     with client.stream("POST", "/v1/chat/completions",

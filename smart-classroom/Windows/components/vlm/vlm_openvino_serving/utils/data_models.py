@@ -87,11 +87,14 @@ class ChatRequest(BaseModel):
     frequency_penalty: Optional[float] = Field(
         None, json_schema_extra={"example": 1.15}
     )
+    # gt=0: a non-positive limit is a malformed request (HTTP 400), never
+    # forwarded to the native GenerationConfig.
     max_completion_tokens: Optional[int] = Field(
-        settings.VLM_MAX_COMPLETION_TOKENS, json_schema_extra={"example": 1000}
+        settings.VLM_MAX_COMPLETION_TOKENS, gt=0, json_schema_extra={"example": 1000}
     )
     max_tokens: Optional[int] = Field(
         None,
+        gt=0,
         json_schema_extra={"description": "Older OpenAI name, used when max_completion_tokens is not set"},
     )
     temperature: Optional[float] = Field(None, json_schema_extra={"example": 0.3})

@@ -264,11 +264,14 @@ def calls_table(calls: list) -> str:
            "---: | ---: |"]
     for g in groups:
         lat = g["latency_ms"]
-        drafted, accepted = g["draft_tokens"]["total"], g["accepted_tokens"]["total"]
-        # Counters are collected independently; either may be missing.
-        acceptance = (f"{_num(accepted, 0)} / {_num(drafted, 0)} "
-                      f"({accepted / drafted:.0%})" if drafted and accepted is not None
-                      else "—")
+        # Paired samples only: a call missing either counter is left out.
+        acc = g["acceptance"]
+        acceptance = "—"
+        if acc["calls"]:
+            acceptance = (f"{_num(acc['accepted'], 0)} / {_num(acc['drafted'], 0)} "
+                          f"({acc['rate']:.0%})")
+            if acc["calls"] < lat["count"]:
+                acceptance += f", {acc['calls']} of {lat['count']} calls"
         out.append(
             f"| {g['capability']} | {g['stage'] or '—'} | {g['model'] or '—'} | "
             f"{g['precision'] or '—'} | {g['device'] or '—'} | {g['decoding'] or '—'} | "

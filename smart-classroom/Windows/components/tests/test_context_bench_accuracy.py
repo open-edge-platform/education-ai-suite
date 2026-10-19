@@ -219,6 +219,20 @@ class TestGroundTruthSurvivesTruncation(unittest.TestCase):
                 fwe = _spec("fwe", options={"top_k": 3})
                 self.assertEqual([w for w, _ in self._counts(fwe, target).most_common(3)], fwe.truths)
 
+    def test_a_small_context_whose_cut_list_reorders_the_answer_is_detected(self):
+        # Copilot's case: at 256 tokens rainfall (9) overtakes the expected friction (7).
+        fwe = tasks.build_spec("fwe", 0, None, "", 20260917, 256, 64)
+        prompt, _ = build_probe_prompt(FakeTokenizer(), 256, [], fwe.question, fwe.filler,
+                                       tolerance=16)
+        self.assertFalse(tasks.word_list_ranking_holds(prompt, fwe.question, fwe.truths))
+        for target in (3000, 9000):
+            with self.subTest(target=target):
+                spec = _spec("fwe", options={"top_k": 3})
+                prompt, _ = build_probe_prompt(FakeTokenizer(), target, [], spec.question,
+                                               spec.filler)
+                self.assertTrue(tasks.word_list_ranking_holds(prompt, spec.question, spec.truths))
+        self.assertIn("truths", accuracy.probe_payload(fwe, 0))
+
     def test_every_task_lands_on_size_with_inserts_intact(self):
         for task in tasks.KNOWN_TASKS:
             spec = _spec(task)
@@ -236,6 +250,9 @@ class TestScorers(unittest.TestCase):
         self.assertTrue(scoring.exact_match("The Code", ["code"]))
         self.assertFalse(scoring.exact_match("the code is 7Q4M91", ["7Q4M91"]))
         self.assertTrue(scoring.exact_match("VAR_A, VAR_B", ["VAR_B", "VAR_A"]))
+        # A single multiword answer keeps its word order: the room is Pine Ridge.
+        self.assertTrue(scoring.exact_match("Pine Ridge.", ["Pine Ridge"]))
+        self.assertFalse(scoring.exact_match("Ridge Pine", ["Pine Ridge"]))
         self.assertEqual(scoring.string_match_all("codes: AAA", ["AAA", "BBB"]), 0.5)
         self.assertEqual(scoring.string_match_part("It is in March.", ["March", "03"]), 1.0)
         self.assertAlmostEqual(scoring.token_f1("the secret code is 7Q4M91", ["7Q4M91"]), 0.4)

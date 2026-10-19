@@ -132,6 +132,8 @@ def probe_payload(spec: ProbeSpec, index: int) -> dict:
         "inserts": [list(pair) for pair in spec.inserts],
         "question": spec.question,
         "filler": spec.filler,
+        # The child checks that a sized word list still ranks these first; it scores nothing.
+        "truths": list(spec.truths) if spec.filler else None,
         "output_tokens": spec.output_tokens,
         "fixture_id": spec.fixture_id,
     }

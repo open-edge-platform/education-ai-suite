@@ -174,7 +174,7 @@ YAML > tool default; resolved values are never written back.
 | `cache_dir`, `output_dir`, `record_text` | Compiled-blob cache (optional), evidence base directory, opt-in persistence of synthetic answers (default false) |
 | `profiles[]` | `name`, `ov`, `scheduler`, optional `dflash`; any other key (e.g. `mtp`, which is not supported) is an error |
 | `profile.scheduler` | Empty = stateful pipeline. Any key = paged, which requires positive `max_num_batched_tokens`, `max_num_seqs` and `enable_prefix_caching: false`. `cache_size`: omitted (runtime-managed), whole GiB, or `auto` |
-| `profile.dflash` | `model` (local draft IR directory), `num_assistant_tokens` >= 1, optional `device` (must equal the target device), `enabled`; needs a paged `scheduler`, and `num_linear_attention_blocks >= max_num_seqs + k + 1` when set |
+| `profile.dflash` | `model` (local draft IR directory), `num_assistant_tokens` >= 1, `enabled` (the draft runs on the target's device; any other key is an error); needs a paged `scheduler`, and `num_linear_attention_blocks >= max_num_seqs + k + 1` when set |
 | `accuracy` | Read only with `--accuracy`: `suites`, `baseline_profile` (optional; when set it must be one of the profiles being run -- without it there are no deltas and the generation suite reports only Coverage), `seed`, `embedding_model`, and per-suite `tasks`, `depths`, `samples`, `output_tokens`, `options` |
 | `speculative_reference` | Published figures printed beside the window sweep; never ranked |
 

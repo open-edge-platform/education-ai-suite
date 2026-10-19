@@ -77,17 +77,19 @@ def lexical_tokens(text: str) -> list[str]:
 # Retrieval scoring (SQuAD + RULER)
 # ---------------------------------------------------------------------------
 def exact_match(prediction: str, truths: list[str]) -> bool:
-    """The answer is the ground truth and nothing else, as an order-insensitive token multiset.
+    """The answer is the ground truth and nothing else.
 
-    For a single-item truth this is SQuAD exact match unchanged: "the code is 7Q4M91" is a
-    retrieval hit but not an exact match, and reporting both is what distinguishes "found the
-    fact" from "answered with only the fact" -- the difference a question that says "answer
-    with only the code" is trying to elicit. For a multi-item truth, order is not part of the
-    answer (`X, Y` and `Y, X` are the same set of variables), so the multiset is compared
-    rather than the string.
+    For a single-item truth this is SQuAD exact match unchanged, word order included ("Ridge
+    Pine" is not the room "Pine Ridge"): "the code is 7Q4M91" is a retrieval hit but not an
+    exact match, and reporting both is what distinguishes "found the fact" from "answered with
+    only the fact" -- the difference a question that says "answer with only the code" is
+    trying to elicit. For a multi-item truth, order is not part of the answer (`X, Y` and
+    `Y, X` are the same set of variables), so the token multiset is compared instead.
     """
     if not truths:
         return False
+    if len(truths) == 1:
+        return tokens(prediction) == tokens(truths[0])
     return Counter(tokens(prediction)) == Counter(tokens(" ".join(truths)))
 
 

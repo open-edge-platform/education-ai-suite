@@ -522,6 +522,29 @@ def suite_of(task: str) -> str:
     return _BUILDERS[task][0]
 
 
+def word_list_ranking_holds(prompt: str, question: str, truths: list) -> bool:
+    """Whether the word list in a sized aggregation prompt still ranks ``truths`` first.
+
+    The filler is repeated and cut to an exact token count, so the last, partial
+    repetition adds one more occurrence to the words near its start. In a small context
+    that can lift a distractor above an expected word, and the fixture's truths would
+    then penalize a correct answer. True when every truth occurs strictly more often
+    than every other vocabulary word between the list and the question.
+    """
+    start, end = prompt.find("WORD LIST"), prompt.rfind(question)
+    if start < 0 or end <= start:
+        return False
+    vocabulary = set(_UNIQUE_VOCABULARY)
+    counts: dict = {}
+    for word in prompt[start:end].split():
+        if word in vocabulary:  # a word cut at the end of the list is not counted
+            counts[word] = counts.get(word, 0) + 1
+    wanted = set(truths)
+    lowest = min((counts.get(word, 0) for word in wanted), default=0)
+    highest_other = max((n for word, n in counts.items() if word not in wanted), default=0)
+    return lowest > highest_other
+
+
 def is_depth_swept(task: str) -> bool:
     """Whether the task is measured across `depths`. See `ProbeSpec.depth`."""
     return task in DEPTH_SWEPT_TASKS

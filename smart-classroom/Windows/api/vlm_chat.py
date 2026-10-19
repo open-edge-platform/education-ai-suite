@@ -128,6 +128,16 @@ def _close(token_iter) -> None:
         close()
 
 
+def _error_event(message: str, kind: str) -> str:
+    error = {"error": {"message": message, "type": kind, "code": None}}
+    return f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
+
+
+# A failure after HTTP 200 has started (a runtime error, or OomError from the
+# runner) is reported in-band; its details stay in the server log.
+_GENERATION_FAILED = _error_event("generation failed", "server_error")
+
+
 def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
     chunk = _chunk_writer(model_name)
     try:
@@ -137,9 +147,12 @@ def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
             if token:
                 yield chunk({"content": token})
         yield chunk({}, finish_reason="stop")
-        yield "data: [DONE]\n\n"
+    except Exception:  # noqa: BLE001 - the stream has started; end it with an error
+        logger.exception("Streaming generation failed")
+        yield _GENERATION_FAILED
     finally:
         _close(token_iter)
+    yield "data: [DONE]\n\n"
 
 
 @router.post("/v1/chat/completions")
@@ -360,8 +373,10 @@ def _tool_sse_stream(token_iter, parser: "tc.ToolStreamParser", info: dict,
     except tc.ToolOutputError as exc:
         # Terminate with an error instead of claiming a tool-call finish.
         logger.warning("Rejected generated tool call mid-stream: %s", exc)
-        error = {"error": {"message": str(exc), "type": exc.kind, "code": None}}
-        yield f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
+        yield _error_event(str(exc), exc.kind)
+    except Exception:  # noqa: BLE001 - the stream has started; end it with an error
+        logger.exception("Streaming generation failed")
+        yield _GENERATION_FAILED
     finally:
         _close(token_iter)
     yield "data: [DONE]\n\n"

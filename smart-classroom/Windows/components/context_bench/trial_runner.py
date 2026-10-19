@@ -52,6 +52,7 @@ from components.context_bench.context_builder import (
     build_benchmark_prompt,
     build_probe_prompt,
 )
+from components.context_bench.tasks import word_list_ranking_holds
 
 # How far an accuracy probe's prompt may land from the configured context, per tokenizer
 # count. Throughput stays exact; a retrieval verdict does not depend on one token, and the
@@ -866,6 +867,12 @@ def _run_accuracy_probes(pipe, accepts_tokenized_input, tokenizer, channel, done
             tokenizer, context_tokens, [tuple(pair) for pair in spec["inserts"]],
             spec["question"], spec.get("filler"), tolerance=PROBE_TOKEN_TOLERANCE,
         )
+        if spec.get("truths") and not word_list_ranking_holds(
+                prompt, spec["question"], spec["truths"]):
+            # Skipped, not scored: the expected answer is no longer the right one.
+            raise PromptSizeError(
+                "the word list cut to this context no longer ranks the expected words first"
+            )
         pipeline_input, prompt_tokens = prepare_pipeline_input(
             pipe, prompt, accepts_tokenized_input
         )

@@ -204,8 +204,10 @@ written.
   samples. A p95 over a single run is an observation, not a distribution.
   Compare repeated warm runs with the same input, settings and enabled stages.
 * **DFlash.** Accepted ÷ drafted tokens shows how much of the draft the target
-  kept. Compare plain and DFlash runs on the same input and statistic. A run
-  that fell back to plain generation reports `decoding: plain`.
+  kept. Each call group's `acceptance` (`calls`, `accepted`, `drafted`, `rate`)
+  counts only calls that report both counters; the report notes "N of M
+  calls" when some did not. Compare plain and DFlash runs on the same input and
+  statistic. A run that fell back to plain generation reports `decoding: plain`.
 * **Unavailable values are `null` (`—` in the report), never zero.**
 
 ## Field Reference
