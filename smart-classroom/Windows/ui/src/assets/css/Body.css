@@ -1,0 +1,67 @@
+/* Container layout */
+.container {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  background: #f5f7fa;
+  z-index: 1000;
+}
+
+/* Panels */
+.left-panel,
+.right-panel {
+  overflow-y: auto;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 12px 12px 12px 18px;
+}
+
+.left-panel {
+  flex: 1;
+  background-color: #f8f8f8;
+}
+
+.right-panel-slot {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+}
+
+
+/* Collapse arrow */
+.arrow {
+  position: absolute;
+  top: 50%;
+  left: calc(50% - 14px);
+  transform: translateY(-50%);
+  cursor: pointer;
+  /* Must beat `.left-panel`'s z-index: 1000 (it is positioned, so it would
+     otherwise paint over the toggle) while staying below modals (10001+). */
+  z-index: 1100;
+  color: #0071c5;
+  background: #fff;
+  border-radius: 50%;
+  border: 1px solid #e6e7e8;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  transition: left 0.3s ease;
+}
+
+.arrow.collapsed {
+  left: calc(100% - 38px);
+}
+
+.arrow.hidden {
+  display: none;
+}
+
+.arrow.below-video {
+  position: fixed;
+  right: 50%;
+  z-index: 120;
+}
