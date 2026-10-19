@@ -196,9 +196,16 @@ def _prepare_target(plan: TextGenPlan) -> Path:
             if not is_model_ready(model_dir, require_detokenizer=True):
                 logger.info("Preparing text_gen target %s (%s) at %s",
                             plan.model_name, plan.weight_format, _rel(model_dir))
-                try:
+                def convert():
                     convert_model(plan.model_name, str(model_dir), model_type="vlm",
                                   weight_format=plan.weight_format)
+
+                try:
+                    if preconverted_repo(plan.model_name, plan.weight_format):
+                        # A resumable download: transient network errors are retried.
+                        _with_retries(convert, f"{plan.model_name} {plan.weight_format} IR")
+                    else:
+                        convert()  # a local export; a failure would only repeat
                 except Exception as exc:  # noqa: BLE001 - surfaced with context
                     raise PreparationError(
                         f"text_gen target {plan.model_name} could not be prepared: {exc}"
@@ -265,29 +272,29 @@ def _prepare_external_draft(plan: TextGenPlan) -> tuple:
         return draft_dir, None
 
     repo = settings.draft_model
-    recorded = _recorded_draft_revision(plan, repo)
-    if _draft_ready(draft_dir):
-        revision = _read_json(draft_dir / ".prepared.json").get("revision")
-        pinned = settings.draft_revision or recorded
-        if pinned and revision and pinned != revision:
-            _set_aside(draft_dir, "superseded")
-        else:
-            return draft_dir, revision or pinned
+    pinned = settings.draft_revision or _recorded_draft_revision(plan, repo)
+    revision = _ready_revision(draft_dir, pinned)
+    if revision:
+        return draft_dir, revision
 
     draft_dir.parent.mkdir(parents=True, exist_ok=True)
     with ArtifactLock(draft_dir):
-        if _draft_ready(draft_dir):
-            return draft_dir, _read_json(draft_dir / ".prepared.json").get("revision")
-        revision = settings.draft_revision or recorded or _with_retries(
-            lambda: _resolve_revision(repo), f"revision of {repo}")
+        revision = _ready_revision(draft_dir, pinned)  # another start may have built it
+        if revision:
+            return draft_dir, revision
+        revision = pinned or _with_retries(lambda: _resolve_revision(repo), f"revision of {repo}")
         source_dir = _download_source(repo, revision)
+        # Replaces (sets aside) an incomplete export or one of another revision.
         _export_draft(source_dir, draft_dir, settings, repo, revision)
     return draft_dir, revision
 
 
-def _draft_ready(draft_dir: Path) -> bool:
-    return (draft_dir / ".prepared.json").is_file() and all(
-        (draft_dir / f).is_file() for f in _DRAFT_IR_FILES)
+def _ready_revision(draft_dir: Path, pinned: Optional[str]) -> Optional[str]:
+    """Revision of a complete drafter export matching ``pinned`` (any if None)."""
+    if not all((draft_dir / f).is_file() for f in _DRAFT_IR_FILES):
+        return None
+    revision = _read_json(draft_dir / ".prepared.json").get("revision")
+    return revision if revision and pinned in (None, revision) else None
 
 
 def _download_source(repo: str, revision: str) -> Path:
@@ -353,7 +360,7 @@ def _export_draft(source_dir: Path, draft_dir: Path, settings: SpeculativeSettin
         "files": _file_sizes(staging),
     })
     if draft_dir.exists():
-        _set_aside(draft_dir, "invalid")
+        _set_aside(draft_dir, "superseded")
     staging.replace(draft_dir)
 
 
@@ -469,12 +476,17 @@ def ensure_dflash_target(target_dir: Path, draft_dir: Path) -> Path:
 
     derived = target_dir.with_name(target_dir.name + "-dflash")
     source_hash = sha256_file(xml_path)
-    stamp = _read_json(derived / ".derived.json")
-    if stamp.get("source_xml_sha256") == source_hash and (derived / xml_path.name).is_file():
-        return derived
 
+    def current() -> bool:
+        stamp = _read_json(derived / ".derived.json")
+        return stamp.get("source_xml_sha256") == source_hash and (derived / xml_path.name).is_file()
+
+    if current():
+        return derived
     layer_ids = validate_dflash_pair(target_dir, draft_dir, 1)
     with ArtifactLock(derived):
+        if current():  # another start built it while this one waited
+            return derived
         if derived.exists():
             _set_aside(derived, "stale")
         staging = derived.with_name(derived.name + ".partial")
@@ -538,12 +550,18 @@ def ensure_draft_head(target_dir: Path, draft_dir: Path) -> Path:
         "target_xml_sha256": sha256_file(target_language_xml(target_dir)),
         "draft_xml_sha256": sha256_file(draft_dir / "openvino_model.xml"),
     }
-    recorded = _read_json(derived / ".derived.json")
-    if (all(recorded.get(k) == v for k, v in stamp.items())
-            and all((derived / f).is_file() for f in _DRAFT_IR_FILES)):
+
+    def current() -> bool:
+        recorded = _read_json(derived / ".derived.json")
+        return (all(recorded.get(k) == v for k, v in stamp.items())
+                and all((derived / f).is_file() for f in _DRAFT_IR_FILES))
+
+    if current():
         return derived
     try:
         with ArtifactLock(derived):
+            if current():  # another start built it while this one waited
+                return derived
             staging = derived.with_name(derived.name + ".partial")
             if staging.exists():
                 shutil.rmtree(staging)

@@ -81,36 +81,95 @@ While a speculative pipeline is active:
 
 To roll back, remove the block (or set `mode: "off"`) and restart. Prepared
 drafter files are kept for later use; superseded ones are moved aside, never
-deleted.
+deleted. Preparation of the drafter is described in
+[Model Preparation](#model-preparation).
 
-### What preparation produces
+## Model Preparation
+
+No model files need to exist beforehand. The backend prepares the configured
+model when it loads the warm VLM at startup, so
+[start-smart-classroom.ps1](../../../start-smart-classroom.ps1), the desktop app
+and `python main.py` all prepare the same way, with no extra switch. Code:
+[text_gen_prepare.py](../../../components/vlm/text_gen_prepare.py) (preparation)
+and [text_gen_vlm.py](../../../components/vlm/text_gen_vlm.py) (load and warm-up).
+
+### First start
+
+1. **Validate the configuration.** Invalid `models.text_gen` or `speculative`
+   settings fail before any download.
+2. **Target.** A catalog model downloads its pre-converted OpenVINO IR
+   (`OpenVINO/<model>-<weight_format>-ov`) into
+   `models/openvino/<model>/<weight_format>`. The download resumes where it
+   stopped and is retried 3 times. Any other model is exported locally with
+   optimum-intel, as before. A target that cannot be prepared fails startup in
+   every mode.
+3. **DFlash drafter** (only when speculative decoding is requested and
+   qualified):
+   1. Its source checkpoint is downloaded at the catalog's pinned commit:
+      configuration and weight files only, never repository code. Free disk
+      space is checked first (2.2x the checkpoint).
+   2. It is exported to int4 IR in a separate process. The exporter uses the
+      DFlash classes built into optimum-intel 2.2.0 (installed by
+      `requirements.txt`), works offline from the downloaded files and does not
+      use `--trust-remote-code`.
+   3. The pair is checked: drafter metadata, vocabulary size, the target layers
+      it reads, and `k` against its block size.
+   4. The target's lm_head is attached to a copy of the drafter (below).
+
+   The export and head take a few minutes on the first start.
+4. **Manifest.** `models/openvino/.manifests/<model>-<weight_format>.json`
+   records what was prepared, the drafter commit, the decision and timings.
+5. **Load and warm up.** The pipeline (with the drafter, if any) is compiled on
+   the device. Tool support is read from the chat template, and one 2-token
+   greedy generation runs. The backend accepts requests and reports `/health`
+   only after warm-up, and the start script waits for it.
 
 | Artifact | Location |
 | --- | --- |
 | Target IR | `models/openvino/<model>/<weight_format>` |
 | DFlash drafter source (pinned commit) | `models/hf/<org>__<repo>/<commit>` |
-| DFlash drafter IR | `models/openvino/<drafter>/int4` |
-| DFlash drafter with its own lm_head (the one loaded) | `models/openvino/<drafter>/int4-lmhead`: the target's int8 lm_head requantized to int4 and attached to the drafter, so the runtime no longer reads the full int8 head on every draft pass (2-7% cheaper verification passes). Rebuilt when the target or drafter IR changes; if it cannot be built, the drafter above is loaded instead. Not applied to `draft_source: local`. |
-| DFlash target with hidden-state metadata | `models/openvino/<model>/<weight_format>-dflash` (only when the stock export lacks `hidden_states_decoder_layers`; weights are hard-linked, the ordinary target is untouched) |
+| DFlash drafter IR | `models/openvino/<drafter>/int4` (`.prepared.json` records the commit) |
+| DFlash drafter with its own lm_head (the one loaded) | `models/openvino/<drafter>/int4-lmhead`. The target's int8 lm_head is requantized to int4 and attached to the drafter, so the runtime stops reading the full int8 head on every draft pass (2-7% cheaper verification passes). Not built for `draft_source: local`. |
+| DFlash target with hidden-state metadata | `models/openvino/<model>/<weight_format>-dflash`. Only when the stock export lacks `hidden_states_decoder_layers`; weights are hard-linked and the ordinary target is untouched. |
 | Manifest | `models/openvino/.manifests/<model>-<weight_format>.json` |
 
-The DFlash drafter is a source checkpoint, downloaded at the catalog's pinned
-commit: configuration and weight files only, never repository code. It is
-exported with the DFlash classes built into optimum-intel 2.2.0 (installed by
-`requirements.txt`), without `--trust-remote-code`; the first start spends a
-few minutes on this export. If the export fails, `auto` continues with plain
-generation and reports the reason; an IR exported separately can be used with
-`draft_source: local`.
+### Later starts
 
-## Model Preparation
+Prepared files are validated and reused, without network access:
 
-The backend prepares the configured model when it loads the warm VLM, so
-[start-smart-classroom.ps1](../../../start-smart-classroom.ps1), the desktop app
-and `python main.py` all prepare the same way, with no extra switch. The first
-start downloads or converts what is missing (progress is in the backend log) and
-the backend reports ready on `/health` only after warm-up; later starts only
-validate. To run offline, start once with network access, or copy the prepared
-`models/` directories; the manifest above records what was prepared.
+| Artifact | Reused when |
+| --- | --- |
+| Target | Its IR, tokenizer and detokenizer are present. |
+| Drafter | Its IR is complete and its recorded commit matches the pin. |
+| Derived artifacts | The SHA-256 stamp of the IR they were built from still matches. |
+
+A stale artifact is rebuilt and the old copy is moved aside with a timestamp
+suffix, never deleted. The drafter and derived artifacts are built in a
+`.partial` directory and published only when complete, and the target download
+resumes, so an interrupted first start recovers on the next one.
+A `.lock` file per artifact keeps two starts from building it at once (a lock
+left by a dead process is recovered). The second start then reuses the result.
+
+The tokenizer is also checked against the installed openvino-tokenizers: an IR
+exported by a newer release fails with an upgrade hint instead of a native
+crash.
+
+### Failures and offline use
+
+| Failure | `mode: auto` | `mode: "on"` |
+| --- | --- | --- |
+| Target download or export (also in plain mode) | Startup fails | Startup fails |
+| Drafter download, export, or a runtime older than the profile needs | Plain generation; reason in `/health` and the manifest | Startup fails with guidance |
+| Drafter incompatible with the target | Startup fails | Startup fails |
+| Pipeline load or warm-up with the drafter | Plain pipeline, decision kept until restart | Startup fails |
+| Drafter lm_head cannot be built | Stock drafter is loaded (warning) | Stock drafter is loaded (warning) |
+
+To run offline, start once with network access, or copy the prepared
+`models/` directories (and `models/hf/` for DFlash) to the machine.
+
+`/health` reports where startup time went (`startup.prepare_s`, `load_s`,
+`warmup_s`). Warm-up covers text generation only: the first request with an
+image still initializes the vision encoder.
 
 ## Tool Calling on Port 8000
 
@@ -135,22 +194,67 @@ messages += [first.choices[0].message,
 answer = client.chat.completions.create(model="text_gen", messages=messages, tools=tools)
 ```
 
+Any OpenAI-compatible client or agent framework that takes a base URL works
+the same way. A request uses the tool path when it has `tools` or
+`tool_choice`, or its history contains tool calls or results.
+
 | Field | Supported |
 | --- | --- |
 | `tools` | `type: "function"` with `name`, optional `description`, JSON Schema `parameters` (`type`, `properties`, `required`, `items`, `enum`, `const`, `additionalProperties`, numeric/length/item bounds, `anyOf`/`oneOf`/`allOf`, `nullable`, annotations). `$ref` and `pattern` are rejected with HTTP 400. |
 | `tool_choice` | `"none"`, `"auto"` (default with tools), `"required"`, or `{"type": "function", "function": {"name": ...}}`. |
-| `parallel_tool_calls` | `false` returns at most one call. |
-| History | System/developer, user (text and images), assistant (with `tool_calls`, content may be null) and `tool` messages, in order. Every call must be answered by exactly one result before the conversation continues. |
+| `parallel_tool_calls` | `false` returns at most one call; later calls in the same turn are dropped unparsed. |
+| History | System/developer, user (text and `data:image/` images), assistant (with `tool_calls`, content may be null) and `tool` messages, in order. Every call must be answered by exactly one result before the conversation continues. Returned assistant messages can be sent back as they are, including `reasoning_content`. |
+| `max_completion_tokens` | Also accepted as `max_tokens`. Omitted, the configured `max_new_tokens` applies. Leave room for reasoning: a thinking model reasons before it calls. |
+| `enable_thinking` | Extra field: `false` skips reasoning on Qwen3.5/3.6/3.8 (faster calls); omitted, the model default applies. |
 
-Generated calls are validated against the offered schema. An invalid call, a
-call to an unoffered function or a missing call under `required`/named choice
-returns HTTP 502 (`tool_call_validation_failed`); a call cut off by the token
-limit returns `finish_reason: "length"` without calls. Streaming publishes each
-call in one `delta.tool_calls` chunk only after it is complete and valid; a
-failure mid-stream ends with an `error` event and `[DONE]`.
+How the model's output is returned:
+
+* **Calls.** The model's call syntax is normalized to `tool_calls`: JSON in
+  `<tool_call>` for Qwen3-VL, `<function=...>` XML for Qwen3.5 and later. Each
+  call gets a unique `id`, and arguments are a JSON-encoded object.
+* **Reasoning.** A thinking model's reasoning is returned in
+  `message.reasoning_content` (streaming: `delta.reasoning_content`), never in
+  `content`. Calls written inside reasoning are ignored.
+* **Forced calls.** `"required"` and a named choice are enforced: the
+  assistant turn is started with the opening of a call (and, for a thinking
+  model, without reasoning), so the model cannot answer in text instead.
+  `"auto"` leaves the decision to the model.
+* **Validation.** Calls are validated against the offered schema. An invalid
+  call, or a call to a function that was not offered, returns HTTP 502
+  (`tool_call_validation_failed`) and is never returned as a call. A call cut
+  off by the token limit returns `finish_reason: "length"` without calls.
+* **Streaming.** Content and reasoning stream as they are generated. Calls are
+  held until the turn is complete, then each is published whole in one
+  `delta.tool_calls` chunk before `finish_reason: "tool_calls"`. A failure
+  mid-stream ends with an `error` event and `[DONE]`.
+
+Unsupported input is rejected with HTTP 400 before generation. That covers
+malformed definitions or history, a choice naming an absent tool, a model
+whose template does not render tools (`"tool_calls": false` in `/health`),
+and `temperature > 0` while DFlash is active. Images given by URL or file path
+are also rejected: tool conversations carry untrusted content, so the server
+neither fetches URLs nor reads local files for them.
 
 Requests without tools or tool messages use the existing chat path unchanged
 (the last user turn is answered).
+
+Verified end to end on Arc 140T (Arrow Lake) with the `openai` client:
+
+| Profile | Result |
+| --- | --- |
+| Qwen3-VL-8B INT4 | 10/10 |
+| Qwen3.5-9B INT4 | 10/10 |
+| Qwen3.6-35B-A3B INT4 + DFlash | 10/10 |
+| Qwen3.8-27B INT4 | 10/10 |
+
+Each run covered, with and without reasoning:
+- a call followed by a tool result and the final answer;
+- streaming calls;
+- two parallel calls, and `parallel_tool_calls: false`;
+- named and `required` choices;
+- a question that needs no tool.
+
+This is a functional check, not the qualification matrix in the design.
 
 ## Health
 

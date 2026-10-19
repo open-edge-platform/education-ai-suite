@@ -163,10 +163,24 @@ def test_history_collects_images_with_per_message_tags():
     ([{"role": "narrator", "content": "hi"}], "not supported"),
     ([{"role": "system", "content": [{"type": "image_url", "image_url": {"url": "u"}}]}],
      "only supported in user"),
+    ([{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "C:/x.png"}}]}],
+     "data:image/"),
+    ([{"role": "user", "content": [{"type": "image_url",
+                                    "image_url": {"url": "https://example.com/x.png"}}]}],
+     "data:image/"),
 ])
 def test_invalid_history_is_rejected(messages, message):
     with pytest.raises(tc.ToolRequestError, match=message):
         tc.normalize_history(messages)
+
+
+def test_history_passes_returned_reasoning_back_to_the_template():
+    messages = [{"role": "user", "content": "w?"},
+                {"role": "assistant", "content": None, "tool_calls": [_call()],
+                 "reasoning_content": "Need the weather."},
+                {"role": "tool", "tool_call_id": "call_1", "content": "21"}]
+    history, _ = tc.normalize_history(messages)
+    assert history[1]["reasoning_content"] == "Need the weather."
 
 
 def test_is_tool_conversation_leaves_plain_chat_on_the_legacy_path():
@@ -245,7 +259,26 @@ def test_calls_inside_reasoning_are_ignored():
     assert [c["function"]["name"] for c in turn.tool_calls] == ["get_weather"]
     opened = "thinking about <tool_call> stuff</think>\n" + HERMES
     turn = tc.parse_completion(opened, _tools(), _choice(), reasoning_open=True)
-    assert len(turn.tool_calls) == 1 and turn.content.startswith("thinking about")
+    assert len(turn.tool_calls) == 1 and turn.content == ""
+    assert turn.reasoning == "thinking about <tool_call> stuff"
+
+
+def test_parallel_false_ignores_extra_calls_even_if_invalid():
+    text = HERMES + '\n<tool_call>\n{"name": "launch", "arguments": {}}\n</tool_call>'
+    turn = tc.parse_completion(text, _tools(), _choice(), parallel=False)
+    assert [c["function"]["name"] for c in turn.tool_calls] == ["get_weather"]
+
+
+@pytest.mark.parametrize("prefill, output", [
+    ('<tool_call>\n{"name": "get_weather", "arguments": ', '{"city": "Paris"}}\n</tool_call>'),
+    ("<tool_call>\n<function=get_weather>\n",
+     "<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>"),
+])
+def test_forced_call_output_continues_the_prefill(prefill, output):
+    named = _choice({"type": "function", "function": {"name": "get_weather"}})
+    turn = tc.parse_completion(output, _tools(), named, prefill=prefill)
+    assert turn.finish_reason == "tool_calls" and turn.content == ""
+    assert json.loads(turn.tool_calls[0]["function"]["arguments"]) == {"city": "Paris"}
 
 
 # --- streaming ------------------------------------------------------------------
@@ -267,6 +300,17 @@ def test_stream_buffers_calls_until_complete_regardless_of_chunking(chunk):
     assert len(calls) == 1 and reason == "tool_calls"
     # The call event is emitted whole: name and complete JSON arguments.
     assert json.loads(calls[0]["function"]["arguments"])["city"] == "Paris"
+
+
+@pytest.mark.parametrize("chunk", [1, 4, 1000])
+def test_reasoning_is_separate_and_surrounding_whitespace_is_not_content(chunk):
+    text = "Plan the call.\n</think>\n\nLet me check.\n\n" + HERMES + "\n"
+    events, reason = _stream(text, chunk, reasoning_open=True)
+    assert "".join(v for k, v in events if k == "reasoning").strip() == "Plan the call."
+    assert "".join(v for k, v in events if k == "content") == "Let me check."
+    assert reason == "tool_calls"
+    answer = tc.parse_completion("<think>\nok\n</think>\n\nIt is\n\n21 C.\n", _tools(), _choice())
+    assert (answer.content, answer.reasoning) == ("It is\n\n21 C.", "ok")
 
 
 def test_stream_never_emits_partial_call_text():

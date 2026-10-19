@@ -23,11 +23,14 @@ CALL = '<tool_call>\n{"name": "get_weather", "arguments": {"city": "Paris"}}\n</
 
 
 class FakeHandler:
-    def __init__(self, output="ok", supports_tools=True, error=None, truncated=False):
+    def __init__(self, output="ok", supports_tools=True, error=None, truncated=False,
+                 reasoning_open=False, prefill=""):
         self.output = output
         self.supports_tools = supports_tools
         self.error = error
         self.truncated = truncated
+        self.reasoning_open = reasoning_open
+        self.prefill = prefill
         self.calls = []
 
     def generate(self, prompt=None, **kwargs):
@@ -39,8 +42,8 @@ class FakeHandler:
             raise self.error
         info = kwargs.get("finish_info")
         if info is not None:
-            info.update(reasoning_open=False, truncated=self.truncated,
-                        input_tokens=11, output_tokens=7)
+            info.update(reasoning_open=self.reasoning_open, prefill=self.prefill,
+                        truncated=self.truncated, input_tokens=11, output_tokens=7)
         if kwargs.get("stream"):
             text = self.output
             return iter([text[i:i + 4] for i in range(0, len(text), 4)])
@@ -180,6 +183,42 @@ def test_invalid_generated_call_is_an_error_not_a_success(client_for):
     assert not any(isinstance(e, dict) and "choices" in e
                    and e["choices"][0]["finish_reason"] == "tool_calls" for e in events)
     assert events[-1] == "[DONE]"
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_reasoning_is_returned_apart_from_content(client_for, stream):
+    handler = FakeHandler("Need the weather.\n</think>\n\n" + CALL, reasoning_open=True)
+    payload = {"stream": stream, "tools": TOOLS, "messages": [{"role": "user", "content": "w?"}]}
+    if stream:
+        with client_for(handler).stream("POST", "/v1/chat/completions", json=payload) as r:
+            deltas = [e["choices"][0]["delta"] for e in _sse(r) if isinstance(e, dict)]
+        reasoning = "".join(d.get("reasoning_content", "") for d in deltas)
+        content = "".join(d.get("content") or "" for d in deltas)
+    else:
+        message = client_for(handler).post("/v1/chat/completions", json=payload).json()[
+            "choices"][0]["message"]
+        reasoning, content = message["reasoning_content"], message["content"] or ""
+        assert len(message["tool_calls"]) == 1
+    assert reasoning.strip() == "Need the weather." and content == ""
+
+
+@pytest.mark.parametrize("tool_choice, forced", [
+    ("required", ""),
+    ({"type": "function", "function": {"name": "get_weather"}}, "get_weather"),
+])
+def test_required_and_named_choices_force_the_call(client_for, tool_choice, forced):
+    prefill = '<tool_call>\n{"name": "get_weather", "arguments": '
+    handler = FakeHandler('{"city": "Paris"}}\n</tool_call>', prefill=prefill)
+    r = client_for(handler).post("/v1/chat/completions", json={
+        "tools": TOOLS, "tool_choice": tool_choice, "messages": [{"role": "user", "content": "w?"}]})
+    assert r.status_code == 200
+    assert handler.calls[0][1]["force_tool_call"] == forced
+    (call,) = r.json()["choices"][0]["message"]["tool_calls"]
+    assert json.loads(call["function"]["arguments"]) == {"city": "Paris"}
+    handler = FakeHandler("ok")
+    client_for(handler).post("/v1/chat/completions", json={
+        "tools": TOOLS, "messages": [{"role": "user", "content": "w?"}]})
+    assert "force_tool_call" not in handler.calls[0][1]  # auto stays the model's choice
 
 
 def test_required_choice_without_call_fails(client_for):

@@ -101,11 +101,12 @@ def _model_name(requested: Optional[str]) -> str:
     return requested or "text_gen"
 
 
-def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
+def _chunk_writer(model_name: str):
+    """SSE ``chat.completion.chunk`` formatter sharing one id and timestamp."""
     created = int(time.time())
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
 
-    def _chunk(delta: dict, finish_reason: Optional[str] = None) -> str:
+    def chunk(delta: dict, finish_reason: Optional[str] = None) -> str:
         payload = {
             "id": completion_id,
             "object": "chat.completion.chunk",
@@ -117,19 +118,28 @@ def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
         }
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
+    return chunk
+
+
+def _close(token_iter) -> None:
+    """Stop native generation if the client stopped reading early."""
+    close = getattr(token_iter, "close", None)
+    if close is not None:
+        close()
+
+
+def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
+    chunk = _chunk_writer(model_name)
     try:
         # First chunk announces the assistant role (OpenAI convention).
-        yield _chunk({"role": "assistant"})
+        yield chunk({"role": "assistant"})
         for token in token_iter:
             if token:
-                yield _chunk({"content": token})
-        yield _chunk({}, finish_reason="stop")
+                yield chunk({"content": token})
+        yield chunk({}, finish_reason="stop")
         yield "data: [DONE]\n\n"
     finally:
-        # Stops native generation if we stopped reading early.
-        close = getattr(token_iter, "close", None)
-        if close is not None:
-            close()
+        _close(token_iter)
 
 
 @router.post("/v1/chat/completions")
@@ -164,7 +174,7 @@ async def _chat_completions(request: Request):
     if image_urls:
         try:
             _, image_tensors = await mods.load_images(image_urls)
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:  # unreadable or undecodable image
             return JSONResponse(status_code=400, content={"error": str(exc)})
 
     model_name = _model_name(chat_req.model)
@@ -237,21 +247,21 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
     except tc.ToolRequestError as exc:
         return _tool_error(exc.status, str(exc), exc.kind)
 
+    model_name = _model_name(chat_req.model)
     handler = ModelManager.instance().text_gen()
     offered = tc.offered_tools(tools, choice)
     uses_tool_turns = any(m["role"] == "tool" or m.get("tool_calls") for m in history)
     if (offered or uses_tool_turns) and not handler.supports_tools:
-        return _tool_error(400, f"{_model_name(chat_req.model)} does not support tool calling",
+        return _tool_error(400, f"{model_name} does not support tool calling",
                            "invalid_request_error")
 
     image_tensors = None
     if image_urls:
         try:
             _, image_tensors = await mods.load_images(image_urls)
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             return _tool_error(400, str(exc), "invalid_request_error")
 
-    model_name = _model_name(chat_req.model)
     parallel = chat_req.parallel_tool_calls is not False
     info: dict = {}
     kwargs = dict(
@@ -263,11 +273,17 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
         tools=[t.for_template() for t in offered] or None,
         finish_info=info,
     )
+    if choice.requires_call:
+        # "required" and named choices are enforced by starting the answer
+        # with the call rather than hoping the model chooses one.
+        kwargs["force_tool_call"] = choice.name or ""
     try:
         if chat_req.stream:
             token_iter = await run_in_threadpool(handler.generate, stream=True, **kwargs)
+            # Positioned after the prompt: inside reasoning or a forced call.
             parser = tc.ToolStreamParser(tools, choice, parallel=parallel,
-                                         reasoning_open=bool(info.get("reasoning_open")))
+                                         reasoning_open=bool(info.get("reasoning_open")),
+                                         prefill=info.get("prefill") or "")
             return StreamingResponse(
                 _tool_sse_stream(token_iter, parser, info, model_name),
                 media_type="text/event-stream",
@@ -281,13 +297,16 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
             str(output), tools, choice, parallel=parallel,
             truncated=bool(info.get("truncated")),
             reasoning_open=bool(info.get("reasoning_open")),
+            prefill=info.get("prefill") or "",
         )
     except tc.ToolOutputError as exc:
         # Never returned as a successful tool invocation.
         logger.warning("Rejected generated tool call: %s", exc)
         return _tool_error(exc.status, str(exc), exc.kind)
 
-    message = {"role": "assistant", "content": turn.content.strip() or None}
+    message = {"role": "assistant", "content": turn.content or None}
+    if turn.reasoning:
+        message["reasoning_content"] = turn.reasoning
     if turn.tool_calls:
         message["tool_calls"] = turn.tool_calls
     prompt_tokens, completion_tokens = info.get("input_tokens"), info.get("output_tokens")
@@ -306,47 +325,36 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
     })
 
 
+# Parser event -> SSE delta field.
+_DELTA_FIELD = {"content": "content", "reasoning": "reasoning_content"}
+
+
 def _tool_sse_stream(token_iter, parser: "tc.ToolStreamParser", info: dict,
                      model_name: str) -> Iterator[str]:
     """SSE with buffered tool calls: a call is published only once complete and valid."""
-    created = int(time.time())
-    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-
-    def _chunk(delta: dict, finish_reason: Optional[str] = None) -> str:
-        payload = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model_name,
-            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
-        }
-        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
+    chunk = _chunk_writer(model_name)
     calls = []
     try:
-        yield _chunk({"role": "assistant"})
+        yield chunk({"role": "assistant"})
         for token in token_iter:
             for kind, value in parser.feed(token):
-                if kind == "content":
-                    yield _chunk({"content": value})
-                else:
+                if kind == "call":
                     calls.append(value)
-        for _, value in parser.finish(bool(info.get("truncated"))):
-            yield _chunk({"content": value})
+                else:
+                    yield chunk({_DELTA_FIELD[kind]: value})
+        for kind, value in parser.finish(bool(info.get("truncated"))):
+            yield chunk({_DELTA_FIELD[kind]: value})
         if parser.finish_reason == "tool_calls":
             # Held until the turn is known complete: like the non-streaming
-            # parser, a truncated turn publishes none of its calls.
+            # path, a truncated turn publishes none of its calls.
             for index, call in enumerate(calls):
-                yield _chunk({"tool_calls": [{"index": index, **call}]})
-        yield _chunk({}, finish_reason=parser.finish_reason)
+                yield chunk({"tool_calls": [{"index": index, **call}]})
+        yield chunk({}, finish_reason=parser.finish_reason)
     except tc.ToolOutputError as exc:
         # Terminate with an error instead of claiming a tool-call finish.
         logger.warning("Rejected generated tool call mid-stream: %s", exc)
         error = {"error": {"message": str(exc), "type": exc.kind, "code": None}}
         yield f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
     finally:
-        # Stops native generation if we stopped reading early.
-        close = getattr(token_iter, "close", None)
-        if close is not None:
-            close()
+        _close(token_iter)
     yield "data: [DONE]\n\n"

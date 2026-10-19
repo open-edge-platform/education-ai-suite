@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import gc
+import json
 import logging
 import math
 import re
@@ -59,6 +60,7 @@ class VLMTextGen:
         # Active speculative settings; None means plain generation.
         self._speculative: Optional[SpeculativeSettings] = None
         self._tool_calls = False
+        self._xml_tool_calls = False
         self._status: dict = {}
         self._load_config()
         self._load()
@@ -218,7 +220,17 @@ class VLMTextGen:
         if declared and not renders_tools:
             logger.warning("%s chat template does not render tools; tool calling disabled.",
                            self._model_name)
+        # Qwen3.5+ templates ask for <function=...> XML calls, Qwen3 for JSON.
+        self._xml_tool_calls = "<function=" in str(getattr(self.tokenizer, "chat_template", ""))
         return bool(renders_tools and declared is not False)
+
+    def _call_opening(self, name: str) -> str:
+        """Start of a call to ``name`` in this model's syntax; empty for any function."""
+        if not name:
+            return ""
+        if self._xml_tool_calls:
+            return f"<function={name}>\n"
+        return '{"name": ' + json.dumps(name) + ', "arguments": '
 
     def _discard_pipeline(self) -> None:
         self._pipe = None
@@ -281,6 +293,7 @@ class VLMTextGen:
         enable_thinking: Optional[bool] = None,
         json_schema: Optional[str] = None,
         tools: Optional[list] = None,
+        force_tool_call: Optional[str] = None,
         call=None,
         finish_info: Optional[dict] = None,
     ) -> Union[Iterator[str], str]:
@@ -304,6 +317,10 @@ class VLMTextGen:
         matching that schema.
         ``tools`` (OpenAI function definitions) is rendered through the
         model's tool-aware template; it requires a tool-capable model.
+        ``force_tool_call`` starts the answer with a tool call: ``""`` for any
+        offered function, or a function name. The prompt ends with the opening
+        of the call in the model's own syntax (reasoning is closed first), and
+        ``finish_info["prefill"]`` holds that text, which the output continues.
         ``call`` (a ``utils.processing_stats.ModelCall``) records timing, and
         ``finish_info`` receives token counts and truncation once generation
         ends.
@@ -324,7 +341,7 @@ class VLMTextGen:
                 f"{self._speculative.method} pipeline supports greedy decoding only; "
                 "omit temperature or set it to 0"
             )
-        if tools and not self._tool_calls:
+        if (tools or force_tool_call is not None) and not self._tool_calls:
             raise UnsupportedRequestError(f"{self._model_name} does not support tool calling")
 
         if call is not None:
@@ -332,9 +349,17 @@ class VLMTextGen:
         try:
             config = self._generation_config(max_new_tokens, temperature, json_schema)
             prompt = self._render(messages, config, enable_thinking, bool(images), tools)
+            prefill = ""
+            if force_tool_call is not None:
+                prefill = "<tool_call>\n" + self._call_opening(force_tool_call)
+                if prompt.rstrip().endswith("<think>"):
+                    # The template's own form of a turn without reasoning.
+                    prompt = prompt.rstrip() + "\n\n</think>\n\n"
+                prompt += prefill
             if finish_info is not None:
                 finish_info["max_new_tokens"] = config.max_new_tokens
                 finish_info["reasoning_open"] = prompt.rstrip().endswith("<think>")
+                finish_info["prefill"] = prefill
 
             if stream:
                 think_filter = StreamThinkFilter() if enable_thinking is False else None
@@ -380,10 +405,12 @@ class VLMTextGen:
             config.apply_chat_template = False
             return prompt
         except Exception as exc:  # noqa: BLE001 - model without a chat template
-            if tools:
-                # The pipeline fallback would drop the definitions silently.
+            if tools or any(m.get("role") == "tool" or m.get("tool_calls") for m in messages):
+                # The pipeline fallback would keep only the last turn and drop
+                # the definitions and tool results silently.
                 raise UnsupportedRequestError(
-                    f"{self._model_name} chat template could not render tools"
+                    f"{self._model_name} chat template could not render this tool "
+                    f"conversation: {_sanitize(exc)}"
                 ) from exc
             logger.warning(
                 "Chat template rendering failed (%s); letting the pipeline "

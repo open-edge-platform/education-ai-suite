@@ -87,6 +87,7 @@ def _vlm(pipe, speculative=None):
     vlm._max_new_tokens = 64
     vlm._speculative = speculative
     vlm._tool_calls = True
+    vlm._xml_tool_calls = False
     vlm._plan = None
     vlm._status = {}
     return vlm
@@ -234,3 +235,36 @@ def test_tools_are_rendered_and_require_capability():
     vlm._tool_calls = False
     with pytest.raises(UnsupportedRequestError, match="tool calling"):
         vlm.generate("q", stream=False, tools=tools)
+
+
+@pytest.mark.parametrize("xml, name, opening", [
+    (False, "f", '<tool_call>\n{"name": "f", "arguments": '),
+    (True, "f", "<tool_call>\n<function=f>\n"),
+    (True, "", "<tool_call>\n"),
+])
+def test_forced_tool_call_closes_reasoning_and_opens_the_call(xml, name, opening):
+    pipe = _Pipe()
+    vlm = _vlm(pipe)
+    vlm._xml_tool_calls = xml
+    info = {}
+    tools = [{"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}}]
+    vlm.generate(messages=[{"role": "user", "content": "q"}], stream=False, tools=tools,
+                 enable_thinking=True, max_new_tokens=1, force_tool_call=name, finish_info=info)
+    assert pipe.prompts[-1] == "q|TOOLS<think>\n\n</think>\n\n" + opening
+    assert info["prefill"] == opening and info["reasoning_open"] is False
+
+
+def test_tool_conversation_never_falls_back_to_the_last_turn():
+    class _Broken(_Tokenizer):
+        def apply_chat_template(self, *args, **kwargs):
+            raise ValueError("System message must be at the beginning.")
+
+    pipe = _Pipe()
+    vlm = _vlm(pipe)
+    vlm.tokenizer = _Broken()
+    history = [{"role": "user", "content": "q"},
+               {"role": "assistant", "content": "", "tool_calls": [{"id": "c"}]},
+               {"role": "tool", "content": "21", "tool_call_id": "c"}]
+    with pytest.raises(UnsupportedRequestError, match="could not render"):
+        vlm.generate(messages=history, stream=False)
+    assert pipe.prompts == []

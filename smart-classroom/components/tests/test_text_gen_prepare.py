@@ -155,8 +155,53 @@ def test_pinned_revision_mismatch_replaces_drafter_when_downloads_allowed(env):
     result = prep.prepare(plan, genai_version=GENAI)
     assert result.speculative.draft_revision == OTHER
     assert env.exports == [("z-lab/Qwen3.6-35B-A3B-DFlash", OTHER)]
+
+
+def test_target_download_is_retried_but_a_local_export_is_not(tmp_path, monkeypatch):
+    attempts = []
+
+    def convert(name, cache_dir, model_type, weight_format):
+        attempts.append(name)
+        if len(attempts) == 1:
+            raise RuntimeError("connection reset")
+        (Path(cache_dir) / "ready").write_text("1", encoding="utf-8")
+
+    def ready(model_dir, require_detokenizer):
+        return (Path(model_dir) / "ready").is_file()
+
+    monkeypatch.setattr(prep, "_convert_helpers", lambda: (convert, ready))
+    monkeypatch.setattr(prep.time, "sleep", lambda s: None)
+    monkeypatch.setattr(prep, "check_tokenizer_runtime", lambda model_dir, installed: None)
+    catalog = SimpleNamespace(model_name="Qwen/Qwen3.5-9B", weight_format="int4",
+                              target_dir=tmp_path / "int4")
+    assert prep._prepare_target(catalog) == catalog.target_dir and len(attempts) == 2
+    attempts.clear()
+    custom = SimpleNamespace(model_name="org/custom", weight_format="int4",
+                             target_dir=tmp_path / "custom")
+    with pytest.raises(prep.PreparationError, match="connection reset"):
+        prep._prepare_target(custom)
+    assert len(attempts) == 1
+
+
+def test_successful_export_sets_the_previous_drafter_aside(tmp_path, monkeypatch):
+    def run(cmd, env=None, check=False):
+        staging = Path(cmd[-1])
+        staging.mkdir(parents=True)
+        for name in prep._DRAFT_IR_FILES:
+            (staging / name).write_text("{}", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(prep.subprocess, "run", run)
+    settings = resolve_plan(SimpleNamespace(
+        vlm_name="Qwen/Qwen3.6-35B-A3B", weight_format="int4", device="GPU",
+        speculative={"mode": "auto"})).speculative
+    source = _write_draft(tmp_path / "src")
+    draft_dir = _write_draft(tmp_path / "int4", prepared=COMMIT)
+    prep._export_draft(source, draft_dir, settings, "z-lab/x", OTHER)
+    assert json.loads((draft_dir / ".prepared.json").read_text())["revision"] == OTHER
+    assert "dflash_config" in json.loads((draft_dir / "config.json").read_text())
     # The superseded drafter is moved aside, not deleted (rollback).
-    assert any(p.name.startswith("int4.superseded-") for p in plan.speculative.draft_dir().parent.iterdir())
+    assert any(p.name.startswith("int4.superseded-") for p in tmp_path.iterdir())
 
 
 def test_drafter_export_command_runs_no_repository_code(tmp_path, monkeypatch):

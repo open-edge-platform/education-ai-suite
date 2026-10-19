@@ -17,6 +17,7 @@ This module is pure (no model, no FastAPI) so every rule is unit-testable:
   -- into OpenAI ``tool_calls``, validating each against the offered schema.
   An invalid or missing required call raises :class:`ToolOutputError`; a call
   cut off by the token limit is reported as ``finish_reason: "length"``.
+  Reasoning (``<think>``) is returned apart from the content.
 
 Error messages name schema paths and expectations, never argument values:
 tool arguments and results are untrusted and may be sensitive.
@@ -318,8 +319,10 @@ def _content_text(content, where: str, allow_images: bool, images: list) -> str:
             if not allow_images:
                 raise ToolRequestError(f"{where}: images are only supported in user messages")
             url = (part.get("image_url") or {}).get("url")
-            if not url:
-                raise ToolRequestError(f"{where}: image_url part without url")
+            # Inline images only: conversation content is untrusted, so it
+            # never names a server-side file or makes the server fetch a URL.
+            if not isinstance(url, str) or not url.startswith("data:image/"):
+                raise ToolRequestError(f"{where}: image_url must be a data:image/ URL")
             tags.append(MEDIA_TAG_FMT.format(len(images)))
             images.append(url)
         else:
@@ -384,6 +387,10 @@ def normalize_history(messages: list) -> tuple:
             entry = {"role": "assistant", "content": text}
             if rendered:
                 entry["tool_calls"] = rendered
+            if isinstance(msg.get("reasoning_content"), str):
+                # Returned by this server; thinking templates keep it for the
+                # turns of the current tool loop.
+                entry["reasoning_content"] = msg["reasoning_content"]
             out.append(entry)
         elif role == "tool":
             call_id = msg.get("tool_call_id")
@@ -502,34 +509,40 @@ class ParsedTurn:
     content: str
     tool_calls: list = field(default_factory=list)
     finish_reason: str = "stop"
+    reasoning: str = ""
 
 
 def parse_completion(text: str, tools: list, choice: ToolChoice, *, parallel: bool = True,
-                     truncated: bool = False, reasoning_open: bool = False) -> ParsedTurn:
+                     truncated: bool = False, reasoning_open: bool = False,
+                     prefill: str = "") -> ParsedTurn:
     """Parse a complete generation (non-streaming)."""
-    parser = ToolStreamParser(tools, choice, parallel=parallel, reasoning_open=reasoning_open)
+    parser = ToolStreamParser(tools, choice, parallel=parallel, reasoning_open=reasoning_open,
+                              prefill=prefill)
     events = parser.feed(text) + parser.finish(truncated)
     content = "".join(v for kind, v in events if kind == "content")
+    reasoning = "".join(v for kind, v in events if kind == "reasoning").strip()
     calls = [v for kind, v in events if kind == "call"]
     if parser.finish_reason == "length":
         # A truncated turn is not a successful tool invocation, even if some
         # calls before the cut were complete.
         calls = []
-    return ParsedTurn(content, calls, parser.finish_reason)
+    return ParsedTurn(content, calls, parser.finish_reason, reasoning)
 
 
 class ToolStreamParser:
     """Incremental parser: emits text as it becomes safe, calls once validated.
 
-    ``feed`` returns ``("content", str)`` and ``("call", dict)`` events. Text
-    that might begin a ``<tool_call>`` or ``<think>`` tag is held back until it
-    is decided. Calls inside reasoning are never parsed. With
+    ``feed`` returns ``("content", str)``, ``("reasoning", str)`` and
+    ``("call", dict)`` events. Text that might begin a ``<tool_call>`` or
+    ``<think>`` tag is held back until it is decided; whitespace around the
+    tags is not content. Calls inside reasoning are never parsed. With
     ``reasoning_open`` the prompt already opened ``<think>`` (thinking models),
-    so output starts inside reasoning.
+    so output starts inside reasoning; ``prefill`` is prompt text the output
+    continues (the opening of a forced call).
     """
 
     def __init__(self, tools: list, choice: ToolChoice, *, parallel: bool = True,
-                 reasoning_open: bool = False) -> None:
+                 reasoning_open: bool = False, prefill: str = "") -> None:
         self.tools = tools
         self.choice = choice
         self.parallel = parallel
@@ -538,7 +551,10 @@ class ToolStreamParser:
         self._in_think = reasoning_open
         self._in_call = False
         self._calls = 0
+        self._content_started = False
+        self._pending_space = ""
         self.finish_reason: Optional[str] = None
+        self.feed(prefill)  # an unfinished call opening yields no events
 
     def feed(self, text: str) -> list:
         self._buffer += text
@@ -550,38 +566,50 @@ class ToolStreamParser:
                     return events
                 body, self._buffer = self._buffer[:end], self._buffer[end + len(TOOL_CLOSE):]
                 self._in_call = False
+                if self._calls and not self.parallel:
+                    continue  # parallel_tool_calls: false keeps the first call only
                 name, args = parse_call_body(body, self.tools)
                 check_call(name, args, self.tools, self.choice)
-                if self._calls == 0 or self.parallel:
-                    self._calls += 1
-                    events.append(("call", _call_payload(name, args)))
+                self._calls += 1
+                events.append(("call", _call_payload(name, args)))
                 continue
             if self._in_think:
                 end = self._buffer.find(THINK_CLOSE)
                 if end < 0:
-                    events += self._emit_safe((THINK_CLOSE,))
+                    events += self._emit_safe((THINK_CLOSE,), "reasoning")
                     return events
-                cut = end + len(THINK_CLOSE)
-                events.append(("content", self._buffer[:cut]))
-                self._buffer = self._buffer[cut:]
+                if end:
+                    events.append(("reasoning", self._buffer[:end]))
+                self._buffer = self._buffer[end + len(THINK_CLOSE):]
                 self._in_think = False
                 continue
             markers = (THINK_OPEN, TOOL_OPEN) if self._parse_calls else (THINK_OPEN,)
             hits = [(self._buffer.find(m), m) for m in markers if self._buffer.find(m) >= 0]
             if not hits:
-                events += self._emit_safe(markers)
+                events += self._emit_safe(markers, "content")
                 return events
             pos, marker = min(hits)
-            if pos:
-                events.append(("content", self._buffer[:pos]))
+            events += self._content(self._buffer[:pos])
             if marker == THINK_OPEN:
-                events.append(("content", THINK_OPEN))
                 self._in_think = True
             else:
                 self._in_call = True
+                self._pending_space = ""
             self._buffer = self._buffer[pos + len(marker):]
 
-    def _emit_safe(self, markers: tuple) -> list:
+    def _content(self, text: str) -> list:
+        """Content without leading/trailing whitespace; inner whitespace is kept."""
+        text = self._pending_space + text
+        if not self._content_started:
+            text = text.lstrip()
+        body = text.rstrip()
+        self._pending_space = text[len(body):]
+        if not body:
+            return []
+        self._content_started = True
+        return [("content", body)]
+
+    def _emit_safe(self, markers: tuple, kind: str) -> list:
         """Emit the buffer except a suffix that could still start a marker."""
         hold = 0
         for marker in markers:
@@ -591,7 +619,9 @@ class ToolStreamParser:
                     break
         out = self._buffer[:len(self._buffer) - hold]
         self._buffer = self._buffer[len(self._buffer) - hold:]
-        return [("content", out)] if out else []
+        if kind == "content":
+            return self._content(out)
+        return [(kind, out)] if out else []
 
     def finish(self, truncated: bool) -> list:
         """Flush the stream; decide ``finish_reason`` or raise ToolOutputError."""
@@ -604,7 +634,8 @@ class ToolStreamParser:
             self.finish_reason = "length"
             return events
         if self._buffer:
-            events.append(("content", self._buffer))
+            events += ([("reasoning", self._buffer)] if self._in_think
+                       else self._content(self._buffer))
             self._buffer = ""
         if self._calls:
             self.finish_reason = "tool_calls"

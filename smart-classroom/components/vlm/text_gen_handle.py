@@ -50,6 +50,7 @@ class TextGenHandler:
         enable_thinking: Optional[bool] = None,
         json_schema: Optional[str] = None,
         tools: Optional[list] = None,
+        force_tool_call: Optional[str] = None,
         finish_info: Optional[dict] = None,
     ) -> Union[Iterator[str], str]:
         """Generate from ``messages`` (a chat history) or ``prompt`` (one user
@@ -59,11 +60,11 @@ class TextGenHandler:
         latency) attributed to the stage open in the caller's context."""
         runner = self._get_runner()
         call = self._model_call(stream)
-        extra = {}
-        if tools is not None:
-            extra["tools"] = tools
-        if finish_info is not None:
-            extra["finish_info"] = finish_info
+        # Tool-calling arguments only when used, as classroom callers pass none.
+        extra = {key: value for key, value in (("tools", tools),
+                                               ("force_tool_call", force_tool_call),
+                                               ("finish_info", finish_info))
+                 if value is not None}
         try:
             return runner.submit(
                 prompt,
