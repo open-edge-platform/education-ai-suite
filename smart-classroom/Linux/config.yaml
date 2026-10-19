@@ -7,12 +7,7 @@ features:
   asr:                { enabled: true }
   summary:            { enabled: true }
   mindmap:            { enabled: true }
-  topic_segmentation: { enabled: false }
   board_ocr:          { enabled: true }
-  content_search:     { enabled: false }
-  qa:                 { enabled: false }
-  grading:            { enabled: false }
-  report:             { enabled: false }
 
 monitoring:
   logs_dir: ./monitoring/logs
