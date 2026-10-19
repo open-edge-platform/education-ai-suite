@@ -74,9 +74,18 @@ _DRAFT_SOURCE_PATTERNS = ["*.json", "*.safetensors"]
 # optimum-intel ships DFlash drafter classes but selects them only through
 # trust_remote_code; the export subprocess registers them instead, so no
 # repository code can run. They are subclassed because optimum-intel treats
-# classes defined under ``optimum.*`` as wrappers around another model.
+# classes defined under ``optimum.*`` as wrappers around another model. The
+# first lines are convert_worker.skip_unloadable_optional_modules(), inlined
+# because this script runs isolated (-I): optional ``datasets`` imports pyarrow,
+# whose DLLs Windows Application Control may block, so a module that cannot be
+# loaded is marked missing instead of failing the export.
 _DFLASH_EXPORT = """\
-import sys
+import importlib, sys
+try:
+    importlib.import_module("datasets")
+except ImportError as exc:
+    sys.modules["datasets"] = None
+    print(f"Optional module datasets cannot be loaded ({exc}); exporting without it.")
 from transformers import AutoModel, AutoModelForCausalLM, Qwen3Config
 from optimum.exporters.openvino import model_patcher as mp
 class DFlashDraftModel(mp.Qwen3DFlashDraftModel): pass
