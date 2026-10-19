@@ -4,3 +4,9 @@
 [submodule "ai-teaching-assistant/voice-enabled-interactions"]
 	path = ai-teaching-assistant/voice-enabled-interactions
 	url = https://github.com/intel-retail/voice-enabled-interactions.git
+[submodule "smart-classroom/Linux/edge-ai-libraries"]
+	path = smart-classroom/Linux/edge-ai-libraries
+	url = https://github.com/open-edge-platform/edge-ai-libraries.git
+[submodule "smart-classroom/Linux/performance-tools"]
+	path = smart-classroom/Linux/performance-tools
+	url = https://github.com/intel-retail/performance-tools.git

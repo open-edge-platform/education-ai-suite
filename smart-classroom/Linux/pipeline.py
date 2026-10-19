@@ -1,0 +1,352 @@
+from fastapi import HTTPException, status
+import re
+import requests
+from components.asr_remote import RemoteASRComponent
+from utils.config_loader import config
+import logging, os
+from utils.session_manager import generate_session_id
+from components.summarizer_component import SummarizerComponent
+from components.mindmap_component import MindmapComponent
+from components.segmentation.content_segmentation import ContentSegmentationComponent
+from model_manager import ModelManager
+from components.report_generator.report_generator import ReportGenerator
+from utils.runtime_config_loader import RuntimeConfig
+from utils.storage_manager import StorageManager
+from utils.session_paths import SessionPaths
+from utils.markdown_cleaner import markdown_to_plain
+from monitoring import monitor
+from pathlib import Path
+import json
+from utils.media_validation_service import MediaValidationService
+from utils.session_state_manager import SessionState
+from utils.content_search_client import ContentSearchClient
+import time
+logger = logging.getLogger(__name__)
+
+class Pipeline:
+    def __init__(self, session_id=None):
+        logger.info("pipeline initialized")
+        self.session_id = session_id or generate_session_id()
+        # Transcription is served by the audio-analyzer microservice; no
+        # in-process ASR model is bound here.
+        self.summarizer_pipeline = [
+            SummarizerComponent(self.session_id, mode=config.models.summarizer.mode)
+        ]
+        
+        text_gen_handler = ModelManager.instance().text_gen()
+
+        self.mindmap_component = MindmapComponent(
+                self.session_id,
+                provider=config.models.text_gen.provider,
+                model_name=config.models.text_gen.vlm_name,
+                device=config.models.text_gen.device,
+            )
+
+        self.mindmap_component.model = text_gen_handler
+
+        self.content_component = ContentSegmentationComponent(
+            self.session_id,
+            temperature=0.2
+        )
+
+        self.content_component.model = text_gen_handler
+
+    @property
+    def board_ocr_partial(self) -> bool:
+        """True once run_summarizer() has read a board OCR extraction that was
+        still being produced. Only meaningful after the first token."""
+        return any(getattr(c, "board_ocr_partial", False) for c in self.summarizer_pipeline)
+
+    def run_transcription(self, input):
+        audio_path = getattr(input, "audio_filename", None)
+        if not audio_path and isinstance(input, dict):
+            audio_path = input.get("audio_filename")
+        if not audio_path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No audio file provided for transcription.",
+            )
+
+        component = RemoteASRComponent(
+            self.session_id,
+            temperature=config.models.asr.temperature,
+            language=getattr(config.app, "language", "en"),
+        )
+        try:
+            for chunk_transcription in component.process(audio_path):
+                yield chunk_transcription
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        except requests.RequestException as e:
+            logger.error("Audio analyzer service error: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Audio analyzer service is unavailable.",
+            )
+            
+    
+    def run_summarizer(self):
+
+        transcription_path = str(SessionPaths.transcript_path(self.session_id))
+
+        try:
+            input = StorageManager.read_text_file(transcription_path)
+            if not input:
+                logger.error(f"Transcription is empty. No content available for summarization.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transcription is empty. No content available for summarization.")
+        except FileNotFoundError:
+            logger.error(f"Invalid Session ID: {self.session_id}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid session id: {self.session_id}, transcription not found.")
+        except Exception:
+            logger.error(f"An unexpected error occurred while accessing the transcription.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred while accessing the transcription.")
+        
+        for component in self.summarizer_pipeline:
+            input = component.process(input)
+
+        try:
+            for token in input:
+                yield token
+        finally: 
+            pass 
+
+    def run_mindmap(self):
+
+        summary_path = str(SessionPaths.summary_path(self.session_id))
+        min_tokens = config.mindmap.min_token
+
+        try:
+            summary_md = StorageManager.read_text_file(summary_path)
+
+            if not summary_md:
+                logger.error("Summary is empty. Cannot generate mindmap.")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Summary is empty. Cannot generate mindmap."
+                )
+
+        except FileNotFoundError:
+            logger.error(f"Invalid Session ID: {self.session_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid session id: {self.session_id}, summary not found."
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error while accessing summary: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred while accessing the summary."
+            )
+        summary_plain = markdown_to_plain(summary_md)
+
+        token_count = len(re.findall(r'[\u4e00-\u9fff]|[^\u4e00-\u9fff\s]+', summary_plain))
+        logger.info(f"Summary token count: {token_count}, Minimum required: {min_tokens}")
+
+        if token_count < min_tokens:
+            logger.warning("Insufficient information to generate mindmap.")
+            insufficient_mindmap = {
+                "meta": {
+                    "name": "insufficient_input",
+                    "author": "ai_assistant",
+                    "version": "1.0"
+                },
+                "format": "node_tree",
+                "data": {
+                    "id": "root",
+                    "topic": "Insufficient Input",
+                    "children": [
+                        {
+                            "id": "insufficient_info",
+                            "topic": "Insufficient Information",
+                            "children": [
+                                {
+                                    "id": "short_summary",
+                                    "topic": "The summary is too short to generate a meaningful mindmap"
+                                },
+                                {
+                                    "id": "token_info",
+                                    "topic": f"Current tokens: {token_count}, Required: {min_tokens}"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+            
+            # Convert to JSON string
+            import json
+            insufficient_mindmap_json = json.dumps(insufficient_mindmap, indent=2)
+            
+            mindmap_path = str(SessionPaths.mindmap_path(self.session_id))
+            StorageManager.save(mindmap_path, insufficient_mindmap_json, append=False)
+            return insufficient_mindmap_json
+
+        try:
+            full_mindmap = self.mindmap_component.generate_mindmap(summary_plain)
+            logger.info("Mindmap generation successful.")
+            return full_mindmap
+
+        except Exception as e:
+            logger.error(f"Error during mindmap generation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error during mindmap generation: {e}"
+            )
+        finally:
+            pass
+
+    def run_content_segmentation(self):
+
+        transcription_path = str(SessionPaths.segmentation_transcript_path(self.session_id))
+
+        session_state = SessionState.get_session_state(self.session_id)
+        # VALIDATION: Check media duration match before processing
+        is_valid, error_msg = MediaValidationService.validate_duration_match(self.session_id)
+        
+        if not is_valid:
+            SessionState.clear_session(self.session_id)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+
+        logger.info(f"✅ Validation passed - proceeding with content segmentation")
+
+        try:
+            transcript_text = StorageManager.read_text_file(transcription_path)
+
+            if not transcript_text:
+                logger.error("Transcription is empty. Cannot generate topic segmentation.")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Transcription is empty. Cannot generate topic segmentation."
+                )
+
+        except FileNotFoundError:
+            logger.error(f"Invalid Session ID: {self.session_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid session id: {self.session_id}, transcription not found."
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error while accessing transcription: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred while accessing the transcription."
+            )
+
+        try:
+            import json
+            from pathlib import Path
+
+            # 🔹 Generate topics (returns JSON string from LLM)
+            topic_json_str = self.content_component.generate_topics(
+                transcript_text,
+                language=config.app.language,
+            )
+
+            # 🔹 Save raw JSON string
+            topic_path = str(SessionPaths.topics_path(self.session_id))
+            StorageManager.save(topic_path, topic_json_str, append=False)
+
+            # 🔥 Convert to Python object (CRITICAL FIX)
+            topics = json.loads(topic_json_str)
+
+            # Primary: content-search service handles embedding
+            cs_client = ContentSearchClient()
+            cs_client.ingest_topics(
+                session_id=self.session_id,
+                topics=topics,
+                transcript_text=transcript_text,
+            )
+
+            # ✅ Return parsed Python object (not string)
+            return topics
+
+        except Exception as e:
+            logger.error(f"Error during topic segmentation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error during topic segmentation: {e}"
+            )
+        finally:
+            # Clean up session state after processing
+            SessionState.clear_session(self.session_id)
+
+
+    def search_content(self, query: str, top_k: int = 5):
+        cs_client = ContentSearchClient()
+        results = cs_client.search_topics(query=query, top_k=top_k)
+        if results is None:
+            results = []
+        logger.info("Search returned %d result(s) from content-search service.", len(results))
+        return results
+
+    def run_report_generator(self, selected_fields=None, manual_fields=None):
+        """Generate a class evaluation report deterministically (non-agent).
+
+        Uses the ReportGenerator pipeline: collect all session data → fill the
+        default template with the teacher-selected fields → stream the result.
+        ``selected_fields`` is the list of catalog field codes to include (None =
+        the whole catalog); ``manual_fields`` are teacher-typed basic-info values.
+        Template filling lives entirely inside ReportGenerator.
+        """
+        session_dir = str(SessionPaths.session_dir(self.session_id))
+
+        if not os.path.exists(session_dir):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid session id: {self.session_id}, session directory not found.",
+            )
+
+        text_gen_handler = ModelManager.instance().text_gen()
+
+        generator = ReportGenerator(
+            session_id=self.session_id,
+            model=text_gen_handler,
+            selected_fields=selected_fields,
+            manual_fields=manual_fields,
+        )
+
+        try:
+            for event in generator.generate_report():
+                yield event
+        except Exception as e:
+            logger.error(f"Error during report generation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Report generation failed: {e}",
+            )
+
+    def reapply_report_selection(self, selected_fields=None, manual_fields=None) -> dict:
+        """Re-render an existing report for a new field selection — no LLM re-run.
+
+        Re-projects the cached full-catalog field values (from a prior
+        run_report_generator) onto the template, dropping the deselected fields and
+        applying any updated ``manual_fields`` (basic info). See
+        ReportGenerator.reapply_selection. Returns {session_id, report}.
+        """
+        session_dir = str(SessionPaths.session_dir(self.session_id))
+        if not os.path.exists(session_dir):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid session id: {self.session_id}, session directory not found.",
+            )
+
+        text_gen_handler = ModelManager.instance().text_gen()
+
+        generator = ReportGenerator(
+            session_id=self.session_id,
+            model=text_gen_handler,
+            selected_fields=selected_fields,
+            manual_fields=manual_fields,
+        )
+        try:
+            return generator.reapply_selection(selected_fields)
+        except Exception as e:
+            logger.error(f"Error during report re-selection: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Report re-selection failed: {e}",
+            )

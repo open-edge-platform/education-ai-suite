@@ -1,0 +1,1809 @@
+import type { StreamEvent, StreamOptions } from './streamSimulator';
+import { listBrowserMicrophones } from './realtimeMic';
+import { store } from "../redux/store";
+import {
+  setVideoStatus,
+  setVideoAnalyticsActive,
+  setVideoPlaybackMode
+} from "../redux/slices/uiSlice";
+import type { CsSearchParams, CsSearchResult } from "../components/LeftPanel/ResultSection";
+
+export type ProjectConfig = {
+  name: string;
+  location: string;
+  microphone: string;
+  frontCamera?: string;
+  backCamera?: string;
+  boardCamera?: string
+};
+
+export type Settings = {
+  projectName: string;
+  projectLocation: string;
+  microphone: string;
+  frontCamera?: string;
+  backCamera?: string;
+  boardCamera?: string
+};
+
+export type SessionMode = 'record' | 'upload';
+export type StartSessionRequest = { projectName: string; projectLocation: string; microphone: string; mode: SessionMode };
+export type StartSessionResponse = { sessionId: string };
+
+export interface SearchRequest {
+  session_id: string;
+  query: string;
+  top_k?: number;
+}
+
+export interface SearchResult {
+  session_id: string;
+  query: string;
+  results: any[];
+}
+
+const env = (import.meta as any).env ?? {};
+
+function resolveBackendBaseUrl(): string {
+  if (env.VITE_API_BASE_URL) {
+    return String(env.VITE_API_BASE_URL).replace(/\/$/, '');
+  }
+
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    const host = window.location.hostname;
+    const candidate = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0'
+      ? '127.0.0.1'
+      : host;
+    return `http://${candidate}:8000`;
+  }
+
+  return 'http://127.0.0.1:8000';
+}
+
+const BASE_URL: string = resolveBackendBaseUrl();
+// Default to empty string (same-origin) so the Vite dev proxy routes /api/v1
+// to port 9011 without CORS. Set VITE_CONTENT_SEARCH_API_URL for remote hosts.
+const CONTENT_SEARCH_API_URL: string = env.VITE_CONTENT_SEARCH_API_URL || '';
+const GRADING_API_URL: string = env.VITE_GRADING_API_URL || '/grading-api';
+const HEALTH_TIMEOUT_MS = 5000;
+// Content Search wraps every reply in {code, data, message}; only this code means success.
+const CS_SUCCESS_CODE = 20000;
+
+// ============================================================================
+// FEATURE CONFIGURATION API
+// ============================================================================
+
+export interface FeatureDescriptor {
+  id: string;
+  dependency: string[];
+  requires: string[];
+  endpoints?: Record<string, string>;
+  mode?: string;
+  chunking?: boolean;
+}
+
+/**
+ * Fetch enabled features with full UI descriptors from backend
+ * This is the foundation for dynamic UI rendering
+ */
+export async function fetchFeatures(): Promise<FeatureDescriptor[]> {
+  const res = await fetch(`${BASE_URL}/features`, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch features: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.features || [];
+}
+
+/**
+ * Get endpoint URL for a specific feature action
+ */
+export function getFeatureEndpoint(
+  features: FeatureDescriptor[],
+  featureId: string,
+  endpointKey: string
+): string | null {
+  const feature = features.find(f => f.id === featureId);
+  return feature?.endpoints?.[endpointKey] || null;
+}
+
+
+/**
+ * Convert a local:// storage path from search results into a browser-loadable URL
+ * using the backend /download?inline=true endpoint.
+ * e.g. "local://content-search/runs/.../image.jpg" → "/api/v1/object/download?file_key=runs%2F...%2Fimage.jpg&inline=true"
+ */
+export function getContentSearchFileUrl(filePath: string): string {
+  return csDownloadUrl(extractFileKey(filePath), true);
+}
+
+/**
+ * Strip the `local://<bucket>/` prefix from a search result's file_path, yielding the
+ * storage file_key. Paths that are already keys are returned unchanged.
+ */
+export function extractFileKey(filePath: string): string {
+  const LOCAL_PREFIX = 'local://content-search/';
+  return filePath.startsWith(LOCAL_PREFIX) ? filePath.slice(LOCAL_PREFIX.length) : filePath;
+}
+
+/**
+ * Build the backend /download URL for a storage file_key.
+ * `inline` renders in the browser (preview); otherwise it downloads as an attachment.
+ */
+export function csDownloadUrl(fileKey: string, inline = false): string {
+  const base = `${CONTENT_SEARCH_API_URL}/api/v1/object/download?file_key=${encodeURIComponent(fileKey)}`;
+  return inline ? `${base}&inline=true` : base;
+}
+
+/**
+ * Returns the download URL for an OCR text file (triggers download, not inline display).
+ */
+export function getOcrDownloadUrl(fileKey: string): string {
+  return `${CONTENT_SEARCH_API_URL}/api/v1/object/download?file_key=${encodeURIComponent(fileKey)}`;
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ]);
+}
+
+export async function startPipelineMonitoring(sessionId: string) {
+  const controller = new AbortController();
+  try {
+    for await (const event of monitorVideoAnalyticsPipelines(
+      sessionId,
+      controller.signal
+    )) {
+      if (!event?.pipelines) continue;
+      let anyRunning = false;
+      let allCompleted = true;
+
+      for (const pipeline of event.pipelines) {
+
+        if (pipeline.status === "running") {
+          anyRunning = true;
+        }
+
+        if (
+          pipeline.status !== "completed" &&
+          pipeline.status !== "stopped"
+        ) {
+          allCompleted = false;
+        }
+      }
+
+      if (anyRunning) {
+        store.dispatch(setVideoAnalyticsActive(true));
+        store.dispatch(setVideoStatus("streaming"));
+        store.dispatch(setVideoPlaybackMode(false));
+      }
+
+      if (allCompleted && !anyRunning) {
+        console.log("✅ All pipelines completed");
+        store.dispatch(setVideoAnalyticsActive(false));
+        store.dispatch(setVideoStatus("completed"));
+        store.dispatch(setVideoPlaybackMode(true));
+        break;
+      }
+    }
+
+  }
+  catch (err) {
+    console.error("Monitor error:", err);
+  }
+  return controller;
+}
+
+export async function pingBackend(): Promise<boolean> {
+  try {
+    const res = await withTimeout(fetch(`${BASE_URL}/health`, { cache: 'no-store' }), HEALTH_TIMEOUT_MS);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.status === 'ok';
+  } catch {
+    return false;
+  }
+}
+
+// Sentinel message thrown when the backend cannot be reached at all, so callers
+// can recognise it and show a localized message instead of this English text.
+export const BACKEND_UNAVAILABLE_MESSAGE = 'Backend server is unavailable. Please ensure the backend is running.';
+
+export async function safeApiCall<T>(apiCall: () => Promise<T>): Promise<T> {
+  try {
+    return await apiCall();
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      throw new Error(BACKEND_UNAVAILABLE_MESSAGE);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Pull the human-readable reason out of an error response body. FastAPI raises
+ * surface it as `detail`; handlers that return a JSONResponse use `message`.
+ * Falls back to the raw body text, then to the caller's generic message.
+ */
+async function errorDetail(res: Response, fallback: string): Promise<string> {
+  const text = await res.text().catch(() => '');
+  if (!text) return fallback;
+  try {
+    const json = JSON.parse(text);
+    const detail = json.detail ?? json.message ?? json.error;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+  } catch {
+    // Not JSON — the raw body is the best description we have.
+    return text;
+  }
+  return fallback;
+}
+
+export async function getSettings(): Promise<Settings> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${BASE_URL}/project`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Failed to fetch project config: ${res.status}`);
+    const cfg = (await res.json()) as ProjectConfig;
+    return {
+      projectName: cfg.name ?? '',
+      projectLocation: cfg.location ?? '',
+      microphone: cfg.microphone ?? '',
+      frontCamera: cfg.frontCamera || '',
+      backCamera: cfg.backCamera || '',
+      boardCamera: cfg.boardCamera || ''
+    };
+  });
+}
+
+export async function saveSettings(settings: Settings): Promise<ProjectConfig> {
+  return safeApiCall(async () => {
+    const payload: ProjectConfig = {
+      name: settings.projectName,
+      location: settings.projectLocation,
+      microphone: settings.microphone,
+      frontCamera: settings.frontCamera,
+      backCamera: settings.backCamera,
+      boardCamera: settings.boardCamera
+    };
+    console.log('Sending payload to /project:', payload);
+    const res = await fetch(`${BASE_URL}/project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Failed to save project config: ${res.status}`);
+    return (await res.json()) as ProjectConfig;
+  });
+}
+
+// Compatibility aliases (use getSettings/saveSettings internally)
+export async function getProjectConfig(): Promise<ProjectConfig> {
+  return safeApiCall(async () => {
+    const s = await getSettings();
+    return { name: s.projectName, location: s.projectLocation, microphone: s.microphone };
+  });
+}
+
+export async function updateProjectConfig(config: ProjectConfig): Promise<ProjectConfig> {
+  return safeApiCall(async () => {
+    return saveSettings({ projectName: config.name, projectLocation: config.location, microphone: config.microphone });
+  });
+}
+
+export async function startSession(req: StartSessionRequest): Promise<StartSessionResponse> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${BASE_URL}/session/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) throw new Error('Failed to start session');
+    return (await res.json()) as StartSessionResponse;
+  });
+}
+
+export async function uploadAudio(file: File): Promise<{ filename: string; message: string; path: string }> {
+  return safeApiCall(async () => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${BASE_URL}/upload-audio`, { method: 'POST', body: form });
+    if (!res.ok) {
+      throw new Error(await errorDetail(res, `Upload failed (${res.status})`));
+    }
+    return res.json();
+  });
+}
+
+export async function storeAudioDuration(sessionId: string, audioFile: File): Promise<{ status: string; message: string }> {
+  return safeApiCall(async () => {
+    console.log(`🔊 Extracting audio duration from ${audioFile.name}...`);
+    const duration = await getAudioDuration(audioFile);
+
+    if (!duration) {
+      throw new Error('Could not extract audio duration from file');
+    }
+
+    console.log(`📤 Sending audio duration to backend: ${duration.toFixed(2)}s`);
+    const response = await fetch(`${BASE_URL}/store-audio-duration`, {
+      method: 'POST',
+      headers: {
+        'X-Session-ID': sessionId,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ duration }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Audio metadata upload failed: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Audio duration stored at backend:', result);
+    return result;
+  });
+}
+
+/**
+ * Extract audio duration using HTML5 Audio API
+ * This is more reliable than ffprobe and works in the browser
+ */
+export function getAudioDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    try {
+      const audio = document.createElement('audio');
+      const url = URL.createObjectURL(file);
+
+      // Set a timeout in case metadata never loads
+      const timeout = setTimeout(() => {
+        URL.revokeObjectURL(url);
+        console.warn('Audio duration extraction timed out');
+        resolve(null);
+      }, 10000); // 10 second timeout
+
+      audio.addEventListener('loadedmetadata', () => {
+        clearTimeout(timeout);
+        URL.revokeObjectURL(url);
+        const duration = audio.duration;
+        console.log(`✅ Extracted audio duration: ${duration.toFixed(2)}s`);
+        resolve(isFinite(duration) ? duration : null);
+      }, { once: true });
+
+      audio.addEventListener('error', () => {
+        clearTimeout(timeout);
+        URL.revokeObjectURL(url);
+        console.warn('Error loading audio metadata');
+        resolve(null);
+      }, { once: true });
+
+      // Trigger metadata loading
+      audio.src = url;
+      audio.load();
+    } catch (error) {
+      console.error('Error extracting audio duration:', error);
+      resolve(null);
+    }
+  });
+}
+
+export async function* streamTranscript(
+  audioPath: string,
+  sessionId: string,
+  opts: StreamOptions = {}
+): AsyncGenerator<StreamEvent> {
+  const requestBody =
+    audioPath === "MICROPHONE" || audioPath === ""
+      ? { audio_filename: "", source_type: "microphone" }
+      : { audio_filename: audioPath, source_type: "audio_file" };
+
+  let res: Response;
+
+  try {
+    res = await fetch(`${BASE_URL}/transcribe`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "x-session-id": sessionId
+      },
+      body: JSON.stringify(requestBody),
+      signal: opts.signal,
+      cache: "no-store"
+    });
+  } catch (err) {
+    console.error("❌ Network failure:", err);
+    yield { type: "error", message: "Network error. Please retry." };
+    yield { type: "done" };
+    return;
+  }
+
+  if (res.status === 429) {
+    console.warn("⏳ Rate limited");
+    yield { type: "error", message: "Too many requests. Please wait a moment." };
+    yield { type: "done" };
+    return;
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("❌ Transcription failed:", res.status, text);
+    yield { type: "error", message: `Transcription failed (${res.status})` };
+    yield { type: "done" };
+    return;
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) {
+    yield { type: "error", message: "Streaming not supported" };
+    yield { type: "done" };
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const json = JSON.parse(line);
+        if (json.event === "final") {
+          yield { type: "final", data: json };
+          continue;
+        }
+        if ("segments" in json || "text" in json) {
+          yield { type: "transcript_chunk", data: json };
+          continue;
+        }
+      } catch {
+        yield { type: "transcript", token: line };
+      }
+    }
+  }
+
+  yield { type: "done" };
+}
+
+export async function* streamSummary(sessionId: string, opts: StreamOptions = {}): AsyncGenerator<StreamEvent> {
+  const res = await fetch(`${BASE_URL}/summarize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId }),
+    signal: opts.signal,
+    cache: 'no-store',
+    keepalive: true,
+  });
+  if (!res.ok) throw new Error(`Failed to start summary: ${res.status} ${res.statusText}`);
+
+  const reader = res.body?.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (reader) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let chunk: any;
+      try { chunk = JSON.parse(trimmed); } catch { continue; }
+      if (chunk.board_ocr_partial) {
+        yield { type: 'board_ocr_partial' };
+      }
+      const token: string | undefined = chunk.token ?? chunk.summary_token;
+      if (typeof token === 'string' && token.length > 0) {
+        yield { type: 'summary_token', token };
+        continue;
+      }
+      // Progress from the staged path of a long summary: map counts lesson
+      // segments, fold counts note groups, reduce just marks the final write.
+      if (chunk.event === 'progress' && typeof chunk.chunks === 'number') {
+        yield {
+          type: 'summary_progress',
+          stage: String(chunk.stage ?? 'map'),
+          chunk: Number(chunk.chunk ?? 0),
+          chunks: Number(chunk.chunks),
+        };
+      }
+    }
+  }
+  yield { type: 'done' };
+}
+
+export async function fetchMindmap(sessionId: string): Promise<string> {
+  const response = await fetch(`${BASE_URL}/mindmap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await errorDetail(response, `Mind map request failed (${response.status})`));
+  }
+
+  const data: { mindmap?: string; error?: string } = await response.json();
+
+  if (data.error) {
+    throw new Error(data.error);
+  }
+
+  if (!data.mindmap) {
+    throw new Error("No mindmap field returned from server.");
+  }
+
+  return data.mindmap;
+}
+
+/**
+ * Upload a mind-map screenshot (PNG blob, captured in-browser via html2canvas)
+ * for the given session. The backend saves it as the report's mind-map image;
+ * it never re-renders the mind map itself. Best-effort: callers should not block
+ * report generation on this succeeding.
+ */
+export async function uploadMindmapImage(sessionId: string, png: Blob): Promise<void> {
+  const form = new FormData();
+  form.append("file", png, "mindmap.png");
+  const res = await fetch(`${BASE_URL}/report/${encodeURIComponent(sessionId)}/mindmap-image`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(errText || `HTTP ${res.status}`);
+  }
+}
+
+export async function getResourceMetrics(): Promise<any> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${BASE_URL}/metrics`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!res.ok) {
+      console.warn(`Metrics endpoint returned ${res.status}`);
+      return {
+        cpu_utilization: [],
+        gpu_utilization: [],
+        npu_utilization: [],
+        memory: [],
+        power: []
+      };
+    }
+
+    const text = await res.text();
+    return text ? JSON.parse(text) : {
+      cpu_utilization: [],
+      gpu_utilization: [],
+      npu_utilization: [],
+      memory: [],
+      power: []
+    };
+  });
+}
+
+export async function getConfigurationMetrics(sessionId: string): Promise<any> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${BASE_URL}/performance-metrics`, {
+      method: "GET",
+      headers: {
+        "session_id": sessionId,
+        "Accept": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`Performance metrics endpoint returned ${res.status}`);
+      return {
+        configuration: {},
+        performance: {},
+      };
+    }
+
+    const text = await res.text();
+    return text ? JSON.parse(text) : { configuration: {}, performance: {} };
+  });
+}
+
+export const startVideoAnalytics = async (
+  requests: Array<{
+    pipeline_name: string;
+    source: string;
+  }>,
+  sessionId: string
+): Promise<any> => {
+  return safeApiCall(async () => {
+    const response = await fetch(`${BASE_URL}/start-video-analytics-pipeline`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-ID': sessionId,
+      },
+      body: JSON.stringify(requests),
+    });
+
+    if (!response.ok) {
+      throw new Error(await errorDetail(response, `Failed to start video analytics (${response.status})`));
+    }
+
+    return response.json();
+  });
+};
+
+export const stopVideoAnalytics = async (
+  requests: Array<{
+    pipeline_name: string;
+    source?: string;
+  }>,
+  sessionId: string
+): Promise<any> => {
+  return safeApiCall(async () => {
+    const response = await fetch(`${BASE_URL}/stop-video-analytics-pipeline`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-ID': sessionId,
+      },
+      body: JSON.stringify(requests),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `Failed to stop video analytics: ${response.status}`);
+    }
+
+    return response.json();
+  });
+};
+
+export const startVideoAnalyticsPipeline = startVideoAnalytics;
+
+export const checkRecordedVideos = async (sessionId: string): Promise<any> => {
+  return safeApiCall(async () => {
+    const response = await fetch(`${BASE_URL}/check-recorded-videos`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-ID': sessionId,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `Failed to check recorded videos: ${response.status}`);
+    }
+
+    return response.json();
+  });
+};
+
+export const getRecordedVideoUrl = (sessionId: string, videoType: string): string => {
+  if (!sessionId || !videoType) {
+    throw new Error('Session ID and video type are required');
+  }
+  return `${BASE_URL}/recorded-video/${videoType}?session_id=${sessionId}`;
+};
+
+export async function getClassStatistics(
+  sessionId: string,
+  onData: (data: {
+    student_count: number;
+    stand_count: number;
+    raise_up_count: number;
+    stand_reid: { student_id: number; count: number }[];
+  }) => void,
+  onError?: (error: Error) => void
+): Promise<() => void> {
+  return safeApiCall(async () => {
+    const response = await fetch(`${BASE_URL}/class-statistics`, {
+      method: 'GET',
+      headers: {
+        'x-session-id': sessionId,
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No reader available');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const processStream = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete JSON objects
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const data = JSON.parse(line);
+                if (data.error) {
+                  onError?.(new Error(data.error));
+                } else {
+                  onData(data);
+                }
+              } catch (parseError) {
+                console.warn('Failed to parse JSON:', line, parseError);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        onError?.(error as Error);
+      } finally {
+        reader.releaseLock();
+      }
+    };
+
+    processStream();
+
+    // Return cleanup function
+    return () => {
+      reader.cancel();
+    };
+  });
+}
+
+export async function* monitorVideoAnalyticsPipelines(
+  sessionId: string,
+  signal?: AbortSignal
+): AsyncGenerator<any, void, unknown> {
+
+  console.log("🎥 Starting video pipeline monitor:", sessionId);
+
+  const response = await fetch(
+    `${BASE_URL}/monitor-video-analytics-pipeline`,
+    {
+      method: "GET",
+      headers: {
+        "x-session-id": sessionId
+      },
+      signal
+    }
+  );
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Monitor failed: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) return;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const parsed = JSON.parse(line);
+      yield parsed;
+    }
+  }
+}
+
+export async function getPlatformInfo(): Promise<any> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${BASE_URL}/platform-info`, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`Platform info endpoint returned ${res.status}`);
+      return {};
+    }
+
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
+  });
+}
+
+export async function getAudioDevices(): Promise<string[]> {
+  // Browser-based enumeration. The backend no longer captures the microphone;
+  // live audio is streamed from the browser to the audio-analyzer over the
+  // /v1/realtime WebSocket, so mic devices are read via the Web MediaDevices API.
+  try {
+    const mics = await listBrowserMicrophones();
+    return mics.map((m, i) => m.label || `Microphone ${i + 1}`);
+  } catch (error) {
+    console.error('Failed to enumerate microphones:', error);
+    return [];
+  }
+}
+
+export async function stopMicrophone(_sessionId: string): Promise<{ status: string; message: string }> {
+  // Live mic runs in the browser (RealtimeMicSession); there is nothing to stop
+  // server-side. Kept for call-site compatibility.
+  return { status: 'stopped', message: 'Microphone stopped (browser capture).' };
+}
+
+export interface LiveTranscriptSegment {
+  speaker?: string;
+  text: string;
+  start?: number;
+  end?: number;
+  is_primary?: boolean;
+}
+
+// Persist a browser live-mic transcript into the session so the downstream
+// stages (summary -> mindmap -> segmentation -> report) can read it, exactly
+// like the file-upload path does.
+export async function persistLiveTranscript(
+  sessionId: string,
+  segments: LiveTranscriptSegment[],
+  language?: string,
+): Promise<{ teacher_speaker: string | null; speaker_text_stats: Record<string, number> }> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${BASE_URL}/live-transcript`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, segments, language }),
+    });
+    if (!res.ok) throw new Error(await errorDetail(res, `Failed to persist live transcript (${res.status})`));
+    return res.json();
+  });
+}
+
+export async function csUploadIngest(
+  file: File,
+  meta?: Record<string, unknown>
+): Promise<{ task_id: string; status: string; file_key?: string }> {
+  return safeApiCall(async () => {
+    const form = new FormData();
+    form.append('file', file);
+    if (meta) {
+      form.append('meta', JSON.stringify(meta));
+    }
+    const res = await fetch(`${CONTENT_SEARCH_API_URL}/api/v1/object/upload-ingest`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.detail || json.message || `Upload-ingest failed (${res.status})`);
+    }
+    const data = await res.json();
+    // code 40901 = file already exists; backend returns task_id for cleanup
+    if (data.code === 40901) {
+      return { task_id: data.data?.task_id ?? '', status: 'ALREADY_EXISTS', file_key: data.data?.file_key };
+    }
+    const payload = data.data ?? data;
+    if (!payload?.task_id) {
+      throw new Error('upload-ingest response missing task_id');
+    }
+    return payload;
+  });
+}
+
+export async function csIngest(
+  fileKey: string,
+  meta: Record<string, unknown>,
+  bucketName = 'content-search'
+): Promise<{ task_id: string; status: string }> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${CONTENT_SEARCH_API_URL}/api/v1/object/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bucket_name: bucketName, file_key: fileKey, meta }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || `Ingest failed (${res.status})`);
+    }
+    const data = await res.json();
+    return data.data ?? data;
+  });
+}
+
+export async function csQueryTask(taskId: string): Promise<{
+  task_id: string;
+  status: string;
+  progress: number;
+  result?: Record<string, unknown>;
+}> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${CONTENT_SEARCH_API_URL}/api/v1/task/query/${encodeURIComponent(taskId)}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || `Task query failed (${res.status})`);
+    }
+    const data = await res.json();
+    return data.data ?? data;
+  });
+}
+
+export async function csCleanupTask(
+  taskId: string
+): Promise<{ code: number; task_id: string; status: string; message: string }> {
+  return safeApiCall(async () => {
+    const res = await fetch(
+      `${CONTENT_SEARCH_API_URL}/api/v1/object/cleanup-task/${encodeURIComponent(taskId)}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) {
+      throw new Error(await errorDetail(res, `Delete failed (${res.status})`));
+    }
+    const data = await res.json().catch(() => ({}));
+    // Content Search reports refusals ("Task is still processing", "Task ID does
+    // not exist or has expired") as HTTP 200 with a non-success `code`. Treating
+    // those as success would drop the file from the list while it is still on
+    // the server, so they have to be raised explicitly.
+    if (data.code !== undefined && data.code !== CS_SUCCESS_CODE) {
+      throw new Error(data.message || `Delete failed (code ${data.code})`);
+    }
+    return {
+      code: data.code ?? CS_SUCCESS_CODE,
+      task_id: data.data?.task_id ?? taskId,
+      status: data.data?.status ?? 'COMPLETED',
+      message: data.message ?? '',
+    };
+  });
+}
+
+export async function getCsSystemConfig(): Promise<{
+  vlm_model: string;
+  visual_embedding_model: string;
+  doc_embedding_model: string;
+  reranker_model: string;
+  vector_db: string;
+  video_summarization_enabled: boolean;
+}> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${CONTENT_SEARCH_API_URL}/api/v1/system/config`);
+    if (!res.ok) throw new Error(`System config failed (${res.status})`);
+    return res.json();
+  });
+}
+
+export interface CsHealthStatus {
+  status: 'ok' | 'degraded';
+  timestamp: number;
+  video_summarization_enabled: boolean;
+  services: Record<string, string>;
+}
+
+export async function getCsHealth(): Promise<CsHealthStatus> {
+  const res = await fetch(`${CONTENT_SEARCH_API_URL}/api/v1/system/health`);
+  // 503 means degraded, not unreachable: the body still carries the per-service
+  // detail, so callers can name what is down instead of the generic banner.
+  if (!res.ok && res.status !== 503) throw new Error(`Health check failed: ${res.status}`);
+  return res.json();
+}
+
+export async function csDownloadText(fileKey: string): Promise<string> {
+  return safeApiCall(async () => {
+    const res = await fetch(
+      `${CONTENT_SEARCH_API_URL}/api/v1/object/download?file_key=${encodeURIComponent(fileKey)}&inline=true`
+    );
+    if (!res.ok) {
+      throw new Error(await errorDetail(res, `Download failed (${res.status})`));
+    }
+    return await res.text();
+  });
+}
+
+export async function createSession(): Promise<{ sessionId: string }> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${BASE_URL}/create-session`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!res.ok) {
+      const detail = await errorDetail(res, `Failed to create session (${res.status})`);
+      console.error('❌ Failed to create session:', detail);
+      throw new Error(detail);
+    }
+
+    const data = await res.json();
+    const sessionId = data['session-id'];
+    console.log('🟢 Session ID created:', sessionId);
+
+    return { sessionId };
+  });
+}
+
+export async function generateContentSegmentation(sessionId: string): Promise<{ session_id: string }> {
+  return safeApiCall(async () => {
+    const response = await fetch(`${BASE_URL}/content-segmentation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Content segmentation failed: ${response.status} - ${errorText}`);
+    }
+
+    return await response.json();
+  });
+}
+
+export async function uploadVideoMetadata(sessionId: string, videoFile: File): Promise<{ status: string; message: string }> {
+  return safeApiCall(async () => {
+    console.log(`📹 Extracting video duration from ${videoFile.name}...`);
+    // Extract duration from video file using HTML5 Video API
+    const duration = await getVideoDuration(videoFile);
+
+    if (!duration) {
+      throw new Error('Could not extract video duration from file');
+    }
+
+    console.log(`📤 Sending video duration to backend: ${duration.toFixed(2)}s`);
+    // Send duration to backend
+    const response = await fetch(`${BASE_URL}/store-video-duration`, {
+      method: 'POST',
+      headers: {
+        'X-Session-ID': sessionId,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ duration }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Video metadata upload failed: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Video duration stored at backend:', result);
+    return result;
+  });
+}
+
+/**
+ * Extract video duration using HTML5 Video API
+ * This is more reliable than ffprobe and works in the browser
+ */
+export function getVideoDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    try {
+      const video = document.createElement('video');
+      const url = URL.createObjectURL(file);
+
+      // Set a timeout in case metadata never loads
+      const timeout = setTimeout(() => {
+        URL.revokeObjectURL(url);
+        console.warn('Video duration extraction timed out');
+        resolve(null);
+      }, 10000); // 10 second timeout
+
+      video.addEventListener('loadedmetadata', () => {
+        clearTimeout(timeout);
+        URL.revokeObjectURL(url);
+        const duration = video.duration;
+        console.log(`✅ Extracted video duration: ${duration.toFixed(2)}s`);
+        resolve(isFinite(duration) ? duration : null);
+      }, { once: true });
+
+      video.addEventListener('error', () => {
+        clearTimeout(timeout);
+        URL.revokeObjectURL(url);
+        console.warn('Error loading video metadata');
+        resolve(null);
+      }, { once: true });
+
+      // Trigger metadata loading
+      video.src = url;
+      video.load();
+    } catch (error) {
+      console.error('Error extracting video duration:', error);
+      resolve(null);
+    }
+  });
+}
+
+export async function markVideoUsage(sessionId: string): Promise<{ status: string; message: string }> {
+  return safeApiCall(async () => {
+    const response = await fetch(`${BASE_URL}/mark-video-usage`, {
+      method: 'POST',
+      headers: {
+        'X-Session-ID': sessionId,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to mark video usage: ${response.status} - ${errorText}`);
+    }
+
+    return await response.json();
+  });
+}
+
+export async function searchContent(sessionId: string, query: string, topK: number = 5): Promise<SearchResult> {
+  return safeApiCall(async () => {
+    const response = await fetch(`${BASE_URL}/search-content`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id: sessionId,
+        query: query,
+        top_k: topK
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Search failed: ${response.status} - ${errorText}`);
+    }
+    return await response.json();
+  });
+}
+
+// Content Search API - search for objects
+export async function csSearch(params: CsSearchParams): Promise<CsSearchResult[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${CONTENT_SEARCH_API_URL}/api/v1/object/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+    });
+  } catch (error) {
+    throw new Error('BACKEND_UNAVAILABLE');
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Content search failed: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  // API returns { code, data: { results: [...] }, message, timestamp }
+  return Array.isArray(data?.data?.results) ? data.data.results : [];
+}
+
+// ── Q&A types ──────────────────────────────────────────────────────────────
+
+export interface QASource {
+  file_name: string | null;
+  file_path: string | null;
+  type: string | null;
+  video_pin_second: number | null;
+  video_start_second: number | null;
+  video_end_second: number | null;
+  score: number | null;
+}
+
+export interface QAChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface QAAskParams {
+  question: string;
+  history?: QAChatMessage[];
+  filter?: Record<string, string[]>;
+}
+
+export interface QAAskResult {
+  answer: string;
+  sources: QASource[];
+}
+
+// Content Search API - Q&A (RAG chatbot over uploaded content)
+export async function csQaAsk(params: QAAskParams): Promise<QAAskResult> {
+  const response = await fetch(`${CONTENT_SEARCH_API_URL}/api/v1/object/qa`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Q&A request failed: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  if (data.code !== 20000) {
+    throw new Error(data.message || 'Q&A generation failed');
+  }
+  return {
+    answer: data.data?.answer ?? '',
+    sources: Array.isArray(data.data?.sources) ? data.data.sources : [],
+  };
+}
+
+// Content Search API - Get all unique tags from uploaded files
+export async function csGetTags(): Promise<string[]> {
+  return safeApiCall(async () => {
+    const res = await fetch(
+      `${CONTENT_SEARCH_API_URL}/api/v1/object/tags`,
+      { method: 'GET' }
+    );
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.message || `Tags fetch failed (${res.status})`);
+    }
+    const data = await res.json();
+    return Array.isArray(data?.data) ? data.data : [];
+  });
+}
+
+/** Map a MIME type string to a short, display-friendly extension label (e.g. "DOCX"). */
+export function mimeToShortType(mimeType: string): string {
+  const MIME_MAP: Record<string, string> = {
+    // Documents
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPTX',
+    'application/msword': 'DOC',
+    'application/vnd.ms-excel': 'XLS',
+    'application/vnd.ms-powerpoint': 'PPT',
+    'application/pdf': 'PDF',
+    'text/plain': 'TXT',
+    'text/csv': 'CSV',
+    'application/json': 'JSON',
+    // Images
+    'image/jpeg': 'JPEG',
+    'image/png': 'PNG',
+    'image/gif': 'GIF',
+    'image/webp': 'WEBP',
+    'image/svg+xml': 'SVG',
+    // Video
+    'video/mp4': 'MP4',
+    'video/webm': 'WEBM',
+    'video/ogg': 'OGG',
+    'video/quicktime': 'MOV',
+    // Audio
+    'audio/mpeg': 'MP3',
+    'audio/wav': 'WAV',
+    'audio/ogg': 'OGG',
+    'audio/mp4': 'M4A',
+  };
+  if (MIME_MAP[mimeType]) return MIME_MAP[mimeType];
+  // Fallback: take the subtype part and uppercase it
+  const sub = mimeType.split('/')[1] ?? mimeType;
+  // Strip vnd.* and x.* prefixes for unknown types
+  return sub.replace(/^(vnd\.|x-)/, '').split('.').pop()!.toUpperCase();
+}
+
+// Content Search API - Get list of uploaded files
+export async function csGetFilesList(): Promise<{
+  code: number;
+  data: {
+    total: number;
+    files: Array<{
+      file_hash: string;
+      file_name: string;
+      content_type: string;
+      size_bytes: number;
+      meta: Record<string, unknown>;
+      created_at: string;
+      task_id?: string;
+    }>;
+  };
+  message: string;
+}> {
+  return safeApiCall(async () => {
+    const res = await fetch(
+      `${CONTENT_SEARCH_API_URL}/api/v1/object/files/list`,
+      { method: 'GET' }
+    );
+    if (!res.ok) {
+      throw new Error(await errorDetail(res, `Files list failed (${res.status})`));
+    }
+    return await res.json();
+  });
+}
+
+export interface GradingRubricInfo {
+  filename: string;
+  rubric_path: string;
+  size_bytes: number;
+  modified_at: string;
+}
+
+export interface GradingDirInfo {
+  papers_dir: string | null;
+  dir_name: string | null;
+  rubric_path: string | null;
+  rubric_name: string | null;
+  total: number;
+  completed: number;
+  failed: number;
+  pending: number;
+  current: string | null;
+  last_new_item_at: string | null;
+}
+
+export interface GradingTask {
+  task_id: string;
+  task_type: string;
+  status: string;
+  current_step: string;
+  progress: number;
+  error_message?: string | null;
+  created_at: string;
+  updated_at?: string;
+  log_path?: string | null;
+  dir_info?: GradingDirInfo | null;
+}
+
+export interface GradingQuestionScore {
+  catalog?: string;
+  type?: string;
+  score?: number | null;
+  max_score?: number | null;
+}
+
+export interface GradingQuestionMeta {
+  sub_question?: boolean;
+  max_score?: number | null;
+  grading_score?: number | null;
+  part_path?: number[];
+  part_key?: string;
+  catalog?: string;
+  type?: string;
+}
+
+export interface GradingQuestionNode {
+  question_no?: number | null;
+  sub_question_no?: number | null;
+  meta?: GradingQuestionMeta;
+  student_answer?: string | null;
+  reason?: string | null;
+  questions?: GradingQuestionNode[];
+}
+
+export interface GradingStudentResult {
+  student_id?: string | null;
+  student_name?: string | null;
+  class_name?: string | null;
+  exam_number?: string | null;
+  paper_path?: string | null;
+  result_path?: string | null;
+  total_score?: number | null;
+  total_max?: number | null;
+  objective_score?: number | null;
+  objective_max?: number | null;
+  subjective_score?: number | null;
+  subjective_max?: number | null;
+  processing_seconds?: number | null;
+  questions_hierarchy?: GradingQuestionNode[];
+}
+
+export interface GradingStudentResultDetail {
+  summary?: {
+    total_score?: number | null;
+    total_max?: number | null;
+    objective_score?: number | null;
+    objective_max?: number | null;
+    subjective_score?: number | null;
+    subjective_max?: number | null;
+  };
+  questions_hierarchy?: GradingQuestionNode[];
+  paper_meta?: Record<string, unknown>;
+  student_meta?: Record<string, unknown>;
+  input?: Record<string, unknown>;
+}
+
+export interface GradingSummary {
+  metadata: Record<string, unknown>;
+  students: Record<string, GradingStudentResult>;
+  updated_at?: string | null;
+  student_count: number;
+  total_processing_seconds?: number | null;
+}
+
+async function gradingFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  return safeApiCall(async () => {
+    const res = await fetch(`${GRADING_API_URL}${path}`, {
+      cache: 'no-store',
+      ...init,
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.detail || `Grading request failed (${res.status})`);
+    }
+    if (res.status === 204 || res.headers.get('content-length') === '0') {
+      return undefined as T;
+    }
+    return (await res.json()) as T;
+  });
+}
+
+export async function gradingListRubrics(): Promise<{ total: number; rubrics: GradingRubricInfo[] }> {
+  return gradingFetch('/rubrics');
+}
+
+export async function gradingUploadRubric(file: File): Promise<{
+  status: string;
+  filename: string;
+  rubric_path: string;
+  size_bytes: number;
+}> {
+  const form = new FormData();
+  form.append('file', file);
+  return gradingFetch('/rubrics/upload', { method: 'POST', body: form });
+}
+
+export async function gradingCreateTask(body: {
+  paper_path: string;
+  rubric_path?: string;
+}): Promise<GradingTask> {
+  return gradingFetch('/grading/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function gradingListTasks(status?: string): Promise<{
+  total: number;
+  status_counts: Record<string, number>;
+  tasks: GradingTask[];
+}> {
+  const q = status ? `?status=${encodeURIComponent(status)}` : '';
+  return gradingFetch(`/grading/tasks${q}`);
+}
+
+export async function gradingGetTaskSummary(taskId: string): Promise<GradingSummary> {
+  return gradingFetch(`/grading/tasks/${encodeURIComponent(taskId)}/summary`);
+}
+
+export async function gradingGetStudentResult(taskId: string, slot: string): Promise<GradingStudentResultDetail> {
+  return gradingFetch(`/grading/tasks/${encodeURIComponent(taskId)}/students/${encodeURIComponent(slot)}/result`);
+}
+
+export async function gradingPauseTask(taskId: string): Promise<GradingTask> {
+  return gradingFetch(`/grading/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST' });
+}
+
+export async function gradingResumeTask(taskId: string): Promise<GradingTask> {
+  return gradingFetch(`/grading/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+}
+
+export async function gradingCancelTask(taskId: string): Promise<GradingTask> {
+  return gradingFetch(`/grading/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
+}
+
+export async function gradingDeleteTask(taskId: string): Promise<void> {
+  await gradingFetch(`/grading/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+}
+
+export interface GradingHealth {
+  status: string;
+  service: string;
+  language: string;
+  dependencies?: {
+    vlm: 'healthy' | 'unavailable';
+    layout_detection: 'healthy' | 'unavailable';
+  };
+}
+
+export async function gradingHealth(): Promise<GradingHealth> {
+  return gradingFetch('/health');
+}
+
+export interface GradingFsEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+export interface GradingFsListing {
+  path: string;
+  parent: string | null;
+  entries: GradingFsEntry[];
+}
+
+// Browse server-side directories for the target-path picker. path=undefined
+// returns the roots (Windows drive letters). Returned directory paths are real,
+// server-visible absolute paths usable as a task's paper_path.
+export async function gradingListDir(path?: string): Promise<GradingFsListing> {
+  const q = path ? `?path=${encodeURIComponent(path)}` : '';
+  return gradingFetch(`/fs/list${q}`);
+}
+
+export interface GradingTaskLog {
+  task_id: string;
+  log_path: string | null;
+  lines: string[];
+}
+
+export async function gradingGetTaskLog(taskId: string, tail = 50): Promise<GradingTaskLog> {
+  return gradingFetch(`/grading/tasks/${encodeURIComponent(taskId)}/log?tail=${tail}`);
+}
+
+export interface GradingConfig {
+  dpi: number | null;
+  page_columns: number | 'auto' | null;
+  column_split_ratio: number | null;
+  force_split: boolean | null;
+  force_split_pairs: number[][] | null;
+  contrast_enhance: boolean | null;
+  contrast_factor: number | null;
+  max_tokens: number | null;
+  vlm_temperature: number | null;
+  max_image_pixels: number | null;
+  poll_interval: number | null;
+  stable_checks: number | null;
+  idle_timeout: number | null;
+  min_score: number | null;
+  sort_boxes: boolean | null;
+  expand_margin: number | null;
+  merge_overlapping: boolean | null;
+  iou_threshold: number | null;
+  vlm_model: string | null;
+  ocr_model: string | null;
+  layout_model: string | null;
+}
+
+export async function gradingGetConfig(): Promise<GradingConfig> {
+  return gradingFetch('/grading/config');
+}
+
+export type GradingConfigUpdate = Partial<Pick<GradingConfig,
+  'dpi' | 'page_columns' | 'column_split_ratio' | 'force_split' | 'force_split_pairs' | 'contrast_enhance' | 'contrast_factor' | 'max_tokens' | 'vlm_temperature' | 'max_image_pixels' |
+  'poll_interval' | 'stable_checks' | 'idle_timeout' |
+  'min_score' | 'sort_boxes' | 'expand_margin' | 'merge_overlapping' | 'iou_threshold'>>;
+
+export async function gradingUpdateConfig(updates: GradingConfigUpdate): Promise<GradingConfig> {
+  return gradingFetch('/grading/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function gradingGetRubricContent(filename: string): Promise<{ filename: string; content: string }> {
+  return gradingFetch(`/rubrics/${encodeURIComponent(filename)}/content`);
+}
+
+export async function gradingUpdateRubricContent(filename: string, content: string): Promise<{ filename: string; size_bytes: number }> {
+  return gradingFetch(`/rubrics/${encodeURIComponent(filename)}/content`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+}
+
+// ===== Report Generation =====
+
+export type ReportStreamEvent =
+  | { type: 'report_ready' }
+  | { type: 'error'; message: string }
+  | { type: 'token'; token: string }
+  | { type: 'partial_report'; content: string }  // raw-filled skeleton, before the LLM
+  | { type: 'report'; content: string }           // final report (template path)
+  | { type: 'done' };
+
+// Stream a class report from the backend (POST /report/generate).
+// The backend emits NDJSON lines of two shapes:
+//   {type: 'partial_report'|'report'|'report_ready', ...}
+//   {token: '...', error: '...'}
+// which are normalized here into ReportStreamEvent.
+export async function* streamGenerateReport(
+  sessionId: string,
+  selectedFields?: string[],
+  manualFields?: Record<string, string>,
+  opts: { signal?: AbortSignal } = {}
+): AsyncGenerator<ReportStreamEvent> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/report/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        selected_fields: selectedFields ?? null,
+        manual_fields: manualFields ?? null,
+      }),
+      signal: opts.signal,
+      cache: 'no-store',
+      keepalive: true,
+    });
+  } catch (err) {
+    yield { type: 'error', message: 'Network error while generating report.' };
+    yield { type: 'done' };
+    return;
+  }
+
+  if (!res.ok) {
+    let detail = `Report generation failed (${res.status})`;
+    try {
+      const e = await res.json();
+      if (e?.detail) detail = e.detail;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    yield { type: 'error', message: detail };
+    yield { type: 'done' };
+    return;
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) {
+    yield { type: 'error', message: 'Streaming not supported' };
+    yield { type: 'done' };
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let json: any;
+      try { json = JSON.parse(trimmed); } catch { continue; }
+      if (json.type === 'report_ready') { yield { type: 'report_ready' }; continue; }
+      if (json.type === 'partial_report') { yield { type: 'partial_report', content: json.content || '' }; continue; }
+      if (json.type === 'report') { yield { type: 'report', content: json.content || '' }; continue; }
+      if (json.error) { yield { type: 'error', message: json.error }; continue; }
+      if (typeof json.token === 'string' && json.token) { yield { type: 'token', token: json.token }; }
+    }
+  }
+  yield { type: 'done' };
+}
+
+// Direct link to download the generated report in the requested format
+// (GET /report/{id}/download?format=docx|pdf).
+export function getReportDownloadUrl(sessionId: string, format: 'docx' | 'pdf' = 'docx'): string {
+  return `${BASE_URL}/report/${sessionId}/download?format=${format}`;
+}
+
+// Download the generated report as .docx via fetch->blob, so a missing report
+// (404 JSON) surfaces as an error instead of navigating the page to raw JSON.
+export async function downloadReport(sessionId: string): Promise<void> {
+  const res = await fetch(getReportDownloadUrl(sessionId, 'docx'), { cache: 'no-store' });
+  if (!res.ok) {
+    let detail = `Download failed (${res.status})`;
+    try { const e = await res.json(); if (e.detail) detail = e.detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `class_report_${sessionId}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Download the generated report as .pdf via fetch->blob. The backend handles
+// server-side conversion from .docx to .pdf.
+export async function downloadReportPdf(sessionId: string): Promise<void> {
+  const res = await fetch(getReportDownloadUrl(sessionId, 'pdf'), { cache: 'no-store' });
+  if (!res.ok) {
+    let detail = `PDF download failed (${res.status})`;
+    try { const e = await res.json(); if (e.detail) detail = e.detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `class_report_${sessionId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Which download formats the server can produce (GET /report/capabilities).
+// pdf_export is false when LibreOffice ('soffice') is missing, so the UI can
+// disable the PDF option up front instead of failing on click. Defaults to
+// pdf_export:false if the endpoint is unreachable, so we never offer a format
+// that can't be produced.
+export async function getReportCapabilities(): Promise<{ pdf_export: boolean }> {
+  const res = await fetch(`${BASE_URL}/report/capabilities`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load report capabilities (${res.status})`);
+  return res.json();
+}
+
+// Fetch a previously generated report's markdown (GET /report/{id}).
+// Returns '' when no report exists yet (404), so callers can render an empty state.
+export async function getReport(sessionId: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}/report/${sessionId}`, { cache: 'no-store' });
+  if (res.status === 404) return '';
+  if (!res.ok) throw new Error(`Failed to load report (${res.status})`);
+  const data = await res.json();
+  return data.report || '';
+}
+
+// ===== Report Field Catalog (checkbox list) =====
+
+export interface TemplateFieldMeta {
+  code: string;
+  kind: 'raw' | 'generated';
+  input?: 'manual';        // teacher types this in (basic info)
+  always_on?: boolean;     // auto metadata, not a toggleable checkbox (e.g. report_time)
+  label_key?: string;      // preferred i18n key for UI labels
+  label?: { en: string; zh: string }; // legacy inline labels (backward compatibility)
+}
+export interface TemplateFieldGroup {
+  group_key?: string;      // preferred i18n key for UI group titles
+  group?: { en: string; zh: string }; // legacy inline names (backward compatibility)
+  fields: TemplateFieldMeta[];
+}
+
+// The report field catalog exposed as checkboxes (GET /report/template-fields).
+export async function getTemplateFields(): Promise<{ groups: TemplateFieldGroup[] }> {
+  const res = await fetch(`${BASE_URL}/report/template-fields`, { cache: 'no-store' });
+  if (!res.ok) {
+    let detail = `Failed to load fields (${res.status})`;
+    try { const e = await res.json(); if (e.detail) detail = e.detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+// Re-project an existing report onto a new checkbox selection — no LLM re-run
+// (POST /report/{id}/reselect). Reuses the session's cached fields; only which
+// fields appear changes. Used when the teacher toggles fields after generating.
+export async function reselectReport(
+  sessionId: string,
+  selectedFields: string[],
+  manualFields?: Record<string, string>,
+): Promise<{ report: string }> {
+  const res = await fetch(`${BASE_URL}/report/${sessionId}/reselect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selected_fields: selectedFields, manual_fields: manualFields ?? null }),
+  });
+  if (!res.ok) {
+    let detail = `Re-selection failed (${res.status})`;
+    try { const e = await res.json(); if (e.detail) detail = e.detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const data = await res.json();
+  return { report: data.report || '' };
+}
