@@ -11,13 +11,25 @@ class YieldingTextStreamer(ov_genai.StreamerBase):
         self.generation_start_time = None
         self._token_cache = []
         self._print_len = 0
+        self._cancelled = False
+        # Called once, on the generation thread, when the first token arrives.
+        self.on_first_token = None
+
+    def cancel(self):
+        """Ask the pipeline to stop at the next token (consumer went away)."""
+        self._cancelled = True
 
     def get_stop_flag(self):
         """Check whether generation should be stopped."""
+        if self._cancelled:
+            status = ov_genai.StreamingStatus
+            return getattr(status, "CANCEL", status.STOP)
         return ov_genai.StreamingStatus.RUNNING
 
     def write(self, token) -> ov_genai.StreamingStatus:
         """Process token(s) and manage the decoding buffer."""
+        if self.total_tokens == 0 and self.on_first_token is not None:
+            self.on_first_token()
         # Handle both single token and list of tokens
         if isinstance(token, list):
             self._token_cache.extend(token)
@@ -29,7 +41,7 @@ class YieldingTextStreamer(ov_genai.StreamerBase):
         text = self.tokenizer.decode(self._token_cache, skip_special_tokens=self.skip_special_tokens)
         new_text = text[self._print_len:]
         if not new_text:
-            return ov_genai.StreamingStatus.RUNNING
+            return self.get_stop_flag()
 
         if self._is_safe_to_emit(new_text):
             self._queue.put(new_text)

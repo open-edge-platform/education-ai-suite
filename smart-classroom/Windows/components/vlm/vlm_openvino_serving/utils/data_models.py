@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .common import settings
 
@@ -41,10 +41,22 @@ class Message(BaseModel):
     Attributes:
         role (str): The role of the message sender (e.g., "user").
         content: The content of the message (text string or list of text/image/video parts).
+            May be null on an assistant message that carries tool calls.
+        tool_calls (Optional[List[dict]]): Assistant tool calls (OpenAI format).
+        tool_call_id (Optional[str]): The call a ``role: "tool"`` result answers.
+        name (Optional[str]): Optional participant/function name.
+        reasoning_content (Optional[str]): Assistant reasoning returned by a
+            tool-calling response, passed back with the history.
     """
 
     role: str
-    content: Union[str, List[Union[str, MessageContentText, MessageContentImageUrl]]]
+    content: Optional[
+        Union[str, List[Union[str, MessageContentText, MessageContentImageUrl]]]
+    ] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
+    reasoning_content: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -75,8 +87,15 @@ class ChatRequest(BaseModel):
     frequency_penalty: Optional[float] = Field(
         None, json_schema_extra={"example": 1.15}
     )
+    # gt=0: a non-positive limit is a malformed request (HTTP 400), never
+    # forwarded to the native GenerationConfig.
     max_completion_tokens: Optional[int] = Field(
-        settings.VLM_MAX_COMPLETION_TOKENS, json_schema_extra={"example": 1000}
+        settings.VLM_MAX_COMPLETION_TOKENS, gt=0, json_schema_extra={"example": 1000}
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        gt=0,
+        json_schema_extra={"description": "Older OpenAI name, used when max_completion_tokens is not set"},
     )
     temperature: Optional[float] = Field(None, json_schema_extra={"example": 0.3})
     top_p: Optional[float] = Field(None, json_schema_extra={"example": 0.5})
@@ -91,6 +110,24 @@ class ChatRequest(BaseModel):
         None,
         json_schema_extra={"example": False, "description": "Set False to suppress Qwen3 thinking; None keeps model default"},
     )
+    tools: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        json_schema_extra={"description": "OpenAI function tool definitions; validated by the server"},
+    )
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+        None,
+        json_schema_extra={"description": '"none", "auto", "required" or {"type": "function", "function": {"name": ...}}'},
+    )
+    parallel_tool_calls: Optional[bool] = Field(
+        None,
+        json_schema_extra={"description": "False returns at most one tool call"},
+    )
+
+    @model_validator(mode="after")
+    def _apply_max_tokens(self):
+        if self.max_tokens is not None and "max_completion_tokens" not in self.model_fields_set:
+            self.max_completion_tokens = self.max_tokens
+        return self
 
 
 class ChatCompletionDelta(BaseModel):

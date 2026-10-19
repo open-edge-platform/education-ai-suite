@@ -94,6 +94,7 @@ def grade_page(
         resp = requests.post(
             f"{url}/v1/chat/completions",
             json=payload,
+            headers={"X-SC-Stage": "grading"},  # processing-time attribution
             timeout=timeout,
             proxies={"http": None, "https": None},
         )
@@ -180,6 +181,7 @@ def extract_header_info(
         resp = requests.post(
             f"{url}/v1/chat/completions",
             json=payload,
+            headers={"X-SC-Stage": "grading"},  # processing-time attribution
             timeout=timeout,
             proxies={"http": None, "https": None},
         )

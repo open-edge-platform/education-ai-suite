@@ -21,13 +21,11 @@ from .common import ErrorMessages, logger, settings
 __all__ = ["convert_model", "is_model_ready", "load_images", "load_model_config", "setup_seed"]
 
 
-_PRECONVERTED_OV_MODELS = {
-    ("Qwen/Qwen3-VL-8B-Instruct", "int4"): "OpenVINO/Qwen3-VL-8B-Instruct-int4-ov",
-    ("Qwen/Qwen3-VL-8B-Instruct", "int8"): "OpenVINO/Qwen3-VL-8B-Instruct-int8-ov",
-    ("Qwen/Qwen3.5-9B", "int4"): "OpenVINO/Qwen3.5-9B-int4-ov",
-    ("Qwen/Qwen3.5-9B", "int8"): "OpenVINO/Qwen3.5-9B-int8-ov",
-    ("Qwen/Qwen3.6-35B-A3B", "int4"): "OpenVINO/Qwen3.6-35B-A3B-int4-ov",
-}
+def _preconverted_repo(model_id: str, weight_format: str):
+    """Pre-converted IR repository from the text_gen catalog, if one exists."""
+    from components.vlm.text_gen_profiles import preconverted_repo
+
+    return preconverted_repo(model_id, weight_format)
 
 
 def _download_preconverted_ov_model(repo_id: str, cache_dir: str):
@@ -135,10 +133,10 @@ def convert_model(
     try:
         logger.debug(f"cache_ddir: {cache_dir}")
         require_detokenizer = model_type in ("llm", "vlm")
-        preconverted_repo = _PRECONVERTED_OV_MODELS.get((model_id, weight_format))
+        preconverted_repo = _preconverted_repo(model_id, weight_format) if model_type == "vlm" else None
         if is_model_ready(Path(cache_dir), require_detokenizer=require_detokenizer):
             logger.info(f"Optimized {model_id} exist in {cache_dir}. Skip process...")
-        elif model_type == "vlm" and preconverted_repo is not None:
+        elif preconverted_repo is not None:
             _download_preconverted_ov_model(preconverted_repo, cache_dir)
         else:
             logger.info(f"Converting {model_id} model to OpenVINO format in subprocess...")

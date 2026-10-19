@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from threading import Lock
 
+from utils.processing_stats import STATS, stage_scope
 from utils.session_store import SessionStore
 from utils.stage_events import StageEventWriter
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _store_stage(session_id, stage, status) -> None:
@@ -50,12 +51,13 @@ def stage_tracker(session_id, stage):
     error handling still runs.
     """
     started_at = _now_iso()
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     logger.info(f"[stage] {session_id} {stage} start")
     _store_stage(session_id, stage, "running")
     handle = StageHandle()
     try:
-        yield handle
+        with stage_scope(session_id, stage):
+            yield handle
     except Exception as e:
         _finish(session_id, stage, "failed", started_at, t0, e)
         raise
@@ -72,7 +74,8 @@ def stage_tracker(session_id, stage):
 
 
 def _finish(session_id, stage, status, started_at, t0, exc) -> None:
-    duration = round(time.monotonic() - t0, 3)
+    duration = round(time.perf_counter() - t0, 3)
+    STATS.record_stage(session_id, stage, status, duration, started_at, _now_iso())
     if exc is None:
         StageEventWriter.write(session_id, stage, status, started_at, _now_iso(), duration)
         logger.info(f"[stage] {session_id} {stage} done in {duration}s")
@@ -103,7 +106,7 @@ _MANUAL_LOCK = Lock()
 def stage_started(session_id, stage) -> None:
     """Open a stage whose start and end land in different requests."""
     with _MANUAL_LOCK:
-        _MANUAL_STARTS[(session_id, stage)] = (_now_iso(), time.monotonic())
+        _MANUAL_STARTS[(session_id, stage)] = (_now_iso(), time.perf_counter())
     logger.info(f"[stage] {session_id} {stage} start")
     _store_stage(session_id, stage, "running")
 
@@ -112,7 +115,8 @@ def stage_finished(session_id, stage, status, error_class=None, error_detail=Non
     """Close out a stage opened with stage_started()."""
     with _MANUAL_LOCK:
         started_at, t0 = _MANUAL_STARTS.pop((session_id, stage), (None, None))
-    duration = round(time.monotonic() - t0, 3) if t0 is not None else None
+    duration = round(time.perf_counter() - t0, 3) if t0 is not None else None
+    STATS.record_stage(session_id, stage, status, duration, started_at, _now_iso())
     StageEventWriter.write(
         session_id, stage, status, started_at, _now_iso(), duration,
         error_class=error_class, error_detail=error_detail,

@@ -13,6 +13,7 @@ from pipeline import Pipeline
 from utils.audio_util import save_audio_file
 from utils.config_loader import config
 from utils.pipeline_catalog import FEATURE_STAGE
+from utils.processing_stats import ContextIterator
 from utils.stage_tracker import stage_tracker
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,9 @@ def transcribe_audio(
             for chunk_data in pipeline.run_transcription(request):
                 yield json.dumps(chunk_data) + "\n"
 
-    response = StreamingResponse(stream_transcription(), media_type="application/json")
+    # One context for every chunk, so later chunks keep the stage attribution.
+    response = StreamingResponse(ContextIterator(stream_transcription()),
+                                 media_type="application/json")
     response.headers["X-Session-ID"] = pipeline.session_id
     return response
 

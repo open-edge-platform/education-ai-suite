@@ -6,6 +6,7 @@ import json
 import whisper
 from openvino import Core
 import logging
+from utils.config_loader import config
 from utils.ensure_model import get_asr_model_path
 
 logger = logging.getLogger(__name__)  
@@ -47,6 +48,11 @@ class Whisper(BaseASR):
             f"{self.model_path}/openvino_decoder_model.xml",
             self.device
         )
+        # Newer optimum-intel exports of the stateful decoder have no
+        # `cache_position` input; feed it only where the IR declares it.
+        self._decoder_inputs = {
+            name for port in self.decoder.inputs for name in port.get_names()
+        }
 
         logger.info("OpenVINO Whisper models loaded successfully")
  
@@ -64,9 +70,10 @@ class Whisper(BaseASR):
         encoder_output = self.encoder([mel])[0]
 
         # --- Decode ---
+        language = getattr(config.app, "language", "en")
         tokens = [
             self.SOT,
-            self._tok("<|en|>"),
+            self._tok(f"<|{language}|>"),
             self._tok("<|transcribe|>"),
             self.TIMESTAMP_BEGIN
         ]
@@ -81,9 +88,10 @@ class Whisper(BaseASR):
             inputs_map = {
                 "input_ids": inp,
                 "encoder_hidden_states": encoder_output,
-                "cache_position": cache_position,
                 "beam_idx": beam_idx,
             }
+            if "cache_position" in self._decoder_inputs:
+                inputs_map["cache_position"] = cache_position
 
             req = self.decoder.create_infer_request()
             req.infer(inputs_map)
@@ -124,19 +132,8 @@ class Whisper(BaseASR):
                     current_text = ""
                 continue
 
-            txt = self.tokenizer.decode([tok]).strip()
-            CONTROL_TOKENS = {
-            "<|startoftranscript|>",
-            "<|endoftext|>",
-            "<|notimestamps|>",
-            "<|nospeech|>",
-            "<|transcribe|>",
-            "<|translate|>",
-            "<|en|>",
-        }
-
-            # Drop only known control tokens
-            if txt in CONTROL_TOKENS:
+            # Special tokens (SOT, language, task, EOT) sort after the text vocabulary.
+            if tok >= self.EOT:
                 continue
 
             clean_tokens.append(tok)

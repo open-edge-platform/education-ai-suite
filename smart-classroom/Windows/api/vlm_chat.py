@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import time
 import uuid
@@ -17,11 +18,24 @@ from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from components.vlm import tool_calls as tc
+from components.vlm.text_gen_profiles import UnsupportedRequestError
 from model_manager import ModelManager
+from utils.processing_stats import stage_scope
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Internal clients name their workflow stage so calls to the shared model stay
+# attributable (Q&A, video captioning, grading); anything else is "chat_api".
+STAGE_HEADER = "x-sc-stage"
+_STAGE_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+
+def _request_stage(request: Request) -> str:
+    stage = (request.headers.get(STAGE_HEADER) or "").strip().lower()
+    return stage if _STAGE_RE.match(stage) else "chat_api"
 
 # smart-classroom root: api/vlm_chat.py -> parents[1]
 _SC_ROOT = Path(__file__).resolve().parents[1]
@@ -63,7 +77,7 @@ def _extract_prompt_and_images(messages, mods: SimpleNamespace):
         if isinstance(last_user_message.content, str):
             prompt = last_user_message.content
         else:
-            for content in last_user_message.content:
+            for content in last_user_message.content or []:
                 if isinstance(content, mods.MessageContentImageUrl):
                     url = content.image_url.get("url")
                     if url:
@@ -87,11 +101,12 @@ def _model_name(requested: Optional[str]) -> str:
     return requested or "text_gen"
 
 
-def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
+def _chunk_writer(model_name: str):
+    """SSE ``chat.completion.chunk`` formatter sharing one id and timestamp."""
     created = int(time.time())
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
 
-    def _chunk(delta: dict, finish_reason: Optional[str] = None) -> str:
+    def chunk(delta: dict, finish_reason: Optional[str] = None) -> str:
         payload = {
             "id": completion_id,
             "object": "chat.completion.chunk",
@@ -103,18 +118,52 @@ def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
         }
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
-    # First chunk announces the assistant role (OpenAI convention).
-    yield _chunk({"role": "assistant"})
-    for token in token_iter:
-        if token:
-            yield _chunk({"content": token})
-    yield _chunk({}, finish_reason="stop")
+    return chunk
+
+
+def _close(token_iter) -> None:
+    """Stop native generation if the client stopped reading early."""
+    close = getattr(token_iter, "close", None)
+    if close is not None:
+        close()
+
+
+def _error_event(message: str, kind: str) -> str:
+    error = {"error": {"message": message, "type": kind, "code": None}}
+    return f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
+
+
+# A failure after HTTP 200 has started (a runtime error, or OomError from the
+# runner) is reported in-band; its details stay in the server log.
+_GENERATION_FAILED = _error_event("generation failed", "server_error")
+
+
+def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
+    chunk = _chunk_writer(model_name)
+    try:
+        # First chunk announces the assistant role (OpenAI convention).
+        yield chunk({"role": "assistant"})
+        for token in token_iter:
+            if token:
+                yield chunk({"content": token})
+        yield chunk({}, finish_reason="stop")
+    except Exception:  # noqa: BLE001 - the stream has started; end it with an error
+        logger.exception("Streaming generation failed")
+        yield _GENERATION_FAILED
+    finally:
+        _close(token_iter)
     yield "data: [DONE]\n\n"
 
 
 @router.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """OpenAI-compatible chat completion backed by the warm in-process VLM."""
+    # Model calls made while handling this request are attributed to the stage.
+    with stage_scope(None, _request_stage(request)):
+        return await _chat_completions(request)
+
+
+async def _chat_completions(request: Request):
     mods = _import_vlm_serving()
 
     try:
@@ -125,43 +174,59 @@ async def chat_completions(request: Request):
             status_code=400, content={"error": f"Invalid request: {exc}"}
         )
 
+    messages = [m.model_dump(exclude_none=True) for m in chat_req.messages]
+    if tc.is_tool_conversation(chat_req.tools, chat_req.tool_choice, messages):
+        # Full ordered history, tool definitions and tool results.
+        return await _tool_chat_completions(chat_req, messages, mods)
+
     prompt, image_urls = _extract_prompt_and_images(chat_req.messages, mods)
     if not prompt or not prompt.strip():
         return JSONResponse(status_code=400, content={"error": "Prompt is required"})
+    if any(not url.startswith("data:image/") for url in image_urls):
+        # Inline images only: request content never names a server-side file
+        # (any web page can reach this loopback API) or makes the server fetch.
+        return JSONResponse(status_code=400,
+                            content={"error": "image_url must be a data:image/ URL"})
 
     image_tensors = None
     if image_urls:
         try:
             _, image_tensors = await mods.load_images(image_urls)
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:  # unreadable or undecodable image
             return JSONResponse(status_code=400, content={"error": str(exc)})
 
     model_name = _model_name(chat_req.model)
     handler = ModelManager.instance().text_gen()
 
-    if chat_req.stream:
-        token_iter = handler.generate(
+    try:
+        if chat_req.stream:
+            # Admission waits on a threading semaphore: keep it off the event loop.
+            token_iter = await run_in_threadpool(
+                handler.generate,
+                prompt,
+                images=image_tensors,
+                stream=True,
+                max_new_tokens=chat_req.max_completion_tokens,
+                temperature=chat_req.temperature,
+                enable_thinking=chat_req.enable_thinking,
+            )
+            return StreamingResponse(
+                _sse_stream(token_iter, model_name),
+                media_type="text/event-stream",
+            )
+
+        output = await run_in_threadpool(
+            handler.generate,
             prompt,
             images=image_tensors,
-            stream=True,
+            stream=False,
             max_new_tokens=chat_req.max_completion_tokens,
             temperature=chat_req.temperature,
             enable_thinking=chat_req.enable_thinking,
         )
-        return StreamingResponse(
-            _sse_stream(token_iter, model_name),
-            media_type="text/event-stream",
-        )
-
-    output = await run_in_threadpool(
-        handler.generate,
-        prompt,
-        images=image_tensors,
-        stream=False,
-        max_new_tokens=chat_req.max_completion_tokens,
-        temperature=chat_req.temperature,
-        enable_thinking=chat_req.enable_thinking,
-    )
+    except UnsupportedRequestError as exc:
+        # Rejected before generation rather than silently changed.
+        return JSONResponse(status_code=400, content={"error": str(exc)})
     response = mods.ChatCompletionResponse(
         id=str(uuid.uuid4()),
         object="chat.completion",
@@ -176,3 +241,142 @@ async def chat_completions(request: Request):
         ],
     )
     return JSONResponse(content=response.model_dump())
+
+
+# ---------------------------------------------------------------------------
+# Tool calling
+# ---------------------------------------------------------------------------
+def _tool_error(status: int, message: str, kind: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content={"error": {"message": message, "type": kind, "code": None}},
+    )
+
+
+async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace):
+    """OpenAI function calling: validate, render with tools, parse and validate calls.
+
+    The server returns calls; executing them is the client's decision.
+    """
+    try:
+        tools = tc.normalize_tools(chat_req.tools)
+        choice = tc.resolve_tool_choice(chat_req.tool_choice, tools)
+        history, image_urls = tc.normalize_history(messages)
+    except tc.ToolRequestError as exc:
+        return _tool_error(exc.status, str(exc), exc.kind)
+
+    model_name = _model_name(chat_req.model)
+    handler = ModelManager.instance().text_gen()
+    offered = tc.offered_tools(tools, choice)
+    uses_tool_turns = any(m["role"] == "tool" or m.get("tool_calls") for m in history)
+    # May load the model on first use: keep that off the event loop.
+    if ((offered or uses_tool_turns)
+            and not await run_in_threadpool(lambda: handler.supports_tools)):
+        return _tool_error(400, f"{model_name} does not support tool calling",
+                           "invalid_request_error")
+
+    image_tensors = None
+    if image_urls:
+        try:
+            _, image_tensors = await mods.load_images(image_urls)
+        except (ValueError, RuntimeError) as exc:
+            return _tool_error(400, str(exc), "invalid_request_error")
+
+    parallel = chat_req.parallel_tool_calls is not False
+    info: dict = {}
+    kwargs = dict(
+        messages=history,
+        images=image_tensors,
+        max_new_tokens=chat_req.max_completion_tokens,
+        temperature=chat_req.temperature,
+        enable_thinking=chat_req.enable_thinking,
+        tools=[t.for_template() for t in offered] or None,
+        finish_info=info,
+    )
+    if choice.requires_call:
+        # "required" and named choices are enforced by starting the answer
+        # with the call rather than hoping the model chooses one.
+        kwargs["force_tool_call"] = choice.name or ""
+    try:
+        if chat_req.stream:
+            token_iter = await run_in_threadpool(handler.generate, stream=True, **kwargs)
+            # Positioned after the prompt: inside reasoning or a forced call.
+            parser = tc.ToolStreamParser(tools, choice, parallel=parallel,
+                                         reasoning_open=bool(info.get("reasoning_open")),
+                                         prefill=info.get("prefill") or "")
+            return StreamingResponse(
+                _tool_sse_stream(token_iter, parser, info, model_name),
+                media_type="text/event-stream",
+            )
+        output = await run_in_threadpool(handler.generate, stream=False, **kwargs)
+    except UnsupportedRequestError as exc:
+        return _tool_error(400, str(exc), "invalid_request_error")
+
+    try:
+        turn = tc.parse_completion(
+            str(output), tools, choice, parallel=parallel,
+            truncated=bool(info.get("truncated")),
+            reasoning_open=bool(info.get("reasoning_open")),
+            prefill=info.get("prefill") or "",
+        )
+    except tc.ToolOutputError as exc:
+        # Never returned as a successful tool invocation.
+        logger.warning("Rejected generated tool call: %s", exc)
+        return _tool_error(exc.status, str(exc), exc.kind)
+
+    message = {"role": "assistant", "content": turn.content or None}
+    if turn.reasoning:
+        message["reasoning_content"] = turn.reasoning
+    if turn.tool_calls:
+        message["tool_calls"] = turn.tool_calls
+    prompt_tokens, completion_tokens = info.get("input_tokens"), info.get("output_tokens")
+    usage = None
+    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+        usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                 "total_tokens": prompt_tokens + completion_tokens}
+    return JSONResponse(content={
+        "id": str(uuid.uuid4()),
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_name,
+        "system_fingerprint": None,
+        "choices": [{"index": 0, "message": message, "finish_reason": turn.finish_reason}],
+        "usage": usage,
+    })
+
+
+# Parser event -> SSE delta field.
+_DELTA_FIELD = {"content": "content", "reasoning": "reasoning_content"}
+
+
+def _tool_sse_stream(token_iter, parser: "tc.ToolStreamParser", info: dict,
+                     model_name: str) -> Iterator[str]:
+    """SSE with buffered tool calls: a call is published only once complete and valid."""
+    chunk = _chunk_writer(model_name)
+    calls = []
+    try:
+        yield chunk({"role": "assistant"})
+        for token in token_iter:
+            for kind, value in parser.feed(token):
+                if kind == "call":
+                    calls.append(value)
+                else:
+                    yield chunk({_DELTA_FIELD[kind]: value})
+        for kind, value in parser.finish(bool(info.get("truncated"))):
+            yield chunk({_DELTA_FIELD[kind]: value})
+        if parser.finish_reason == "tool_calls":
+            # Held until the turn is known complete: like the non-streaming
+            # path, a truncated turn publishes none of its calls.
+            for index, call in enumerate(calls):
+                yield chunk({"tool_calls": [{"index": index, **call}]})
+        yield chunk({}, finish_reason=parser.finish_reason)
+    except tc.ToolOutputError as exc:
+        # Terminate with an error instead of claiming a tool-call finish.
+        logger.warning("Rejected generated tool call mid-stream: %s", exc)
+        yield _error_event(str(exc), exc.kind)
+    except Exception:  # noqa: BLE001 - the stream has started; end it with an error
+        logger.exception("Streaming generation failed")
+        yield _GENERATION_FAILED
+    finally:
+        _close(token_iter)
+    yield "data: [DONE]\n\n"

@@ -8,6 +8,7 @@ from typing import Optional
 from model_manager.capability.state import CapabilityState
 from model_manager.capability.runner import CapabilityRunner
 from utils.config_loader import config
+from utils.processing_stats import run_admitted, submit_timed
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,7 @@ class AsrHandler:
                 
                 max_concurrency, queue_max = self._concurrency_config()
                 self._runner = CapabilityRunner(
-                    self._processor.transcribe,
+                    run_admitted,
                     max_concurrency=max_concurrency,
                     queue_max=queue_max
                 )
@@ -179,7 +180,9 @@ class AsrHandler:
         if not self.loaded:
             raise RuntimeError("ASR not loaded. Call load() first.")
 
-        return self._runner.submit(audio_path, **kwargs)
+        info = {"model": f"{self.provider}/{self.model_name}", "device": self.device}
+        return submit_timed(self._runner, "asr", info, self._processor.transcribe,
+                            audio_path, **kwargs)
 
     def shutdown(self) -> None:
         """Unload the ASR model and release resources."""

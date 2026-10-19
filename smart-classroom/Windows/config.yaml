@@ -82,6 +82,19 @@ models:
     concurrency: 1    # CapabilityRunner max_concurrency (single warm pipe)
     queue_max: 8      # CapabilityRunner queue depth before 503 backpressure
 
+    # DFlash speculative decoding, supported only for vlm_name Qwen/Qwen3.6-35B-A3B
+    # with weight_format int4 (drafter z-lab/Qwen3.6-35B-A3B-DFlash). Opt-in: set
+    # that vlm_name and mode: auto (falls back to plain when DFlash cannot run) or
+    # "on" (requires it). "off" is plain generation; the other fields are then
+    # ignored. See docs/vlm-llm-serving/serving-guide.md.
+    speculative:
+      mode: "off"          # "off" | auto | "on"
+      method: dflash
+      draft_source: null    # null = Hub drafter | local (draft_model = an exported IR directory)
+      draft_model: null     # null = z-lab/Qwen3.6-35B-A3B-DFlash
+      draft_revision: null  # null = the tested pinned commit; a full 40-char commit overrides it
+      num_assistant_tokens: null  # null = 3, the tested value for classroom summaries
+
     chunking:
       enabled: true                  # false = summarize the whole transcript in one pass
       max_prompt_tokens: auto        # auto = min(quality ceiling, memory ceiling); an int overrides both
