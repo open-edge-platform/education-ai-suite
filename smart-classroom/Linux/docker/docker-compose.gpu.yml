@@ -1,0 +1,59 @@
+# GPU / NPU passthrough override.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d --build
+#
+# Set RENDER_GID in .env so the container user can access /dev/dri:
+#   echo "RENDER_GID=$(getent group render | cut -d: -f3)" >> .env
+#
+# The UI skeleton does not need a GPU, so the `app` device mapping is left
+# commented. Uncomment it (and the backend services) once the real, GPU-backed
+# workloads are layered into the image. `metrics-collector` DOES need /dev/dri
+# (qmassa) and /dev/accel (NPU tool) to report non-empty gpu_utilization /
+# npu_utilization series, so it is active by default.
+
+services:
+  # app:
+  #   devices:
+  #     - "/dev/dri:/dev/dri"
+  #   group_add:
+  #     - "${RENDER_GID}"
+
+  ovms:
+    devices:
+      - "/dev/dri:/dev/dri"
+    group_add:
+      - "${RENDER_GID}"
+  model-downloader:
+    devices:
+      - "/dev/dri:/dev/dri"
+    group_add:
+      - "${RENDER_GID}"
+    volumes:
+      - ../components/vlm/config/startup-models.gpu.yaml:/opt/startup-models.yaml:ro
+
+  ovms-provision:
+    volumes:
+      - ../components/vlm/config/startup-models.gpu.yaml:/opt/startup-models.yaml:ro
+
+  metrics-collector:
+    devices:
+      - "/dev/dri:/dev/dri"
+      - "/dev/accel:/dev/accel"
+    group_add:
+      - "${RENDER_GID}"
+
+  # ASR microservice: map GPU (/dev/dri) and NPU (/dev/accel) so the audio
+  # analyzer can run Whisper/diarization on GPU or NPU when its config selects
+  # a non-CPU device (config.models.asr.device).
+  audio-analyzer:
+    devices:
+      - "/dev/dri:/dev/dri"
+      - "/dev/accel:/dev/accel"
+    group_add:
+      - "${RENDER_GID}"
+
+  # Placeholder so this override file is valid on its own during the skeleton
+  # phase. Remove once a real service above is uncommented.
+  app:
+    profiles: []

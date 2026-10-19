@@ -31,7 +31,7 @@ jobs:
         with:
           filters: |
             smart-classroom:
-              - 'smart-classroom/docs/user-guide/**'
+              - 'smart-classroom/Windows/docs/user-guide/**'
 
   build-smart-classroom:
     permissions:
@@ -40,4 +40,4 @@ jobs:
     if: ${{ needs.filter.outputs.smart-classroom_changed == 'true' }}
     uses: ./.github/workflows/docs-reusable-workflow.yaml
     with:
-      docs_directory: smart-classroom
+      docs_directory: smart-classroom/Windows

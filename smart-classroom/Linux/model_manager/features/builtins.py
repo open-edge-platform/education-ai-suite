@@ -1,0 +1,34 @@
+import logging
+
+from .asr_feature import ASRFeature
+from .board_ocr_feature import BoardOCRFeature
+from .content_search_feature import ContentSearchFeature
+from .grading_feature import GradingFeature
+from .mindmap_feature import MindmapFeature
+from .qa_feature import QAFeature
+from .report_feature import ReportFeature
+from .registry import REGISTRY, register
+from .segmentation_feature import SegmentationFeature
+from .summary_feature import SummaryFeature
+
+logger = logging.getLogger(__name__)
+
+_BUILTIN_FEATURES = [
+    ASRFeature,
+    SummaryFeature,
+    MindmapFeature,
+    SegmentationFeature,
+    BoardOCRFeature,
+    ContentSearchFeature,
+    QAFeature,
+    GradingFeature,
+    ReportFeature,
+    GradingFeature,
+]
+
+
+def register_builtin_features() -> None:
+    for feature_cls in _BUILTIN_FEATURES:
+        if feature_cls.id not in REGISTRY:
+            register(feature_cls())
+    logger.info("Registered built-in features: %s", sorted(REGISTRY))

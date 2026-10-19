@@ -1,0 +1,267 @@
+import logging, os
+import yaml
+from utils.config_loader import config
+from utils.cli_utils import run_cli
+
+logger = logging.getLogger(__name__)
+from huggingface_hub import snapshot_download
+from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
+
+HF_PYTORCH_WEIGHTS_NAME = "pytorch_model.bin"
+
+
+class ModelDownloadError(RuntimeError):
+    """A model could not be fetched or prepared locally.
+
+    Raised instead of returning a failure flag so a missing model aborts
+    whatever was being loaded (and, at warmup, startup itself) with the real
+    cause attached, rather than leaving the service up with a capability that
+    dies on every request.
+    """
+
+
+def normalize_hf_token(hf_token) -> str | None:
+    """Map a blank/absent config token to None.
+
+    An empty string is not "no token" to huggingface_hub — it builds an
+    ``Authorization: Bearer `` header and fails with an opaque "Illegal header
+    value" instead of the gated-repo error that says what to actually do.
+    """
+    token = str(hf_token).strip() if hf_token is not None else ""
+    return token or None
+
+
+def _hf_auth_hint(model_name: str) -> str:
+    return (
+        f"'{model_name}' is gated or private. Accept the model conditions at "
+        f"https://hf.co/{model_name}, create a token at "
+        "https://hf.co/settings/tokens, and set models.asr.hf_token in config.yaml "
+        "(or disable models.asr.diarization)."
+    )
+
+
+def _download_hf_model(
+    model_name: str,
+    output_dir: str,
+    hf_token: str = None,
+    force: bool = False,
+    required_files: list[str] | None = None
+) -> str:
+    """Download a HuggingFace model locally (full snapshot, offline usable).
+
+    Returns the local directory; raises ModelDownloadError if the snapshot
+    could not be fetched.
+    """
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    required_files = required_files or []
+    has_required_files = all(
+        os.path.exists(os.path.join(output_dir, required_file))
+        for required_file in required_files
+    )
+
+    # If already downloaded and not forcing, reuse
+    if not force and os.listdir(output_dir) and has_required_files:
+        logger.info(f"⚡ Using cached HF model at {output_dir}")
+        return output_dir
+
+    if os.listdir(output_dir) and not has_required_files:
+        logger.warning(f"Incomplete HF model cache detected at {output_dir}. Re-downloading snapshot.")
+
+    logger.info(f"🚀 Downloading HF model {model_name} → {output_dir}\n"
+                "⏳ This may take time depending on model size...\n"
+                "⚠️ Please do not terminate.")
+
+    try:
+        snapshot_download(
+            repo_id=model_name,
+            local_dir=output_dir,
+            token=normalize_hf_token(hf_token)
+        )
+    except (GatedRepoError, RepositoryNotFoundError) as e:
+        # 401/403/404 all surface here when the token is missing, expired, or
+        # has not accepted the model conditions — the actionable case.
+        raise ModelDownloadError(
+            f"Failed to download HF model {model_name} -> {output_dir}: {e}\n"
+            f"{_hf_auth_hint(model_name)}"
+        ) from e
+    except Exception as e:
+        raise ModelDownloadError(
+            f"Failed to download HF model {model_name} -> {output_dir}: {e}"
+        ) from e
+
+    if not os.listdir(output_dir):
+        raise ModelDownloadError(
+            f"Download of HF model {model_name} left {output_dir} empty."
+        )
+
+    missing = [f for f in required_files if not os.path.exists(os.path.join(output_dir, f))]
+    if missing:
+        raise ModelDownloadError(
+            f"HF model {model_name} downloaded to {output_dir} but is missing "
+            f"required file(s): {', '.join(missing)}"
+        )
+
+    logger.info("✅ Download successful")
+    return output_dir
+
+def _cache_diarization_dependencies_locally(pipeline_dir: str, hf_token: str = None) -> None:
+    config_path = os.path.join(pipeline_dir, "config.yaml")
+    if not os.path.exists(config_path):
+        return
+
+    with open(config_path, "r", encoding="utf-8") as handle:
+        pipeline_config = yaml.safe_load(handle) or {}
+
+    pipeline_params = pipeline_config.get("pipeline", {}).get("params", {})
+    changed = False
+
+    for key in ("segmentation", "embedding", "plda"):
+        model_ref = pipeline_params.get(key)
+        if not isinstance(model_ref, str):
+            continue
+        if os.path.isfile(model_ref) or os.path.isdir(model_ref):
+            continue
+        if "/" not in model_ref:
+            continue
+
+        # pyannote 4.0 uses "$model/<name>" to reference sub-models bundled in the snapshot
+        if model_ref.startswith("$model/"):
+            sub_name = model_ref[len("$model/"):]
+            sub_dir = os.path.join(pipeline_dir, sub_name)
+            local_checkpoint = os.path.join(sub_dir, HF_PYTORCH_WEIGHTS_NAME)
+            if os.path.exists(local_checkpoint):
+                pipeline_params[key] = local_checkpoint
+                changed = True
+            elif os.path.isdir(sub_dir):
+                pipeline_params[key] = sub_dir
+                changed = True
+            continue
+
+        dependency_dir = os.path.join(pipeline_dir, "dependencies", model_ref.replace("/", "_"))
+        # Not swallowed: a sub-model that never lands leaves the pipeline config
+        # pointing at the hub, which only fails much later at diarize() time.
+        _download_hf_model(
+            model_ref,
+            dependency_dir,
+            hf_token=hf_token,
+            required_files=[HF_PYTORCH_WEIGHTS_NAME, "config.yaml"]
+        )
+
+        checkpoint_path = os.path.join(dependency_dir, HF_PYTORCH_WEIGHTS_NAME)
+        if os.path.exists(checkpoint_path):
+            pipeline_params[key] = checkpoint_path
+            changed = True
+
+    if changed:
+        with open(config_path, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(pipeline_config, handle, sort_keys=False)
+
+
+def diarization_cache_complete(pipeline_dir: str) -> bool:
+    """True when the cached pipeline is actually usable offline.
+
+    ``config.yaml`` alone is not enough: it is written by the snapshot download,
+    while the sub-models it points at are fetched afterwards by
+    ``_cache_diarization_dependencies_locally``. If that second step was
+    interrupted, the config still carries hub identifiers (or unexpanded
+    ``$model/...`` refs) and the pipeline only fails when a session runs.
+    """
+    config_path = os.path.join(pipeline_dir, "config.yaml")
+    if not os.path.exists(config_path):
+        return False
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            pipeline_config = yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning(f"Unreadable diarization pipeline config at {config_path}: {e}")
+        return False
+
+    pipeline_params = pipeline_config.get("pipeline", {}).get("params", {})
+    for key in ("segmentation", "embedding", "plda"):
+        model_ref = pipeline_params.get(key)
+        if not isinstance(model_ref, str):
+            continue
+        if not (os.path.isfile(model_ref) or os.path.isdir(model_ref)):
+            logger.warning(
+                f"Diarization cache at {pipeline_dir} is incomplete: "
+                f"{key}={model_ref!r} does not resolve locally."
+            )
+            return False
+    return True
+
+def _ir_exists(output_dir: str) -> bool:
+    """Check if exported OpenVINO IR files exist."""
+    xml_file = os.path.join(output_dir, "openvino_model.xml")
+    bin_file = os.path.join(output_dir, "openvino_model.bin")
+    en_xml_file = os.path.join(output_dir, "openvino_encoder_model.xml")
+    en_bin_file = os.path.join(output_dir, "openvino_encoder_model.bin")
+    de_xml_file = os.path.join(output_dir, "openvino_decoder_model.xml")
+    de_bin_file = os.path.join(output_dir, "openvino_decoder_model.bin")
+    return (os.path.exists(xml_file) and os.path.exists(bin_file)) or (os.path.exists(en_xml_file) and os.path.exists(en_bin_file) and os.path.exists(de_xml_file) and os.path.exists(de_bin_file))
+
+def _download_openvino_model(
+    model_name: str,
+    output_dir: str,
+    weight_format: str,
+    force: bool = False
+) -> str:
+    """Export a HuggingFace model to OpenVINO IR using optimum-cli.
+
+    Returns the output directory; raises ModelDownloadError if the export
+    failed or produced no IR.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    if not force and _ir_exists(output_dir):
+        logger.info(f"⚡ Using cached export at {output_dir}")
+        return output_dir
+
+    cmd = [
+        "optimum-cli", "export", "openvino",
+        "--model", model_name,
+        "--trust-remote-code",
+        output_dir,
+    ] + (["--weight-format", weight_format] if weight_format else [])
+
+    logger.info(f"🚀  Exporting {model_name} → {output_dir} ({weight_format})\n"
+                "⏳  Exporting model... This process may take some time depending on the model size. \n"
+                "⚠️  Please do not terminate the process.")
+
+    return_code = run_cli(cmd=cmd, log_fn=logger.info)
+    if return_code != 0:
+        raise ModelDownloadError(
+            f"optimum-cli export of {model_name} -> {output_dir} failed with exit "
+            f"code {return_code}. See the export log above for the cause."
+        )
+
+    if not _ir_exists(output_dir):
+        raise ModelDownloadError(
+            f"optimum-cli export of {model_name} reported success but no "
+            f"OpenVINO IR was written to {output_dir}."
+        )
+
+    logger.info("✅ Export successful")
+    return output_dir
+
+def ensure_model():
+    # NOTE: Core capabilities (text_gen VLM, ASR, OCR) handle model download/
+    # conversion lazily during first warmup via their respective handlers:
+    # - VLMTextGen: downloads and converts on first _load()
+    # - AsrHandler: calls _ensure_openvino_asr_model() from _build_processor()
+    # - OcrHandler: calls _ensure_openvino_models() from _build_processor()
+    # No pre-download is needed here; models are prepared on-demand.
+    pass
+
+
+def get_asr_model_path() -> str:
+    return os.path.join(config.models.asr.models_base_path, config.models.asr.provider, f"{config.models.asr.name.replace('/', '_')}")
+
+def get_diarization_model_path() -> str:
+    return os.path.join(
+        config.models.diarization.models_base_path,
+        config.models.diarization.provider,
+        config.models.diarization.name.replace('/', '_')
+    )
