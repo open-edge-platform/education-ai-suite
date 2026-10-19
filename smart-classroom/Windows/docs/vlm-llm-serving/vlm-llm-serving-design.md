@@ -6,7 +6,7 @@
 
 This design covers shared model serving, speculative decoding, timing instrumentation, and offline benchmarking while preserving classroom inference interfaces.
 
-| Key feature | Stakeholder benefit |
+| Key Feature | Stakeholder Benefit |
 | --- | --- |
 | **Qwen3.5, Qwen3.6, or Qwen3.8 model choice** | Serve Qwen3.5-9B INT4 and INT8, Qwen3.6-35B-A3B INT4, and Qwen3.8-27B INT4 and INT8 through the shared OpenVINO service. |
 | **Tool calling on port 8000** | OpenAI-compatible function calls and tool-result conversations through `/v1/chat/completions`, enabling agent workflows without a separate endpoint. |
@@ -23,7 +23,7 @@ Keep one target per serving instance. Generating tool calls and consuming tool r
 
 ## 2. Model Profiles
 
-| Model | Target artifacts | Optional accelerator |
+| Model | Target Artifacts | Optional Accelerator |
 | --- | --- | --- |
 | Previously supported VLM and LLM models | Preserve their supported download and export paths, and precisions | Plain generation; a drafter is not required |
 | `Qwen/Qwen3.5-9B` | [INT4 intermediate representation (IR)](https://huggingface.co/OpenVINO/Qwen3.5-9B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.5-9B-int8-ov) | Plain generation; speculative decoding requires a separately qualified profile |
