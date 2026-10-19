@@ -171,14 +171,26 @@ else
   log "      docker compose -f docker/docker-compose.yml logs -f model-downloader ovms"
 fi
 
-log "Optional local UI startup (Vite dev server):"
-log "  cd \"$SCRIPT_DIR/ui\""
-log "  npm install"
-log "  npm run dev -- --host 0.0.0.0 --port 5173"
-log "Expected Vite banner:"
-printf '  \033[1;36mVITE v8.1.4\033[0m  ready in 95 ms\n'
-printf '  \033[1;36m➜  Local:\033[0m   http://localhost:5173/\n'
-printf '  \033[1;36m➜  Network:\033[0m http://10.223.23.54:5173/\n'
-printf '  \033[1;36m➜  Network:\033[0m http://172.18.0.1:5173/\n'
+# --- Start the local UI (Vite dev server) -----------------------------------
+UI_DIR="${SCRIPT_DIR}/ui"
+UI_LOG="${UI_DIR}/vite-dev.log"
+UI_PID_FILE="${UI_DIR}/vite-dev.pid"
+UI_PORT="${UI_PORT:-5173}"
+
+if [[ -d "$UI_DIR" ]]; then
+  log "Installing UI dependencies (npm install)…"
+  (cd "$UI_DIR" && npm install) || die "npm install failed in ${UI_DIR}."
+
+  if [[ -f "$UI_PID_FILE" ]] && kill -0 "$(cat "$UI_PID_FILE")" 2>/dev/null; then
+    log "UI dev server already running (PID $(cat "$UI_PID_FILE")) — leaving it as is."
+  else
+    log "Starting UI dev server in the background (npm run dev --port ${UI_PORT})…"
+    (cd "$UI_DIR" && nohup npm run dev -- --host 0.0.0.0 --port "$UI_PORT" >"$UI_LOG" 2>&1 & echo $! >"$UI_PID_FILE")
+    log "✅ UI: http://localhost:${UI_PORT}/  (logs: ${UI_LOG})"
+    log "   Stop with: kill \$(cat \"${UI_PID_FILE}\")"
+  fi
+else
+  log "⚠️  ${UI_DIR} not found — skipping UI startup."
+fi
 
 log "✅ setup complete."
