@@ -5,7 +5,9 @@
 
 Run as a script (``python convert_worker.py ...``) by
 :func:`utils.utils.convert_model` so that all memory used during quantization and
-export is reclaimed by the OS when the process exits.
+export is reclaimed by the OS when the process exits. ``python convert_worker.py
+optimum-cli <args>`` runs the optimum CLI the same way (used by
+``utils.ensure_model``).
 
 This module is deliberately self-contained: it imports nothing from the
 smart-classroom application packages. Using ``multiprocessing.Process`` here
@@ -15,13 +17,38 @@ graph and is sensitive to top-level package-name collisions on ``sys.path``.
 """
 
 import argparse
+import importlib
 import logging
 import sys
 
 logger = logging.getLogger("convert_worker")
 
+# Optional to optimum-intel (only calibration-based quantization uses it), but
+# imported eagerly whenever it is installed. ``datasets`` imports pyarrow, whose
+# DLLs Windows Application Control (Smart App Control, WDAC) may refuse to load,
+# which would fail every export although none of them needs it.
+OPTIONAL_MODULES = ("datasets",)
+
+
+def skip_unloadable_optional_modules() -> None:
+    """Treat an optional module that cannot be loaded as not installed.
+
+    A failed probe leaves ``sys.modules[name] = None``: ``import`` then raises
+    ImportError and ``importlib.util.find_spec`` returns None, which is how
+    optimum-intel and transformers detect a missing optional package. The
+    blocked file itself is never loaded.
+    """
+    for name in OPTIONAL_MODULES:
+        try:
+            importlib.import_module(name)
+        except ImportError as exc:
+            sys.modules[name] = None
+            logger.warning("Optional module %s cannot be loaded (%s); exporting without it.",
+                           name, exc)
+
 
 def convert(model_id: str, cache_dir: str, model_type: str, weight_format: str) -> None:
+    skip_unloadable_optional_modules()
     import openvino as ov
     from openvino_tokenizers import convert_tokenizer
     from optimum.exporters.openvino.utils import save_preprocessors
@@ -74,7 +101,24 @@ def convert(model_id: str, cache_dir: str, model_type: str, weight_format: str) 
         raise ValueError(f"Unsupported model type: {model_type}")
 
 
+def optimum_cli(argv: list) -> int:
+    """``optimum-cli <argv>`` with the same optional-module handling as :func:`convert`."""
+    skip_unloadable_optional_modules()
+    from optimum.commands.optimum_cli import main as cli_main
+
+    sys.argv = ["optimum-cli", *argv]
+    try:
+        cli_main()
+    except SystemExit as exc:  # argparse and the export commands exit this way
+        return exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    return 0
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["optimum-cli"]:
+        logging.basicConfig(level=logging.INFO)
+        return optimum_cli(argv[1:])
     parser = argparse.ArgumentParser(description="Convert a model to OpenVINO IR.")
     parser.add_argument("--model-id", required=True)
     parser.add_argument("--cache-dir", required=True)

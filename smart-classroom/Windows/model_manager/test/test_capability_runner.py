@@ -101,6 +101,25 @@ def test_streaming_holds_slot_until_exhausted():
     assert list(runner.submit(2)) == [0, 1]
 
 
+def test_abandoned_stream_releases_slot():
+    """A consumer that drops a stream without closing it does not leak the slot."""
+    closed = []
+
+    def stream(n):
+        try:
+            for i in range(n):
+                yield i
+        finally:
+            closed.append(True)
+
+    runner = CapabilityRunner(stream, max_concurrency=1, queue_max=1)
+    it = runner.submit(3)
+    assert next(it) == 0
+    del it  # dropped mid-stream, never closed
+    assert closed == [True]
+    assert list(runner.submit(1)) == [0]
+
+
 def test_oom_fails_one_request_runner_stays_ready():
     """RuntimeError (simulated GPU OOM) wraps to OomError; runner stays READY."""
     call_count = [0]

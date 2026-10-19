@@ -49,18 +49,51 @@ class TextGenHandler:
         temperature: Optional[float] = None,
         enable_thinking: Optional[bool] = None,
         json_schema: Optional[str] = None,
+        tools: Optional[list] = None,
+        force_tool_call: Optional[str] = None,
+        finish_info: Optional[dict] = None,
     ) -> Union[Iterator[str], str]:
         """Generate from ``messages`` (a chat history) or ``prompt`` (one user
-        turn). Templating happens inside the VLM, so callers pass raw text."""
-        return self._get_runner().submit(
-            prompt,
-            messages=messages,
-            images=images,
+        turn). Templating happens inside the VLM, so callers pass raw text.
+
+        Every call is timed as one model-call record (queue wait separate from
+        latency) attributed to the stage open in the caller's context."""
+        runner = self._get_runner()
+        call = self._model_call(stream)
+        # Tool-calling arguments only when used, as classroom callers pass none.
+        extra = {key: value for key, value in (("tools", tools),
+                                               ("force_tool_call", force_tool_call),
+                                               ("finish_info", finish_info))
+                 if value is not None}
+        try:
+            return runner.submit(
+                prompt,
+                messages=messages,
+                images=images,
+                stream=stream,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                enable_thinking=enable_thinking,
+                json_schema=json_schema,
+                call=call,
+                **extra,
+            )
+        except BaseException as exc:
+            # No-op when the VLM already finished the record.
+            call.finish("rejected" if type(exc).__name__ == "QueueFullError" else "failed", exc)
+            raise
+
+    def _model_call(self, stream: bool):
+        from utils.processing_stats import ModelCall
+
+        vlm = self._vlm
+        return ModelCall(
+            "text_gen",
+            model=getattr(vlm, "model_name", None),
+            precision=getattr(vlm, "weight_format", None),
+            device=self._device,
+            decoding=getattr(vlm, "decoding_method", None),
             stream=stream,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            enable_thinking=enable_thinking,
-            json_schema=json_schema,
         )
 
     def load(self) -> None:
@@ -90,6 +123,16 @@ class TextGenHandler:
     def tokenizer(self):
         self._get_runner()
         return self._vlm.tokenizer
+
+    @property
+    def supports_tools(self) -> bool:
+        self._get_runner()
+        return bool(getattr(self._vlm, "supports_tools", False))
+
+    def serving_status(self) -> dict:
+        """Model, tool-call capability and speculative state for /health."""
+        status = getattr(self._vlm, "status", None)
+        return status() if callable(status) else {}
 
     def memory_stats(self) -> dict:
         stats: dict = {}

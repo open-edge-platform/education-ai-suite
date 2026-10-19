@@ -1,4 +1,5 @@
-import logging, os
+import logging, os, sys
+from pathlib import Path
 import yaml
 from utils.config_loader import config
 from utils.cli_utils import run_cli
@@ -205,6 +206,10 @@ def _ir_exists(output_dir: str) -> bool:
     de_bin_file = os.path.join(output_dir, "openvino_decoder_model.bin")
     return (os.path.exists(xml_file) and os.path.exists(bin_file)) or (os.path.exists(en_xml_file) and os.path.exists(en_bin_file) and os.path.exists(de_xml_file) and os.path.exists(de_bin_file))
 
+_CONVERT_WORKER = (Path(__file__).resolve().parents[1] / "components" / "vlm"
+                   / "vlm_openvino_serving" / "utils" / "convert_worker.py")
+
+
 def _download_openvino_model(
     model_name: str,
     output_dir: str,
@@ -222,8 +227,10 @@ def _download_openvino_model(
         logger.info(f"⚡ Using cached export at {output_dir}")
         return output_dir
 
+    # Through convert_worker rather than the optimum-cli executable, so an optional
+    # dependency Windows Application Control blocks (pyarrow) does not fail the export.
     cmd = [
-        "optimum-cli", "export", "openvino",
+        sys.executable, str(_CONVERT_WORKER), "optimum-cli", "export", "openvino",
         "--model", model_name,
         "--trust-remote-code",
         output_dir,

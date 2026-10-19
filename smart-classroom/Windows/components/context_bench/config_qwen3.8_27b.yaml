@@ -1,0 +1,102 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen3.8-27B, plain generation only: the paged-attention baseline at 8K context.
+#
+#   .\components\context_bench\run_benchmark.ps1 --config components/context_bench/config_qwen3.8_27b.yaml
+#   ... --list-profiles                       # the plan below; loads nothing
+#   ... --weight-format int4                  # the INT4 artifact, same profiles and steps
+#   ... --accuracy
+#
+# TEST STEPS. Every case below is one child process: load the model, run the warm-up(s), then
+# the measured generations, while RAM/GPU memory are sampled. IDs follow execution order, row
+# by row, so each task runs on every profile back to back under the same thermal conditions.
+# CLI filters (--profiles, --contexts, --throughput-task) renumber the steps; --list-profiles
+# prints the exact plan, with its IDs, before anything loads.
+#
+# Throughput run (default): 1 case, 1 warm-up + 3 measured generations of up to 64 tokens
+# (EOS respected), back to back.
+#
+#   Context       Task       | paged_min
+#   8,000 tokens  summary_2s | c01
+#
+#   Context   a synthetic classroom transcript, then the task, 8,000 rendered tokens in total
+#   Task      summary_2s two-sentence summary of the transcript (~45 tokens)
+#   Profile   paged_min  continuous-batching (paged attention) pipeline, runtime-managed pool
+#
+# Accuracy run (--accuracy): 1 case replaces the throughput case:
+#
+#   Context       Task     | paged_min
+#   8,000 tokens  accuracy | c01
+#
+#   accuracy  1 warm-up + 32 probes (`accuracy` below): 28 RULER retrieval probes scored
+#             against planted ground truth, and 4 generation probes (summary, fact_sheet)
+#             scored against paged_min's answer, i.e. against itself in this one-profile run.
+#
+# Artifacts (prepared by the serving workflow, never downloaded here) are derived from
+# `models_base_path` and the weight format, so --weight-format selects the artifact:
+#   models/openvino/Qwen3.8-27B/int8   (OpenVINO/Qwen3.8-27B-int8-ov)   default
+#   models/openvino/Qwen3.8-27B/int4   (OpenVINO/Qwen3.8-27B-int4-ov)   --weight-format int4
+# Results of both go under output_dir; each report's header names the weights it ran.
+#
+# No speculative profile: speculative decoding for this model requires its own qualified
+# profile.
+
+model:
+  provider: openvino
+  device: GPU
+  weight_format: int8
+  models_base_path: models
+
+benchmark:
+  models: [Qwen3.8-27B]
+  context_tokens: [8000]
+  # Throughput decode length. Accuracy probes use the per-suite budgets under `accuracy`.
+  # throughput_task and iteration_gap_sec keep their defaults, as in the reference:
+  # summary_2s, back-to-back.
+  output_tokens: 64
+  warmup: 1
+  iterations: 3
+  timeout_sec: 5400
+  max_system_memory_pct: 100
+  gpu_memory_budget_gb: 59
+  cache_dir: null
+  output_dir: monitoring/executionlogs/context_bench/qwen3.8_27b
+
+# Read only with --accuracy; identical to the reference configuration.
+accuracy:
+  suites: [retrieval, generation]
+  baseline_profile: paged_min
+  seed: 20260917
+  embedding_model: sentence-transformers/all-mpnet-base-v2
+  retrieval:
+    tasks: [niah_single, niah_multikey, niah_multivalue, niah_multiquery, vt, cwe, fwe, qa]
+    depths: [0.0, 0.5, 1.0]
+    samples: 2
+    output_tokens: 64
+    options:
+      niah_multikey: {num_distractors: 3}
+      niah_multivalue: {num_values: 4}
+      niah_multiquery: {num_queries: 4}
+      vt: {chain_length: 3, num_chains: 3}
+      cwe: {num_target_words: 10}
+      fwe: {top_k: 3}
+  generation:
+    tasks: [summary, fact_sheet]
+    depths: [0.5]
+    samples: 2
+    output_tokens: 256
+    options:
+      fact_sheet: {num_facts: 6}
+
+profiles:
+  - name: paged_min
+    ov:
+      ATTENTION_BACKEND: PA
+      GPU_ENABLE_LARGE_ALLOCATIONS: "YES"
+      KV_CACHE_PRECISION: f16
+    scheduler:
+      max_num_batched_tokens: 32768
+      max_num_seqs: 1
+      enable_prefix_caching: false
+
