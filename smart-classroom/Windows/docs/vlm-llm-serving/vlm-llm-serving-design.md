@@ -6,7 +6,7 @@
 
 This design covers shared model serving, speculative decoding, timing instrumentation, and offline benchmarking while preserving classroom inference interfaces.
 
-| Key feature | Stakeholder benefit |
+| Key Feature | Stakeholder Benefit |
 | --- | --- |
 | **Qwen3.5, Qwen3.6, or Qwen3.8 model choice** | Serve Qwen3.5-9B INT4 and INT8, Qwen3.6-35B-A3B INT4, and Qwen3.8-27B INT4 and INT8 through the shared OpenVINO service. |
 | **Tool calling on port 8000** | OpenAI-compatible function calls and tool-result conversations through `/v1/chat/completions`, enabling agent workflows without a separate endpoint. |
@@ -23,7 +23,7 @@ Keep one target per serving instance. Generating tool calls and consuming tool r
 
 ## 2. Model Profiles
 
-| Model | Target artifacts | Optional accelerator |
+| Model | Target Artifacts | Optional Accelerator |
 | --- | --- | --- |
 | Previously supported VLM and LLM models | Preserve their supported download and export paths, and precisions | Plain generation; a drafter is not required |
 | `Qwen/Qwen3.5-9B` | [INT4 intermediate representation (IR)](https://huggingface.co/OpenVINO/Qwen3.5-9B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.5-9B-int8-ov) | Plain generation; speculative decoding requires a separately qualified profile |
@@ -38,36 +38,59 @@ A source checkpoint is not runtime-ready IR. Each accelerated profile must provi
 
 ## 3. Architecture
 
-Separate startup preparation from request handling. A shared helper prepares files once; the model owner loads and warms them before serving classroom requests.
+In the design requirements, serving has two phases: startup preparation and request handling.
 
 ![Startup and request flow for existing and new models](assets/vlm-llm-serving-overview.svg)
 
-Model upgrades do not require a new deployment topology. The owner may be the application, a supervised worker or an independently operated server. Workers reuse prepared artifacts on restart. External clients do not download or manage the server's model files; the server reports its actual model and acceleration state.
+Startup:
+- A shared helper prepares model files once. The model owner, which can be the application, a supervised worker, or an independently operated server, loads and warms the model before serving classroom requests.
+- Workers reuse prepared artifacts after restart.
 
-Keep bounded request admission, streaming and cancellation. A cancelled request must not release model capacity while native inference is still active.
+Request Handling:
+- Classroom workflows send requests to the ready model. The service limits how many requests it admits, can stream responses as they are generated, and supports cancellation.
+- If a request is cancelled while native inference is still running, the service must keep that model capacity reserved until inference finishes.
 
-### Tool Calling on Port 8000
+Model upgrades do not require a new deployment topology. External clients do not download or manage the server’s model files. The server reports its actual model and acceleration state.
 
-**`POST /v1/chat/completions` on port 8000 must support OpenAI-compatible function/tool calling**, in streaming and non-streaming requests. Qwen3.6/Qwen3.8 serving profiles must pass tool-call qualification; older tool-capable models use the same contract, while ordinary chat remains available for models without tool support. All serving ownership modes expose this contract through the same application endpoint.
+### Tool Calls on Port 8000
 
-| Contract | Required behavior |
+**`POST /v1/chat/completions` on port 8000 must support OpenAI-compatible function (tool) calling**, in streaming and non-streaming requests. Qwen3.6 and Qwen3.8 serving profiles must pass the tool-call qualification; older tool-capable models use the same contract, while ordinary chat remains available for models without tool support. All serving ownership modes expose this contract through the same application endpoint.
+
+| Contract | Required Behavior |
 | --- | --- |
-| Conversation | Preserve the full ordered `messages` history: system/developer, user, assistant and tool turns, including supported image content. Do not reduce it to the last user prompt. Assistant messages may have null content when they contain tool calls. |
-| Tool definitions | Accept request-level `tools` entries with `type: "function"`, function name, optional description and a JSON Schema `parameters` object. Render definitions and history through the selected model's tool-aware chat template. |
+| Conversation | Preserve the full ordered `messages` history: system or developer, user, assistant, and tool turns, including supported image content. Do not reduce it to the last user prompt. Assistant messages may have null content when they contain tool calls. |
+| Tool definitions | Accept request-level `tools` entries with `type: "function"`, function name, optional description, and a JSON Schema `parameters` object. Render definitions and history through the selected model's tool-aware chat template. |
 | Tool selection | Support `tool_choice: "none"`, `"auto"`, `"required"`, or a named function object. Default to `auto` when tools are supplied, otherwise `none`. Reject choices referring to absent tools. Honor `parallel_tool_calls: false` by returning at most one call; multiple calls, when allowed, each require a distinct ID. |
-| Tool response | Return `choices[].message.tool_calls` with stable `id`, `type: "function"`, `function.name` and JSON-encoded `function.arguments`. Normalize model-specific tool syntax into this structure. Finish a valid tool-call turn with `finish_reason: "tool_calls"`; an ordinary completed text turn uses `"stop"`. |
-| Tool results | The client appends the assistant tool-call message and a `role: "tool"` message with matching `tool_call_id` and result `content`, then submits the conversation again. Validate call/result associations and duplicate or missing results in the submitted history; server-side conversation storage is not required. |
-| Streaming | Emit OpenAI-compatible SSE `delta.tool_calls` with stable call indexes and IDs. Buffer each generated call until its name and arguments are complete and validated, then publish it; finish with `finish_reason: "tool_calls"` and `[DONE]`. Do not expose partial generated arguments as a completed call. |
+| Tool response | Return `choices[].message.tool_calls` with stable `id`, `type: "function"`, `function.name`, and JSON-encoded `function.arguments`. Normalize model-specific tool syntax into this structure. Finish a valid tool-call turn with `finish_reason: "tool_calls"`; an ordinary completed text turn uses `"stop"`. |
+| Tool results | The client appends the assistant tool-call message and a `role: "tool"` message with matching `tool_call_id` and result `content`, then submits the conversation again. Validate call-to-result associations and duplicate or missing results in the submitted history; server-side conversation storage is not required. |
+| Streaming | Emit OpenAI-compatible Server-Sent Events (SSE) `delta.tool_calls` with stable call indexes and IDs. Buffer each generated call until its name and arguments are complete and validated, then publish it; finish with `finish_reason: "tool_calls"` and `[DONE]`. Do not expose partially generated arguments as a completed call. |
 
-The interaction is **request with tools -> assistant tool call -> client-authorized execution -> tool-result message -> assistant answer or next tool call**. The serving process never executes a function, opens a shell or performs an action merely because the model requested it.
+Tool-call sequence from the design requirements:
 
-Validate request schemas, names, selection options and model capabilities before generation; reject malformed requests or unsupported tool/schema features with a clear 4xx error instead of ignoring them. Validate generated calls against the offered function's supported JSON Schema, not just required keys. An invalid, truncated or missing required call must not be returned as a successful tool invocation; preserve failure/truncation semantics, and terminate an already-started stream with an error rather than claiming a successful tool-call finish. The controller independently validates arguments, authorizes execution and bounds tool-loop iterations. Treat tool results as untrusted conversation data, not authorization to execute further actions.
+1. Request with tools: The client sends a request that includes tool definitions.
+2. Assistant tool call: The assistant returns a tool call: a request to use one of those tools, with its name and arguments.
+3. Client-authorized execution: Execution is client-authorized. The controller independently validates the arguments, authorizes execution, and bounds tool-loop iterations. The serving process does not execute a function, open a shell, or performs an action merely because the model requested it.
+4. Tool result message: The client appends the assistant's tool-call message and a `role: "tool"` message containing the result and matching `tool_call_id`, then resubmits the conversation.
+5. Assistant answer or next tool call: The assistant uses the result to answer, or returns another tool call and the sequence continues.
+
+Tool-call validation and failure handling from the design requirements:
+
+- Before invoking generation, the serving endpoint validates request schemas, tool names, selection options, and model capabilities.
+- The serving endpoint returns a clear 4xx error for malformed requests or unsupported tool or schema features; it must not ignore them.
+- The service endpoint validates each generated call against the offered function’s supported JSON Schema, not only its required keys.
+- The service endpoint does not report an invalid, truncated, or missing required call as a successful tool invocation. It preserves failure and truncation semantics.
+- If a stream has already started, the serving endpoint terminates it with an error rather than signaling a successful tool-call completion.
+- The controller independently validates arguments, authorizes execution, and limits tool-loop iterations.
+- The controller treats tool results as untrusted conversation data; it does not authorize further actions.
 
 ## 4. Configuration
 
-**Reuse the current configuration structure and add an optional `models.text_gen.speculative` block.** Keep activation policy (`mode`) separate from decoding mechanism (`method`) and draft-model identity/source. The target remains selected by `vlm_name` and `weight_format`; no existing keys are renamed and no new top-level blocks are needed.
+- **Reuse the current configuration structure and add an optional `models.text_gen.speculative` block.**
+- Keep the activation policy (`mode`) separate from the decoding mechanism (`method`) and from the draft model’s identity and source.
+- Continue to select the target with `vlm_name` and `weight_format`.
+- Do not rename existing keys or add top-level blocks.
 
-The example uses the structure of [../../../config.yaml](../../../config.yaml), selects Qwen3.8 INT4 and adds the proposed DFlash2 settings. It is an illustrative profile, not a snapshot of every installation's values. Preserve existing generation, admission, chunking and segmentation settings when merging it. Omitting `speculative` preserves plain generation.
+The following example uses the structure of [../../../config.yaml](../../../config.yaml), selects Qwen3.8 INT4 and adds the proposed DFlash2 settings. It is an illustrative profile, not a snapshot of every installation's values. Preserve existing generation, admission, chunking and segmentation settings when merging it. Omitting `speculative` preserves plain generation.
 
 ```yaml
 models:
@@ -102,28 +125,28 @@ models:
       topics_max: 25
 ```
 
-| Configuration item | Required behavior |
+| Configuration Item | Required Behavior |
 | --- | --- |
-| Existing `provider`, `vlm_name`, `device`, `weight_format` | Keep names and meanings. For the new models use `provider: vlm`; select a listed model/precision combination. Keep an older installation's selection unless the operator changes it. |
-| Existing `max_new_tokens`, `concurrency`, `queue_max` | Retain the installation's generation and admission limits; 5120, 1 and 8 are example values. A larger model does not automatically increase these limits. |
+| Existing `provider`, `vlm_name`, `device`, `weight_format` | Keep names and meanings. For the new models use `provider: vlm`; select a listed model and precision combination. Keep an older installation's selection unless the operator changes it. |
+| Existing `max_new_tokens`, `concurrency`, `queue_max` | Retain the installation's generation and admission limits; 5120, 1, and 8 are example values. A larger model does not automatically increase these limits. |
 | Existing `chunking` and `segmentation` | Preserve the nested structure and configured values. Validate context and memory budgets for the selected model; change tuning only when measurements justify it. |
-| New optional `speculative` block | Select activation policy, method and draft artifacts without changing target or workflow settings. Defaults and validation are defined below. |
+| New optional `speculative` block | Select activation policy, method, and draft artifacts without changing target or workflow settings. Defaults and validation are defined below. |
 
 ### Speculative Settings
 
-| Field under `speculative` | Values and default | Purpose |
+| Field under `speculative` | Values and Default | Purpose |
 | --- | --- | --- |
 | `mode` | `"off"` (default), `auto`, `"on"` | Disable acceleration, allow plain fallback, or require acceleration. This is not the algorithm name. |
 | `method` | `auto` (default), `dflash`, `dflash2`, `mtp` | Select the decoding mechanism. `auto` selects the catalog's declared method, not trial-and-error loading. Future methods require an explicit supported profile. |
-| `draft_source` | `null` (profile default), `huggingface`, `local`, `target` | Distinguish a Hub repository, an explicit local IR directory, and target-bundled MTP artifacts. Other sources require a supported adapter/profile. |
-| `draft_model` | Repository ID or local directory; `null` selects the profile default | Identify the external drafter for DFlash/DFlash2. For MTP, leave null: use the target's prediction head, not a second model. |
+| `draft_source` | `null` (profile default), `huggingface`, `local`, `target` | Distinguish a Hub repository, an explicit local IR directory, and target-bundled MTP artifacts. Other sources require a supported adapter and profile. |
+| `draft_model` | Repository ID or local directory; `null` selects the profile default | Identify the external drafter for DFlash or DFlash2. For MTP, set to null: use the target's prediction head, not a second model. |
 | `draft_revision` | Immutable repository commit; `null` selects the profile's pinned revision | Reproduce a Hub download. Reject non-null values for `local` or `target`; bundled MTP inherits the target revision. |
-| `num_assistant_tokens` | Positive integer; `null` selects the method/profile's tested default | Control the draft block size within the selected runtime's supported range. Do not reuse DFlash tuning for DFlash2/MTP without validation. |
+| `num_assistant_tokens` | Positive integer; `null` selects the tested default for the selected method and profile. | Control the draft block size within the selected runtime's supported range. Do not reuse DFlash tuning with either DFlash2 or MTP without validation. |
 
-| Selected target/method | Draft settings |
+| Selected Target and Method | Draft Settings |
 | --- | --- |
 | Qwen3.6 INT4 with `dflash` | `draft_source: huggingface`, `draft_model: z-lab/Qwen3.6-35B-A3B-DFlash` |
-| Qwen3.8 INT4/INT8 with `dflash2` | `draft_source: huggingface`, `draft_model: z-lab/Qwen3.8-27B-DFlash2` |
+| Qwen3.8 INT4 or INT8 with `dflash2` | `draft_source: huggingface`, `draft_model: z-lab/Qwen3.8-27B-DFlash2` |
 | Target with a qualified bundled `mtp` head | `draft_source: target`, `draft_model: null`; download required MTP files with the target |
 
 For example, replace only the speculative block with the following when the selected target has a qualified MTP profile:
@@ -138,11 +161,22 @@ speculative:
   num_assistant_tokens: null
 ```
 
-Resolve defaults before download, then validate the complete target/method/source/revision combination against artifact metadata and the supported profile. An explicit method is never changed to another method on failure; `mode: auto` may fall back only to plain generation. Unknown methods, contradictory sources, mismatched drafters and out-of-range tuning fail validation rather than triggering fallback. In `"off"`, ignore dormant speculative fields and prepare only the target.
+Resolve and Validate:
+- The helper resolves defaults before downloading, then validates the complete combination of target, method, source, and revision against artifact metadata and the supported profile.
+- The model-serving software never changes an explicitly selected method if it fails; in `mode: auto`, the software falls back to the plain generation method.
+- Unknown methods, contradictory sources, mismatched drafters, and out-of-range tuning fail the validation rather than triggering fallback. 
+- In `"off"` mode, the helper ignores dormant speculative settings and prepares only the target.
 
-First-run downloads use the catalog's pinned Hub sources. `draft_source: local` requires a non-empty `draft_model` directory and a null `draft_revision`; it validates existing IR and never silently downloads a replacement when missing. Resolve relative local directories from the Smart Classroom root. `draft_source: target` is valid only with MTP and requires null `draft_model` and `draft_revision`. A source override or revision cannot bypass compatibility checks, enable arbitrary URLs or execute repository code. The manifest records resolved settings and actual artifact versions, including defaults.
+Prepare Artifacts:
+- The helper uses the catalog’s pinned Hub sources for first-run downloads. `draft_source: local` requires a non-empty `draft_model` directory and a null `draft_revision`; the helper validates the existing IR and does not download a replacement if it is missing. 
+- The helper resolves relative directory paths from the Smart Classroom root.
+- `draft_source: target` is valid only with MTP, and requires `draft_model` and `draft_revision` to be set to null.
+- The startup preparation flow ensures that a source override or revision cannot bypass compatibility checks, enable arbitrary URLs or execute repository code.
+- The manifest records resolved settings and actual artifact versions, including defaults.
 
-Tool definitions and selection are per-request API fields (`tools`, `tool_choice`, `parallel_tool_calls`), not new YAML settings or a separate service. Record tool/template capability in the model profile so unsupported requests fail before streaming; no `enable_tool_call` configuration flag is needed.
+Tool Calls:
+Tool definitions and selection are per-request API fields (`tools`, `tool_choice`, and `parallel_tool_calls`), not new YAML settings or a separate service. Record tool and template capability in the model profile so unsupported requests fail before streaming; no `enable_tool_call` configuration flag is needed.
+
 
 ## 5. Model Preparation
 
