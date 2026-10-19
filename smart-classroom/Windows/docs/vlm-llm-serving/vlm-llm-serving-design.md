@@ -1,6 +1,6 @@
 # Smart Classroom Vision-Language Model (VLM) and Large Language Model (LLM) Serving Design
 
-**Status:** Implementation design. Unless explicitly identified as existing behavior, the following features and contracts are requirements, not claims of implemented or qualified support. Model and runtime qualification and performance results remain pending.
+**Status:** Implementation design. The requirements below are the contract; paragraphs marked **Implemented** describe how the current code meets them, and the table under Section 1 summarizes coverage. Hardware qualification (Section 8) and published performance results remain pending.
 
 ## 1. Key Features and Compatibility
 
@@ -15,11 +15,23 @@ This design covers shared model serving, speculative decoding, timing instrument
 | **Backward compatibility** | Retain older models and configuration, the port-8000 API, `/v1/chat/completions`, and the shared classroom generation interface. |
 | **Controlled activation** | Complete the warm-up of the selected model pipeline before reporting readiness, show the model's acceleration status, and handle failures safely. |
 | **Workflow-stage and model-call timing statistics** | Measure processing time separately for workflow stages, including Automatic Speech Recognition (ASR), video analytics (VA), Optical Character Recognition (OCR), Summary, and Mindmap. Compare individual model calls by model, precision, device, and effective decoding method. |
-| **Standalone `context_bench` benchmarking** | Compare model and runtime profiles using repeatable measurements of time to first token (TTFT), time per output token after the first (TPOT), throughput, and memory. Optionally assess retrieval accuracy and generation fidelity against a baseline. See [context-bench-design.md](context-bench-design.md). |
+| **Standalone `context_bench` benchmarking** | Compare model and runtime profiles using repeatable measurements of time to first token (TTFT), time per output token after the first (TPOT), throughput, and memory. Optionally assess retrieval accuracy and generation fidelity against a baseline. See [context-bench-design.md](../context-bench/context-bench-design.md). |
 
 **Preserve existing model support**, including Qwen3-VL-8B-Instruct and Qwen3.5-9B, with unchanged providers, model IDs, precisions, local paths and generation behavior. No configuration migration or default model replacement is required; speculation remains switched off unless enabled. A model without a qualified accelerator continues through plain generation. Qualified serving profiles prepare missing artifacts automatically after software setup; the offline benchmark consumes prepared artifacts.
 
 Keep one target per serving instance. Generating tool calls and consuming tool results are in scope; executing tools remains the client's or controller's responsibility. Multi-model routing, UI redesign, and NPU text-generation support are outside the scope; existing NPU use by other classroom components is unchanged.
+
+**Implemented** (usage: [serving-guide.md](serving-guide.md)):
+
+| Feature | Current implementation |
+| --- | --- |
+| Model choice | Catalog in [text_gen_profiles.py](../../components/vlm/text_gen_profiles.py): Qwen3-VL-8B-Instruct (default) and Qwen3.5-9B INT4/INT8, Qwen3.6-35B-A3B INT4, Qwen3.8-27B INT4/INT8, all declared tool-capable. Models outside the catalog keep the existing export path. |
+| Speculative decoding | DFlash for Qwen3.6-35B-A3B INT4 only. `dflash2` and `mtp` are accepted settings without a profile: plain generation under `auto`, a startup failure under `"on"`. |
+| First-run preparation | [text_gen_prepare.py](../../components/vlm/text_gen_prepare.py), run by the model owner at load (Section 5). |
+| Tool calling | [tool_calls.py](../../components/vlm/tool_calls.py) and [vlm_chat.py](../../api/vlm_chat.py) (Section 3). |
+| Controlled activation | Warm-up before readiness; `/health` reports `hub.text_gen.serving` (Section 6). |
+| Timing statistics | Stage and model-call records, `GET /processing-stats`, per-session logs and a report script: [processing-time-statistics.md](processing-time-statistics.md) (Section 7). |
+| `context_bench` | [components/context_bench](../../components/context_bench/): [context-bench-design.md](../context-bench/context-bench-design.md). |
 
 ## 2. Model Profiles
 
@@ -28,13 +40,15 @@ Keep one target per serving instance. Generating tool calls and consuming tool r
 | Previously supported VLM and LLM models | Preserve their supported download and export paths, and precisions | Plain generation; a drafter is not required |
 | `Qwen/Qwen3.5-9B` | [INT4 intermediate representation (IR)](https://huggingface.co/OpenVINO/Qwen3.5-9B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.5-9B-int8-ov) | Plain generation; speculative decoding requires a separately qualified profile |
 | `Qwen/Qwen3.6-35B-A3B` | [INT4 IR](https://huggingface.co/OpenVINO/Qwen3.6-35B-A3B-int4-ov) | [DFlash](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash) |
-| `Qwen/Qwen3.8-27B` | [INT4 IR](https://huggingface.co/OpenVINO/Qwen3.8-27B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.8-27B-int8-ov) | [DFlash2](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2) |
+| `Qwen/Qwen3.8-27B` | [INT4 IR](https://huggingface.co/OpenVINO/Qwen3.8-27B-int4-ov) or [INT8 IR](https://huggingface.co/OpenVINO/Qwen3.8-27B-int8-ov) | [DFlash2](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2) (planned: no profile yet, so plain generation) |
 
 A Qwen3.5-9B selection uses `provider: vlm`, `vlm_name: Qwen/Qwen3.5-9B`, and `weight_format: int4` or `int8` under `models.text_gen`. Omit `speculative` for plain generation; listing the target artifacts does not qualify a speculative method or tool-call capability.
 
 A maintained catalog supplies compatible combinations of targets and methods, default drafter sources, immutable revisions, conversion recipes, dependency versions, and tested tuning values. Explicit speculative settings select or override these defaults only within a validated profile. Drafter precision is independent of target precision. Extend the catalog without restricting the existing plain-model loading path.
 
 A source checkpoint is not runtime-ready IR. Each accelerated profile must provide downloadable compatible IR or a tested conversion recipe for downloaded source files, including target hidden-state outputs where needed. Qualify the DFlash2 exporter and runtime independently. Multi-token prediction (MTP) uses the target's bundled prediction head and requires its own artifact and runtime qualification; it does not use either of the two external Dflash and Dflash2 z-lab drafters listed above. Select one mechanism per pipeline, never silently substitute or combine them.
+
+**Implemented:** the Qwen3.6 DFlash profile pins drafter commit `f181eece646affea2c38b2765f1aaa01a9734ccd`, downloads only its configuration and weight files, and exports it to INT4 IR with the DFlash classes built into optimum-intel 2.2.0 (no repository code). The tested defaults are `num_assistant_tokens: 3` (range 1–15), OpenVINO GenAI 2026.3 or later, an f16 KV cache, and a scheduler with `max_num_seqs: 1`, `num_linear_attention_blocks: 17` and prefix caching off; the cache size is left to the runtime. When the stock target export lacks the hidden-state metadata the drafter needs, a derived target directory carries it (Section 5).
 
 ## 3. Architecture
 
@@ -51,6 +65,8 @@ Request Handling:
 - If a request is cancelled while native inference is still running, the service must keep that model capacity reserved until inference finishes.
 
 Model upgrades do not require a new deployment topology. External clients do not download or manage the server’s model files. The server reports its actual model and acceleration state.
+
+**Implemented:** the owner is the backend process itself. `ModelManager` warms `text_gen` at startup through `TextGenHandler`, which wraps one `VLMTextGen` pipeline in a `CapabilityRunner` (`concurrency` and `queue_max` from `models.text_gen`; a full queue returns HTTP 503). A streamed request holds its slot until native generation has stopped, including after a client disconnect, which cancels generation at the next token. A consumer that abandons a stream without closing it still releases the slot when the stream is garbage-collected.
 
 ### Tool Calls on Port 8000
 
@@ -83,6 +99,17 @@ Tool-call validation and failure handling from the design requirements:
 - The controller independently validates arguments, authorizes execution, and limits tool-loop iterations.
 - The controller treats tool results as untrusted conversation data; it does not authorize further actions.
 
+**Implemented** ([tool_calls.py](../../components/vlm/tool_calls.py), [vlm_chat.py](../../api/vlm_chat.py)):
+
+- A request uses the tool path when it has `tools` or `tool_choice`, or its history contains tool calls or results; any other request keeps the existing chat path (last user turn).
+- The supported JSON Schema subset covers `type`, `properties`, `required`, `items`, `enum`, `const`, `additionalProperties`, numeric, length and item bounds, `anyOf`/`oneOf`/`allOf`, `nullable` and annotations. Other keywords, such as `$ref` and `pattern`, are rejected with HTTP 400, as are malformed definitions, history or choices.
+- Tool capability comes from the catalog and from the chat template rendering tools. A model without it rejects tool requests with HTTP 400; `tool_choice: "none"` still works.
+- Qwen3 JSON calls and Qwen3.5+ `<function=...>` XML calls are both normalized. Calls inside reasoning are ignored, and reasoning is returned as `reasoning_content`, never in `content`.
+- `"required"` and named choices are enforced: the assistant turn starts with the opening of a call in the model's syntax (reasoning closed first).
+- An invalid call, or a call to a function not offered, returns HTTP 502 (`tool_call_validation_failed`). A token-limited turn returns `finish_reason: "length"` without calls, even when calls before the cut were complete.
+- Streaming holds calls until the turn is complete. A rejected call or a generation failure after the stream starts ends it with an `error` event and `[DONE]`; generation failures report a generic message, with details only in the server log.
+- Images must be inline `data:image/` URLs on both paths; the server never fetches a URL or reads a local file named by a request. `max_tokens` is accepted as an alias of `max_completion_tokens`, and both must be positive.
+
 ## 4. Configuration
 
 - **Reuse the current configuration structure and add an optional `models.text_gen.speculative` block.**
@@ -90,13 +117,13 @@ Tool-call validation and failure handling from the design requirements:
 - Continue to select the target with `vlm_name` and `weight_format`.
 - Do not rename existing keys or add top-level blocks.
 
-The following example uses the structure of [../../../config.yaml](../../../config.yaml), selects Qwen3.8 INT4 and adds the proposed DFlash2 settings. It is an illustrative profile, not a snapshot of every installation's values. Preserve existing generation, admission, chunking and segmentation settings when merging it. Omitting `speculative` preserves plain generation.
+The following example uses the structure of [config.yaml](../../config.yaml), selects Qwen3.6 INT4 and enables DFlash, the implemented accelerated profile. It is an illustrative profile, not a snapshot of every installation's values. Preserve existing generation, admission, chunking and segmentation settings when merging it. Omitting `speculative` preserves plain generation. The shipped `config.yaml` keeps Qwen3-VL-8B-Instruct with `mode: "off"`. A DFlash2 selection (Qwen3.8 with `method: dflash2`, `draft_model: z-lab/Qwen3.8-27B-DFlash2`) is validated the same way, but runs plain under `auto` until its profile exists.
 
 ```yaml
 models:
   text_gen:
     provider: vlm
-    vlm_name: Qwen/Qwen3.8-27B
+    vlm_name: Qwen/Qwen3.6-35B-A3B
     device: GPU
     weight_format: int4
     max_new_tokens: 5120
@@ -105,9 +132,9 @@ models:
 
     speculative:
       mode: auto
-      method: dflash2
+      method: dflash
       draft_source: huggingface
-      draft_model: z-lab/Qwen3.8-27B-DFlash2
+      draft_model: z-lab/Qwen3.6-35B-A3B-DFlash
       draft_revision: null
       num_assistant_tokens: null
 
@@ -140,14 +167,14 @@ models:
 | `method` | `auto` (default), `dflash`, `dflash2`, `mtp` | Select the decoding mechanism. `auto` selects the catalog's declared method, not trial-and-error loading. Future methods require an explicit supported profile. |
 | `draft_source` | `null` (profile default), `huggingface`, `local`, `target` | Distinguish a Hub repository, an explicit local IR directory, and target-bundled MTP artifacts. Other sources require a supported adapter and profile. |
 | `draft_model` | Repository ID or local directory; `null` selects the profile default | Identify the external drafter for DFlash or DFlash2. For MTP, set to null: use the target's prediction head, not a second model. |
-| `draft_revision` | Immutable repository commit; `null` selects the profile's pinned revision | Reproduce a Hub download. Reject non-null values for `local` or `target`; bundled MTP inherits the target revision. |
-| `num_assistant_tokens` | Positive integer; `null` selects the tested default for the selected method and profile. | Control the draft block size within the selected runtime's supported range. Do not reuse DFlash tuning with either DFlash2 or MTP without validation. |
+| `draft_revision` | Immutable repository commit (a full 40-character hash); `null` selects the profile's pinned revision | Reproduce a Hub download. Reject non-null values for `local` or `target`; bundled MTP inherits the target revision. |
+| `num_assistant_tokens` | Positive integer; `null` selects the tested default for the selected method and profile (DFlash: 3, range 1–15, and at most the drafter's block size minus one) | Control the draft block size within the selected runtime's supported range. Do not reuse DFlash tuning with either DFlash2 or MTP without validation. |
 
 | Selected Target and Method | Draft Settings |
 | --- | --- |
-| Qwen3.6 INT4 with `dflash` | `draft_source: huggingface`, `draft_model: z-lab/Qwen3.6-35B-A3B-DFlash` |
-| Qwen3.8 INT4 or INT8 with `dflash2` | `draft_source: huggingface`, `draft_model: z-lab/Qwen3.8-27B-DFlash2` |
-| Target with a qualified bundled `mtp` head | `draft_source: target`, `draft_model: null`; download required MTP files with the target |
+| Qwen3.6 INT4 with `dflash` (implemented) | `draft_source: huggingface`, `draft_model: z-lab/Qwen3.6-35B-A3B-DFlash` |
+| Qwen3.8 INT4 or INT8 with `dflash2` (planned) | `draft_source: huggingface`, `draft_model: z-lab/Qwen3.8-27B-DFlash2` |
+| Target with a qualified bundled `mtp` head (planned) | `draft_source: target`, `draft_model: null`; download required MTP files with the target |
 
 For example, replace only the speculative block with the following when the selected target has a qualified MTP profile:
 
@@ -166,10 +193,11 @@ Resolve and Validate:
 - The model-serving software never changes an explicitly selected method if it fails; in `mode: auto`, the software falls back to the plain generation method.
 - Unknown methods, contradictory sources, mismatched drafters, and out-of-range tuning fail the validation rather than triggering fallback. 
 - In `"off"` mode, the helper ignores dormant speculative settings and prepares only the target.
+- **Implemented:** `resolve_plan()` in [text_gen_profiles.py](../../components/vlm/text_gen_profiles.py) applies these rules before any model work, so invalid settings under `auto` or `"on"` fail at startup. Bare YAML `off`/`on` booleans are accepted for `mode`.
 
 Prepare Artifacts:
 - The helper uses the catalog’s pinned Hub sources for first-run downloads. `draft_source: local` requires a non-empty `draft_model` directory and a null `draft_revision`; the helper validates the existing IR and does not download a replacement if it is missing. 
-- The helper resolves relative directory paths from the Smart Classroom root.
+- The helper resolves relative directory paths from the Smart Classroom application root (`smart-classroom/Windows/`).
 - `draft_source: target` is valid only with MTP, and requires `draft_model` and `draft_revision` to be set to null.
 - The startup preparation flow ensures that a source override or revision cannot bypass compatibility checks, enable arbitrary URLs or execute repository code.
 - The manifest records resolved settings and actual artifact versions, including defaults.
@@ -184,6 +212,12 @@ The model owner prepares artifacts during model initialization, before reporting
 
 On first start, the helper downloads or converts missing artifacts. On later starts, it reuses and validates existing artifacts, rebuilding derived artifacts when source hashes change. Dependent services wait for the model owner’s `/health` endpoint before using the model. Request handlers do not download or convert files.
 
+1. **Select:** Resolve the target and speculative policy, method and source. Validate explicit settings, then select the compatible catalog profile. A recognized method without runtime/profile support means plain generation in `auto` or an actionable failure in `"on"`.
+2. **Prepare:** Download the target's catalog IR and, for Hub drafters, the pinned drafter files over HTTPS. For `local`, validate the specified IR directory without downloading a replacement drafter. For MTP, acquire the target's bundled head and metadata without downloading an unrelated external model. Use runtime-ready IR directly; convert downloaded sources only through the profile's qualified recipe. Network failures do not trigger unrelated export attempts.
+3. **Validate:** Check required files, integrity, tokenizer/processor compatibility, runtime versions and target/drafter graph interfaces. Preserve the ordinary target if accelerated export needs separate IR. Record a manifest without overwriting active files or changing legacy model paths.
+4. **Activate:** Load the resolved artifacts and run warm-up. Report readiness only after success; a completed download alone is not a ready model.
+>>>>>>> 17d44b0 (VLM/LLM Serving basic feature: VLM/LLM model upgrade, context_bench (#15))
+
 The following steps describe the model-preparation requirements. MTP preparation is planned; the design does not currently list a qualified MTP profile.
 
 1. **Select:** The helper resolves the target, speculative policy, method, and source. It validates explicit settings, then selects a compatible catalog profile. Before downloading, it validates the resolved target, method, source, and revision against artifact metadata and the selected profile. If a recognized method lacks runtime or profile support, the helper uses plain generation in `auto` mode or returns an actionable error in `"on"` mode.
@@ -196,18 +230,20 @@ The following steps describe the model-preparation requirements. MTP preparation
 
 Preparation creates storage on demand, uses resumable staging and per-artifact locks, and publishes only complete, validated artifacts. It bounds retries and checks disk space for weights and conversion intermediates. It keeps prior valid artifacts for rollback. When preparation reuses legacy files, it validates them without claiming unknown provenance.
 
-### Launcher Behavior
+**Implemented:**
 
-| Invocation | Behavior |
+| Artifact | How it is prepared and reused |
 | --- | --- |
-| Normal startup | Download/prepare missing selected files, then start services under the failure policy below. |
-| `-DownloadModelsOnly` | Prepare without changing services or running inference warm-up. Require all artifacts for the selected method: target plus external drafter, or target plus bundled MTP head. Return nonzero if incomplete, even in `auto`; this includes a missing accelerated profile. |
-| `-SkipModelDownload` | Validate existing text-generation artifacts only; no network, conversion or dependency installation. An empty target cache fails. May combine with download-only to validate an offline bundle. |
-| `-Silent` | No prompts; report outcome and exit status. It may restart existing services during normal startup, but never during download-only preparation. |
+| Target IR, `models/openvino/<model>/<weight_format>` | Catalog models download the pre-converted `OpenVINO/<model>-<weight_format>-ov` IR (resumable, 3 attempts); other models use the existing local export. Reused when the IR, tokenizer and detokenizer are present. The manifest records no revision for it, since the download is not pinned. The tokenizer IR is refused if a newer openvino-tokenizers release exported it. |
+| DFlash drafter source, `models/hf/<org>__<repo>/<commit>` | Configuration and weight files only, at the pinned commit, after a free-space check (2.2x the checkpoint). |
+| DFlash drafter IR, `models/openvino/<drafter>/int4` | Exported offline in a separate process; `.prepared.json` records the commit, and the IR is reused while it matches the pin. |
+| Drafter with its own INT4 lm_head, `<drafter>/int4-lmhead` (the one loaded) | The target's INT8 head requantized to INT4 and attached to the drafter, so the runtime no longer reads the full INT8 head on every draft pass. Rebuilt when the SHA-256 of the target or drafter XML changes; if it cannot be built, the stock drafter is used. Not applied to `draft_source: local`. |
+| Derived target, `<model>/<weight_format>-dflash` | Only when the stock target lacks `hidden_states_decoder_layers`: weights hard-linked, XML annotated, the ordinary target untouched; rebuilt when the target XML hash changes. |
+| Manifest, `models/openvino/.manifests/<model>-<weight_format>.json` | Resolved settings, drafter commit, decision, reason and timings. |
 
-These are intended launcher behaviors; the preparation switches are part of the proposed change. Initialize proxy/environment settings before download-only dispatch, then exit before elevation, restart or cleanup. Reject download-only with desktop delegation or an externally owned server. Forward supported options through relaunch paths. Preparation requires no elevation and must not trigger service cleanup on failure.
+Drafter and derived artifacts are staged in `.partial` directories and published whole. Each artifact has a `.lock` file that records its owner's process ID and start time, so a lock left by a dead process is recovered even when Windows reuses the ID. A superseded or stale artifact is moved aside with a timestamp suffix, never deleted. Under `auto`, a drafter download, export or file-system failure falls back to plain generation; a drafter incompatible with the target always fails.
 
-Cache-only operation covers text generation, not ASR, embeddings, OCR/grading or frontend dependencies. Install trusted exporter dependencies during software setup. Validate paths and downloaded metadata, never execute repository code, and preserve TLS verification. Pass arguments as data and credentials/proxy settings through the environment without logging secrets.
+To run offline, start once with network access (or copy prepared `models/` directories): validated artifacts are reused without network access. Install trusted exporter dependencies during software setup. Validate paths and downloaded metadata, never execute repository code, and preserve TLS verification. Pass arguments as data and credentials/proxy settings through the environment without logging secrets.
 
 ## 6. Generation and Failure Policy
 
@@ -227,11 +263,24 @@ Tool calling is independent of speculative decoding: it must work with speculati
 | Speculative artifact acquisition, conversion or activation fails | Not applicable | Warm a plain pipeline once, after safe cleanup | Fail |
 | Invalid active method/source/tuning, mismatched target/drafter or integrity failure | Fail for active target | Fail | Fail |
 
-The cache-only switch prevents acquisition even when files are missing; `local` draft sources also prohibit replacement downloads. Download-only requires every artifact for the requested method; a normal `auto` fallback is not successful accelerator qualification.
+`local` draft sources prohibit replacement downloads. A normal `auto` fallback is not successful accelerator qualification; qualify with `"on"`.
 
 If native cleanup cannot be confirmed, stop the model process before recovery. Retain the plain-mode decision for that launch so recovery does not repeatedly activate a failing drafter. Never replay a partially streamed request. Roll back by restoring the previous model/artifacts or disabling speculation and restarting, not by deleting caches.
 
 Health reports the target, tool-call capability, requested/effective method, drafter identity or target-bundled head, warm-up result and sanitized fallback reason. Detailed revisions, tuning and runtime versions remain available for diagnostics without exposing private local paths. Do not log sensitive tool arguments or results by default.
+
+**Implemented** ([text_gen_vlm.py](../../components/vlm/text_gen_vlm.py)):
+
+- **Warm-up and fallback.** Readiness follows one 2-token greedy generation. Under `auto`, a failed load or warm-up with the drafter discards that in-process pipeline (released and garbage-collected) before the plain pipeline is warmed. The plain decision is kept for the process lifetime.
+- **Request policy.** While DFlash is active, requests are greedy with the profile's fixed draft window. A request with `temperature > 0` is rejected with HTTP 400 before generation, and image requests run on the same pipeline.
+- **Health.** `GET /health` adds `hub.text_gen.serving` with these fields:
+  - `model`, `weight_format`, `device`, `tool_calls`;
+  - `speculative` (`requested_mode`, `requested_method`, `effective_method`, `draft`, `num_assistant_tokens`, `fallback_reason`);
+  - `warmup`;
+  - `startup` (`prepare_s`, `load_s`, `warmup_s`);
+  - `diagnostics` (GenAI version, drafter revision, scheduler).
+
+  Local paths are stripped from reasons, and a local drafter is shown only by its directory name.
 
 ## 7. Processing-Time Statistics
 
@@ -269,13 +318,13 @@ Time each invocation at the model owner, retaining its parent stage and an opaqu
 | Speculative decoding | Requested/effective method and fallback status; target verification time, drafter or bundled-head time and accepted/proposed tokens when exposed by the runtime. These are subphases of the call, not extra workflow stages. |
 | Startup | Download, conversion, model load/compile and warm-up times recorded separately from warm-request latency. |
 
-Use the generation metric definitions and source/boundary rules in the [benchmark metrics section](context-bench-design.md#7-iteration-metrics-and-comparison-rules). Keep model TTFT distinct from client-visible TTFT, which also includes request preparation, queueing, transport and earlier map calls. Record durations locally within each process; do not subtract monotonic timestamps from different processes or hosts.
+Use the generation metric definitions and source/boundary rules in the [benchmark metrics section](../context-bench/context-bench-design.md#7-iteration-metrics-and-comparison-rules). Keep model TTFT distinct from client-visible TTFT, which also includes request preparation, queueing, transport and earlier map calls. Record durations locally within each process; do not subtract monotonic timestamps from different processes or hosts.
 
 For every model/precision in Section 2, report call-latency mean/p50/p95, TTFT and decode throughput across the platform/method matrix in Section 8. Include the installed model as the compatibility baseline. ASR, VA, OCR, embedding and reranker models use the applicable per-call statistics with their actual configured identities.
 
 ### Collection and Reporting
 
-Reuse existing timing sources while preserving their meanings: [ASR](../../../components/asr_component.py) writes `performance.transcription_time`; [Summary](../../../components/summarizer_component.py) writes `performance.summarizer_time`, `performance.summary_map_time`, `performance.ttft`, `performance.reduce_ttft` and `performance.tps`; [Report](../../../components/report_generator/report_generator.py) writes collection, generation and total times. These are component timers, not isolated model benchmarks. ASR includes upstream input waiting and optional diarization; the report generation timer also includes rendering/persistence. [Hardware monitoring](../../../monitoring/monitor.py) provides utilization, memory and power samples, not model-call latency. Keep these existing fields compatible and add the missing stage/call measurements at their owning boundaries.
+Reuse existing timing sources while preserving their meanings: [ASR](../../components/asr_component.py) writes `performance.transcription_time`; [Summary](../../components/summarizer_component.py) writes `performance.summarizer_time`, `performance.summary_map_time`, `performance.ttft`, `performance.reduce_ttft` and `performance.tps`; [Report](../../components/report_generator/report_generator.py) writes collection, generation and total times. These are component timers, not isolated model benchmarks. ASR includes upstream input waiting and optional diarization; the report generation timer also includes rendering/persistence. [Hardware monitoring](../../monitoring/monitor.py) provides utilization, memory and power samples, not model-call latency. Keep these existing fields compatible and add the missing stage/call measurements at their owning boundaries.
 
 Retain one record per stage attempt and model invocation so repeated calls, retries and failures are not overwritten by a last-value metric. Use monotonic clocks and finalize timers on success, failure or cancellation; for streaming, measure through generator completion, not generator creation. Separate client cancellation time from the end of any continuing native inference. Record status, counts and timing metadata only, with bounded retention; exclude prompts, transcripts, images, tool arguments/results, student identifiers, credentials and private paths.
 
@@ -283,18 +332,45 @@ For each stage and model group, publish successful sample count, total processin
 
 Compare repeated warm runs using the same fixed inputs, prompt templates, token limits, chunking, concurrency, media settings and enabled stages. Publish hardware/driver/runtime/artifact versions, input durations or dimensions, token counts, warm-up/repetition counts, quality outcomes and an evidence link with every result. Separate isolated model benchmarks from concurrent classroom runs and cold-start measurements. Compute speedup only between matched plain/accelerated cases using the same latency statistic; report actual fallback as plain generation, not accelerated success.
 
+### Implemented Coverage
+
+See [processing-time-statistics.md](processing-time-statistics.md) for fields and usage.
+
+| Level | Recorded now | Not yet recorded |
+| --- | --- | --- |
+| Workflow stages ([stage_tracker.py](../../utils/stage_tracker.py)) | `transcribe`, `va`, `summarize`, `mindmap`, `segmentation` and `report`: one record per attempt with status, UTC start/end and duration | Media preparation, content-search ingestion, and the retrieval/reranking breakdown of RAG Q&A |
+| Stages seen through model calls | `board_ocr`, `document_ocr`, and `/v1/chat/completions` callers named by the `X-SC-Stage` header (`qa`, `video_captioning`, `grading`, otherwise `chat_api`) | — |
+| Model calls ([processing_stats.py](../../utils/processing_stats.py)) | `text_gen`, `asr` and `ocr`: queue wait, latency, status, client cancellation, and for text generation TTFT, TPOT, token counts and DFlash accepted/drafted tokens | VA, embedding, reranking and grading layout/detection models; target-versus-drafter time inside a DFlash call |
+| Startup | Preparation, load and warm-up seconds in `/health` | A per-run history |
+
+Records are held in memory (the latest 4,000 of each kind) for `GET /processing-stats` and appended to `<session>/logs/stage_events.jsonl` and `model_calls.jsonl`. They contain timing metadata only. [processing_stats_report.py](../../Scripts/processing_stats_report.py) turns either source into a Markdown report with a per-session timeline. That report:
+- counts each stage attempt's own model calls, failed and cancelled included;
+- computes DFlash acceptance only from calls that report both counters.
+
 ## 8. Release Decisions
 
 | Area | Required checks |
 | --- | --- |
 | Backward compatibility | Load unchanged older configurations; retain existing key names, token/queue limits, chunking, segmentation and service endpoints. Test supported providers/model IDs, precisions and local paths; no drafter download when off; plain fallback in `auto`; no regressions from runtime dependency upgrades. |
-| Model/precision support | For every Section 2 profile, test empty-cache preparation, warm-up and later cache-only reuse. Plain mode downloads only the target; an accelerated case requires all artifacts for its selected method. |
+| Model/precision support | For every Section 2 profile, test empty-cache preparation, warm-up and later reuse of the validated artifacts. Plain mode downloads only the target; an accelerated case requires all artifacts for its selected method. |
 | Port-8000 tool calling | End-to-end function definition -> tool call -> tool result -> answer through `/v1/chat/completions`, with streaming and non-streaming clients. Test `none`/`auto`/`required`/named choices, multiple-call IDs, `parallel_tool_calls: false`, full history, malformed arguments, missing results, truncation, unsupported models and no server-side tool execution. |
 | Speculative configuration | Missing/mode-only blocks, all supported methods, explicit/default Hub revisions, local path handling and tuning bounds. Reject cross-model drafters and MTP with an external draft source/model; bundled MTP must never trigger a z-lab download. |
 | Classroom quality | Streaming/non-streaming text, images, supported thinking/structured output, cancellation and queue limits; summaries, mind maps, segmentation, reports, RAG Q&A, video summaries and grading. |
-| Reliability | Invalid pairs and corrupt artifacts, network/disk failures, interrupted/concurrent downloads, safe startup fallback and non-disruptive download-only behavior on Windows PowerShell 5.1/7. |
+| Reliability | Invalid pairs and corrupt artifacts, network/disk failures, interrupted/concurrent downloads, safe startup fallback, and identical preparation from both launchers on Windows PowerShell 5.1/7. |
 | Performance | Repeated plain/accelerated comparisons: answer quality, time to first token, tokens/s, end-to-end p50/p95 latency and peak memory. Separate download/conversion/compile time from inference. |
 | Timing statistics | Publish stage and individual-model results defined in Section 7 for each qualification case. Verify attribution for shared models, overlapping stages, streaming completion, retries, failures, cancellation and skipped stages; retain raw samples and do not present unavailable timings as zero or pending cases as measured. |
-| Context bench | Complete the [benchmark implementation and tests](context-bench-design.md#10-implementation-sequence-and-verification); verify exact-context and matched-profile measurements, separate accuracy verdicts, interruption-safe evidence, nonzero failure exits and unchanged source/serving artifacts. Publish model-call evidence without presenting it as full classroom-workflow timing. |
+| Context bench | Complete the [benchmark implementation and tests](../context-bench/context-bench-design.md#10-implementation-sequence-and-verification); verify exact-context and matched-profile measurements, separate accuracy verdicts, interruption-safe evidence, nonzero failure exits and unchanged source/serving artifacts. Publish model-call evidence without presenting it as full classroom-workflow timing. |
 
 The required GPU matrix covers Arrow Lake (ARL) and Panther Lake (PTL): Qwen3.5-9B INT4/INT8 plain on both platforms (four cases), plus Qwen3.6 INT4 and Qwen3.8 INT4/INT8 with plain and their respective DFlash/DFlash2 methods on both platforms (twelve cases). These sixteen cases are planned qualification, not reported passes; DFlash2 remains blocked until its adapter/runtime is qualified. Add older-model regressions and separate MTP cases for each advertised target/precision/platform; do not infer support across methods. Include tool-call round trips for tool-capable profiles. CPU qualification is separate; identify exact hardware, artifacts, runtime/driver versions and workload settings in every result.
+
+**Verified so far (not qualification):**
+- **Unit tests** (`components/tests`, `tests/unit`, `model_manager/test`) cover:
+  - configuration resolution, preparation and locking;
+  - the tool-call contract, including truncation, forced choices, malformed history and stream failures;
+  - stream slot release and the timing records.
+- **Tool calls, end to end:** one Arc 140T (Arrow Lake) passed 10 tool-call scenarios through the `openai` client on four profiles:
+  - Qwen3-VL-8B, Qwen3.5-9B and Qwen3.8-27B INT4, plain;
+  - Qwen3.6-35B-A3B INT4 with DFlash.
+- **DFlash performance:** `context_bench` measured DFlash for Qwen3.6 INT4 on the same machine.
+
+The ARL/PTL matrix above remains planned.
