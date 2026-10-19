@@ -154,8 +154,18 @@ def fixed_state_cache_bytes(model_dir) -> int | None:
     seen = set()
     try:
         with open(model_xml, "rb") as handle:
-            states = [dict(elem.attrib) for _, elem in ET.iterparse(handle, events=("start",))
-                      if "cache_params.past." in elem.attrib.get("variable_id", "")]
+            states = []
+            stack = []
+            for event, elem in ET.iterparse(handle, events=("start", "end")):
+                if event == "start":
+                    stack.append(elem)
+                else:
+                    if "cache_params.past." in elem.attrib.get("variable_id", ""):
+                        states.append(dict(elem.attrib))
+                    stack.pop()
+                    if stack:
+                        stack[-1].remove(elem)
+                    elem.clear()
         for attrib in states:
             variable_id = attrib.get("variable_id", "")
             if not re.search(r"cache_params\.past\.(?:conv|ssm)\.", variable_id):
