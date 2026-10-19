@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """The accuracy task suite: what gets planted in the long context, what is asked about it,
 and what counts as the right answer.

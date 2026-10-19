@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """Prompt construction: exact sizing, single templating, standalone context zero, probe
 placement and tolerance, and the task framings -- all with a word-level stub tokenizer."""

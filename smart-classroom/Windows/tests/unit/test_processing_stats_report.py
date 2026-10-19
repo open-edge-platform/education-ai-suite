@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """Scripts/processing_stats_report.py: sources, timeline lanes and report tables."""
@@ -88,6 +88,38 @@ def test_api_json_source_requires_raw_records(tmp_path):
     path.write_text(json.dumps({"stages": []}), encoding="utf-8")
     with pytest.raises(SystemExit, match="raw=true"):
         rep.report([str(path)])
+
+
+def test_powershell_export_with_bom_is_read(tmp_path):
+    path = tmp_path / "stats.json"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(
+        {"raw": {"stages": STAGES, "model_calls": CALLS}}).encode("utf-8"))
+    assert "## Session `20261017-235509-d65d`" in rep.report([str(path)])
+
+
+def test_stage_rows_count_each_attempts_own_calls_including_failures():
+    stages = [
+        {"session_id": SID, "stage": "summarize", "status": "failed", "duration_sec": 70.0,
+         "started_at": "2026-10-17T15:00:00.000+00:00"},
+        {"session_id": SID, "stage": "summarize", "status": "done", "duration_sec": 20.0,
+         "started_at": "2026-10-17T15:02:00.000+00:00"},
+    ]
+    calls = [
+        # The first attempt's only call ran 60 s and then failed.
+        _call("text_gen", "summarize", "2026-10-17T15:00:01.000+00:00", 60_000.0,
+              status="failed"),
+        _call("text_gen", "summarize", "2026-10-17T15:02:01.000+00:00", 15_000.0),
+    ]
+    text = rep.session_section(SID, stages, calls)
+    assert "| summarize | failed | 0.0 | 70.0 | 70.0 | 1 | 60.0 | 0.5 |" in text
+    assert "| summarize | done | 120.0 | 140.0 | 20.0 | 1 | 15.0 | 0.5 |" in text
+
+
+def test_acceptance_needs_both_counters():
+    calls = [_call("text_gen", "summarize", "2026-10-17T15:56:45.000+00:00", 1_000.0,
+                   draft_tokens=100)]
+    row = next(line for line in rep.calls_table(calls).splitlines() if "text_gen" in line)
+    assert "| — |" in row
 
 
 def test_cli_writes_the_report(tmp_path):

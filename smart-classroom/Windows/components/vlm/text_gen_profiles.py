@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """Serving catalog and ``models.text_gen.speculative`` resolution.

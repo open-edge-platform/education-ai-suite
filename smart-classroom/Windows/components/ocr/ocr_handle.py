@@ -29,6 +29,7 @@ class OcrHandler:
         self._runner = None
         self._processor = None
         self._provider: Optional[str] = None
+        self._model_id: Optional[str] = None
         self._device: Optional[str] = None
         self._state = CapabilityState.UNLOADED
         self._max_concurrency: int = _OCR_MAX_CONCURRENCY  
@@ -46,7 +47,7 @@ class OcrHandler:
         from utils.processing_stats import submit_timed
 
         runner = self._get_runner()
-        info = {"model": self._provider, "device": self._device}
+        info = {"model": self._model_id, "device": self._device}
         return submit_timed(runner, "ocr", info, getattr(self._processor, method), image)
 
     def load(self) -> None:
@@ -90,6 +91,7 @@ class OcrHandler:
             self._runner = None
             self._processor = None
             self._provider = None
+            self._model_id = None
             self._device = None
             self._state = CapabilityState.UNLOADED
 
@@ -138,23 +140,32 @@ class OcrHandler:
         self._provider = provider
         self._device = str(config.models.ocr.device)
 
+        ocr = config.models.ocr
+        models = [ocr.det_model, ocr.rec_model]
         if provider in ("native", "paddle"):
             from components.ocr.paddle.paddle_ocr_processor import PaddleOCRProcessor
-            return PaddleOCRProcessor(
+            processor = PaddleOCRProcessor(
                 lang=config.app.language,
                 use_angle_cls=True,
                 device=config.models.ocr.device,
             )
-        if provider == "openvino":
+        elif provider == "openvino":
             self._ensure_openvino_models(config)
             from components.ocr.openvino.openvino_ocr_processor import OpenVINOOCRProcessor
-            return OpenVINOOCRProcessor(
+            processor = OpenVINOOCRProcessor(
                 lang=config.app.language,
                 use_angle_cls=True,
                 device=config.models.ocr.device,
                 ir_models_dir=config.models.ocr.model_dir,
             )
-        raise ValueError(f"Unsupported OCR provider: {provider}")
+            if getattr(processor, "cls_compiled", None) is not None:
+                models.append(ocr.cls_model)
+        else:
+            raise ValueError(f"Unsupported OCR provider: {provider}")
+        # Processing statistics group calls by model: name the loaded models,
+        # not just the runtime ("openvino/PP-OCRv6_small_det+PP-OCRv6_small_rec").
+        self._model_id = f"{provider}/" + "+".join(str(m) for m in models)
+        return processor
 
     def _ensure_openvino_models(self, config) -> None:
         """Download and convert OCR ONNX models to OpenVINO IR if not already cached.

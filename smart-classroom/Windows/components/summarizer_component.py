@@ -452,12 +452,20 @@ class SummarizerComponent(PipelineComponent):
 
             run.reduce_start = time.perf_counter()
             # Reasoning is already filtered out of the stream by generate().
-            for token in self.summarizer.generate(messages=messages, enable_thinking=False):
-                if not run.first_token:
-                    run.first_token = time.perf_counter()
-                raw_tokens.append(token)
-                StorageManager.save(summary_path, token, append=True)
-                yield token
+            stream = self.summarizer.generate(messages=messages, enable_thinking=False)
+            try:
+                for token in stream:
+                    if not run.first_token:
+                        run.first_token = time.perf_counter()
+                    raw_tokens.append(token)
+                    StorageManager.save(summary_path, token, append=True)
+                    yield token
+            finally:
+                # Leaving early (client gone, save failed) stops generation and
+                # frees the model slot once native work ends.
+                close = getattr(stream, "close", None)
+                if close is not None:
+                    close()
 
         finally:
             raw_text = "".join(raw_tokens)

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """Offline, text-only OpenVINO LLM benchmark (``python -m components.context_bench.benchmark``).
 

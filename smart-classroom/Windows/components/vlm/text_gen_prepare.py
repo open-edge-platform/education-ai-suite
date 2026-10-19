@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """Prepare the ``text_gen`` target and speculative artifacts before serving.
@@ -153,7 +153,8 @@ def prepare(plan: TextGenPlan, *,
             result.speculative = _prepare_speculative(plan, target_dir)
         except CompatibilityError:
             raise
-        except (PreparationError, SpeculativeUnavailableError) as exc:
+        except (PreparationError, SpeculativeUnavailableError, OSError, ET.ParseError) as exc:
+            # OSError: a drafter file held open by another process, a full disk.
             if strict:
                 raise
             result.speculative_error = str(exc)
@@ -781,7 +782,7 @@ class ArtifactLock:
         while True:
             try:
                 self._fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(self._fd, str(os.getpid()).encode("ascii"))
+                os.write(self._fd, f"{os.getpid()} {_own_start()}".strip().encode("ascii"))
                 return self
             except FileExistsError:
                 if self._stale():
@@ -795,18 +796,28 @@ class ArtifactLock:
                 time.sleep(2.0)
 
     def _stale(self) -> bool:
+        """Whether the owner is gone: no such process, or a reused process id."""
         try:
-            pid = int(self.path.read_text(encoding="ascii").strip() or "0")
-        except (OSError, ValueError):
+            owner = self.path.read_text(encoding="ascii").split()
+            age = time.time() - self.path.stat().st_mtime
+        except OSError:
             return False
+        if not owner:
+            # The owner died between creating the file and writing its id.
+            return age > _EMPTY_LOCK_GRACE_S
+        try:
+            pid = int(owner[0])
+        except ValueError:
+            return True
         if pid == os.getpid():
             return False
         try:
-            import psutil
-
-            return not psutil.pid_exists(pid)
-        except ImportError:
+            started = _process_started(pid)
+        except ImportError:  # psutil unavailable: never steal a lock
             return False
+        # Windows reuses process ids: the start time tells a new process apart
+        # ("" when it cannot be read, which never counts as different).
+        return started is None or bool(started and len(owner) > 1 and owner[1] != started)
 
     def __exit__(self, *exc):
         if self._fd is not None:
@@ -817,6 +828,26 @@ class ArtifactLock:
         except OSError:
             pass
         return False
+
+
+_EMPTY_LOCK_GRACE_S = 60.0
+
+
+def _own_start() -> str:
+    try:
+        return _process_started(os.getpid()) or ""
+    except ImportError:
+        return ""
+
+
+def _process_started(pid: int) -> Optional[str]:
+    """Start time of process ``pid`` (whole seconds); "" if unreadable, None if gone."""
+    import psutil
+
+    try:
+        return f"{psutil.Process(pid).create_time():.0f}"
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+        return None if not psutil.pid_exists(pid) else ""
 
 
 def _set_aside(path: Path, why: str) -> None:

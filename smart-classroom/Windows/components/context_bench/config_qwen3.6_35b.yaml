@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
 # Qwen3.6-35B-A3B INT4: plain paged baseline versus DFlash speculative decoding (k=3/5/7/15).

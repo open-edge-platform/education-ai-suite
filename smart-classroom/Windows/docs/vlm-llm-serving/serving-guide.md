@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: (C) 2026 Intel Corporation
-SPDX-License-Identifier: Apache-2.0
--->
-
 # VLM/LLM Serving Guide
 
 How to select a text-generation model, enable speculative decoding, prepare
@@ -62,7 +57,7 @@ but quoting avoids surprises).
 | `mode: auto` | Accelerate when the profile is qualified and its artifacts prepare and warm up; otherwise plain generation, with the reason in `/health`. |
 | `mode: "on"` | Acceleration is required at startup; any reason it cannot run is a startup failure with guidance. |
 | `method` | `dflash` is the only method with a profile, for Qwen3.6 INT4; `auto` selects it there. `dflash2` and `mtp` are valid settings without a profile yet: plain generation under `auto`, a startup failure under `"on"`. |
-| `draft_source: local` | `draft_model` names an existing OpenVINO IR directory (relative paths resolve from `smart-classroom/`). It is validated, never downloaded or replaced. |
+| `draft_source: local` | `draft_model` names an existing OpenVINO IR directory (relative paths resolve from `smart-classroom/Windows/`). It is validated, never downloaded or replaced. |
 | `draft_revision` | A full 40-character commit. `null` uses the catalog pin (`f181eece646a…` for the Qwen3.6 drafter). |
 | `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 3. Range 1–15. |
 
@@ -73,7 +68,10 @@ silently fall back.
 While a speculative pipeline is active:
 
 * Requests are greedy. A request with `temperature > 0` is rejected with HTTP 400
-  instead of being changed. Classroom stages already generate greedily.
+  instead of being changed. Classroom stages already generate greedily; grading
+  does not (`vlm.temperature: 0.2` in
+  [components/grading/config.yaml](../../components/grading/config.yaml)), so set
+  that to 0 before using grading with DFlash.
 * Image requests run on the same pipeline; image-encoding speedups are not
   claimed.
 * If activation fails under `auto`, the server warms a plain pipeline once and

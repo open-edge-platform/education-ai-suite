@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """Turn processing-time statistics into a Markdown report with a timing diagram.
@@ -38,7 +38,7 @@ def _jsonl(path: Path) -> list:
     if not path.is_file():
         return []
     rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         try:
             rows.append(json.loads(line))
         except json.JSONDecodeError:
@@ -48,10 +48,13 @@ def _jsonl(path: Path) -> list:
 
 def load(source: Path) -> tuple:
     """Return ``(stages, calls)`` records from a session directory or API JSON."""
+    if not source.exists():
+        raise SystemExit(f"{source}: not found (run from the app root, smart-classroom/Windows)")
     if source.is_dir():
         logs = source / "logs" if (source / "logs").is_dir() else source
         return _jsonl(logs / "stage_events.jsonl"), _jsonl(logs / "model_calls.jsonl")
-    data = json.loads(source.read_text(encoding="utf-8"))
+    # utf-8-sig: Windows PowerShell 5.1 "Set-Content -Encoding utf8" writes a BOM.
+    data = json.loads(source.read_text(encoding="utf-8-sig"))
     raw = data.get("raw")
     if raw is None:
         raise SystemExit(f"{source}: no raw records; save GET /processing-stats?raw=true")
@@ -179,10 +182,31 @@ def ascii_chart(rows: list, t0: float, t1: float, width: int = _WIDTH) -> str:
     return "```text\n" + "\n".join(lines) + "\n```"
 
 
-def _calls_in(calls, stage):
-    rows = [r for r in calls if r.get("stage") == stage]
-    ok = [r for r in rows if r.get("status") == _OK_CALL]
-    model = sum(r.get("latency_ms") or 0 for r in ok) / 1000.0
+def _calls_per_attempt(calls, stage, blocks):
+    """Model calls of each attempt (block) of ``stage``.
+
+    Attempts of one stage run one after another (a retry starts after the
+    previous attempt ended), so a call belongs to the last attempt that started
+    before it was submitted; a call without a usable time goes to the first.
+    """
+    per = [[] for _ in blocks]
+    for r in calls:
+        if r.get("stage") != stage:
+            continue
+        submitted = _ts(r.get("submitted_at"))
+        index = 0
+        if submitted is not None:
+            # Both timestamps have millisecond resolution.
+            started = [i for i, b in enumerate(blocks) if b[0] <= submitted + 0.001]
+            index = started[-1] if started else 0
+        per[index].append(r)
+    return per
+
+
+def _totals(rows):
+    """Call count, model time and queue wait (s); model time includes failed and
+    cancelled calls, whose inference still occupied the stage."""
+    model = sum(r.get("latency_ms") or 0 for r in rows) / 1000.0
     queued = sum(r.get("queue_wait_ms") or 0 for r in rows) / 1000.0
     return len(rows), model, queued
 
@@ -217,8 +241,10 @@ def session_section(session: str, stages: list, calls: list) -> str:
     for label, kind, blocks in rows:
         if kind == "calls":
             continue
-        n, model, queued = _calls_in(calls, None if label == "unattributed" else label)
-        for start, end, status in blocks:
+        stage = None if label == "unattributed" else label
+        for (start, end, status), attempt in zip(blocks,
+                                                 _calls_per_attempt(calls, stage, blocks)):
+            n, model, queued = _totals(attempt)
             name, shown = (f"{label} *", "from calls") if kind == "derived" else (label, status)
             out.append(f"| {name} | {shown} | {start - t0:,.1f} | {end - t0:,.1f} | "
                        f"{end - start:,.1f} | {n} | {model:,.1f} | {queued:,.1f} |")
@@ -239,8 +265,10 @@ def calls_table(calls: list) -> str:
     for g in groups:
         lat = g["latency_ms"]
         drafted, accepted = g["draft_tokens"]["total"], g["accepted_tokens"]["total"]
+        # Counters are collected independently; either may be missing.
         acceptance = (f"{_num(accepted, 0)} / {_num(drafted, 0)} "
-                      f"({accepted / drafted:.0%})" if drafted else "—")
+                      f"({accepted / drafted:.0%})" if drafted and accepted is not None
+                      else "—")
         out.append(
             f"| {g['capability']} | {g['stage'] or '—'} | {g['model'] or '—'} | "
             f"{g['precision'] or '—'} | {g['device'] or '—'} | {g['decoding'] or '—'} | "

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """``/v1/chat/completions``: legacy chat unchanged, tool calling per the OpenAI contract."""
@@ -94,6 +94,16 @@ def test_plain_stream_shape_is_unchanged(client_for):
     assert events[0]["choices"][0]["delta"] == {"role": "assistant"}
     assert "".join(e["choices"][0]["delta"].get("content", "") for e in events[1:-2]) == "hello world"
     assert events[-2]["choices"][0]["finish_reason"] == "stop" and events[-1] == "[DONE]"
+
+
+@pytest.mark.parametrize("url", ["C:/Users/x/photo.png", "https://example.com/x.png"])
+def test_plain_chat_accepts_only_inline_images(client_for, url):
+    handler = FakeHandler("ok")
+    r = client_for(handler).post("/v1/chat/completions", json={"messages": [{
+        "role": "user", "content": [{"type": "image_url", "image_url": {"url": url}},
+                                    {"type": "text", "text": "describe"}]}]})
+    assert r.status_code == 400 and "data:image/" in r.json()["error"]
+    assert handler.calls == []
 
 
 def test_request_the_pipeline_cannot_honor_is_a_400(client_for):
@@ -237,9 +247,25 @@ def test_truncated_tool_turn_reports_length(client_for):
     assert choice["finish_reason"] == "length" and "tool_calls" not in choice["message"]
 
 
+def test_streamed_complete_call_is_withheld_when_the_turn_is_truncated(client_for):
+    client = client_for(FakeHandler(CALL + "\nAlso", truncated=True))
+    with client.stream("POST", "/v1/chat/completions",
+                       json={"stream": True, "tools": TOOLS,
+                             "messages": [{"role": "user", "content": "w?"}]}) as r:
+        events = _sse(r)
+    deltas = [e["choices"][0]["delta"] for e in events if isinstance(e, dict)]
+    assert not any("tool_calls" in d for d in deltas)
+    assert events[-2]["choices"][0]["finish_reason"] == "length" and events[-1] == "[DONE]"
+
+
 @pytest.mark.parametrize("payload", [
     {"tools": [{"type": "function", "function": {"name": "bad name"}}],
      "messages": [{"role": "user", "content": "x"}]},
+    {"tools": TOOLS, "tool_choice": {"type": "function", "function": "get_weather"},
+     "messages": [{"role": "user", "content": "x"}]},
+    {"messages": [{"role": "user", "content": "x"}, {"role": "assistant", "content": None,
+                  "tool_calls": [{"id": "c", "type": "function", "function": "invalid"}]},
+                  {"role": "tool", "tool_call_id": "c", "content": "r"}]},
     {"tools": TOOLS, "tool_choice": {"type": "function", "function": {"name": "nope"}},
      "messages": [{"role": "user", "content": "x"}]},
     {"messages": [{"role": "user", "content": "x"}, {"role": "assistant", "content": None,

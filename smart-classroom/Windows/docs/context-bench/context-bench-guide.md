@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: (C) 2026 Intel Corporation
-SPDX-License-Identifier: Apache-2.0
--->
-
 # Context Bench
 
 `components/context_bench/` is an offline, text-only OpenVINO LLM benchmark. It answers, per
@@ -20,8 +15,9 @@ time. Results are observations on the machine that produced them, not qualificat
 
 ## Quick start
 
-Run from `smart-classroom/`. The benchmark uses the backend venv
-(`<smart-classroom>/../smartclassroom`) that `setup-smart-classroom.ps1` creates; the
+Run from the app root, `smart-classroom/Windows/`. The benchmark uses the backend
+venv one level above it (`smart-classroom/smartclassroom`) that
+`setup-smart-classroom.ps1` creates; the
 application's `requirements.txt` pins everything it needs. Then:
 
 ```powershell

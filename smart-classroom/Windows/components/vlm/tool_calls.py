@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """OpenAI-compatible function/tool calling for ``/v1/chat/completions``.
@@ -285,7 +285,8 @@ def resolve_tool_choice(raw, tools: list) -> ToolChoice:
             raise ToolRequestError(f'tool_choice "{raw}" requires tools')
         return ToolChoice(raw)
     if isinstance(raw, dict) and raw.get("type") == "function":
-        name = (raw.get("function") or {}).get("name")
+        function = raw.get("function")
+        name = function.get("name") if isinstance(function, dict) else None
         if not any(t.name == name for t in tools):
             raise ToolRequestError("tool_choice names a function that is not in tools")
         return ToolChoice("named", name)
@@ -375,7 +376,9 @@ def normalize_history(messages: list) -> tuple:
                     raise ToolRequestError(f"{cw}.id is required")
                 if call_id in known_ids:
                     raise ToolRequestError(f"{cw}.id duplicates an earlier call id")
-                function = call.get("function") or {}
+                function = call.get("function")
+                if not isinstance(function, dict):
+                    raise ToolRequestError(f"{cw}.function must be an object")
                 name = function.get("name")
                 if not isinstance(name, str) or not name:
                     raise ToolRequestError(f"{cw}.function.name is required")
@@ -521,11 +524,8 @@ def parse_completion(text: str, tools: list, choice: ToolChoice, *, parallel: bo
     events = parser.feed(text) + parser.finish(truncated)
     content = "".join(v for kind, v in events if kind == "content")
     reasoning = "".join(v for kind, v in events if kind == "reasoning").strip()
-    calls = [v for kind, v in events if kind == "call"]
-    if parser.finish_reason == "length":
-        # A truncated turn is not a successful tool invocation, even if some
-        # calls before the cut were complete.
-        calls = []
+    calls = ([v for kind, v in events if kind == "call"]
+             if parser.finish_reason == "tool_calls" else [])
     return ParsedTurn(content, calls, parser.finish_reason, reasoning)
 
 
@@ -637,10 +637,12 @@ class ToolStreamParser:
             events += ([("reasoning", self._buffer)] if self._in_think
                        else self._content(self._buffer))
             self._buffer = ""
-        if self._calls:
-            self.finish_reason = "tool_calls"
-        elif truncated:
+        if truncated:
+            # A turn cut off by the token limit is not a successful tool
+            # invocation, even if calls before the cut were complete.
             self.finish_reason = "length"
+        elif self._calls:
+            self.finish_reason = "tool_calls"
         elif self.choice.requires_call:
             raise ToolOutputError("model did not produce the required tool call")
         else:

@@ -167,6 +167,27 @@ def test_ocr_handler_reads_concurrency_from_config():
     handler.shutdown()
 
 
+def test_ocr_calls_are_labelled_with_the_loaded_models():
+    """Processing statistics group OCR calls by the models, not just the runtime."""
+    import types
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    ocr = SimpleNamespace(provider="openvino", device="CPU", model_dir="m",
+                          det_model="det", rec_model="rec", cls_model="cls")
+    cfg = SimpleNamespace(app=SimpleNamespace(language="en"), models=SimpleNamespace(ocr=ocr))
+    for cls_loaded, expected in ((True, "openvino/det+rec+cls"), (False, "openvino/det+rec")):
+        fake = types.ModuleType("components.ocr.openvino.openvino_ocr_processor")
+        fake.OpenVINOOCRProcessor = lambda cls_loaded=cls_loaded, **kw: SimpleNamespace(
+            cls_compiled=object() if cls_loaded else None)
+        handler = OcrHandler()
+        with patch("utils.config_loader.config", cfg), \
+                patch.dict(sys.modules, {fake.__name__: fake}), \
+                patch.object(handler, "_ensure_openvino_models"):
+            handler._build_processor()
+        assert handler._model_id == expected
+
+
 # ---------------------------------------------------------------------------
 # AsrHandler state machine
 # ---------------------------------------------------------------------------

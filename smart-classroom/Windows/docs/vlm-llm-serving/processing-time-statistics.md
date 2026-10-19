@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: (C) 2026 Intel Corporation
-SPDX-License-Identifier: Apache-2.0
--->
-
 # Processing-Time Statistics
 
 Smart Classroom times every run at two levels:
@@ -136,7 +131,7 @@ With `raw=true` the response also contains `raw.stages` and `raw.model_calls`.
 ## Generate a Report
 
 [Scripts/processing_stats_report.py](../../Scripts/processing_stats_report.py)
-turns the raw records into a Markdown report. Run it from `smart-classroom/`
+turns the raw records into a Markdown report. Run it from `smart-classroom/Windows/`
 with the backend virtual environment active:
 
 ```powershell
@@ -160,8 +155,11 @@ Without `-o`, the report is printed to the console. For each session it shows:
   GitHub, and by VS Code with a Mermaid preview extension) and as plain text.
   Failed or interrupted work is red in Mermaid and `X` in the text view. Lanes
   marked `*` are drawn from model calls only.
-* **Stages**: start and end offsets, duration, number of model calls, their
-  total model time and their queue wait.
+* **Stages**: one row per attempt, with start and end offsets, duration, the
+  number of model calls, their total model time (failed and cancelled calls
+  included) and their queue wait. A call is counted for the last attempt of its
+  stage that started before the call was submitted, so a retried stage does not
+  show the same calls twice.
 
 After the per-session sections, the report adds two tables for all sessions:
 stage-duration statistics, and model-call statistics. The model-call table

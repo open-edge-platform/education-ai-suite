@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
@@ -194,3 +194,18 @@ def test_stage_tracker_attribution_survives_async_generator_steps(stats):
     with w, s, patch("utils.stage_tracker.STATS", stats):
         assert asyncio.run(consume()) == ["summary"] * 3
     assert ps.current_stage() == (None, None)
+
+
+def test_concurrent_session_lines_are_all_written(tmp_path):
+    """Calls finishing together (OCR, ASR, text_gen) each keep their line."""
+    from utils.session_paths import SessionPaths
+
+    with patch.object(SessionPaths, "logs_dir", staticmethod(lambda session_id: tmp_path)):
+        def write(worker):
+            for i in range(500):
+                ps._append_session_line({"session_id": "s", "worker": worker, "i": i})
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(write, range(4)))
+    lines = (tmp_path / "model_calls.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2000

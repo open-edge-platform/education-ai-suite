@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """Optional bridge to OpenVINO's who_what_benchmark (WWB) for the embedding-similarity metric.
 
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import sys
 from dataclasses import dataclass
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
@@ -60,12 +59,16 @@ def unavailable(reason: str) -> SimilarityResult:
 def _offline():
     """Force Hugging Face offline mode while the evaluator loads its embedding model.
 
-    huggingface_hub reads HF_HUB_OFFLINE once, at import, so once it is loaded (the
-    tokenizer path imports it early) the cached flag is switched as well.
+    huggingface_hub reads HF_HUB_OFFLINE once, at import, so the cached flag is
+    switched as well. It is imported first: imported inside the block, it would
+    keep offline mode cached after the block ends.
     """
+    try:
+        import huggingface_hub.constants as constants
+    except ImportError:
+        constants = None
     previous = {key: os.environ.get(key) for key in _OFFLINE_ENV}
     os.environ.update(_OFFLINE_ENV)
-    constants = sys.modules.get("huggingface_hub.constants")
     cached = getattr(constants, "HF_HUB_OFFLINE", None)
     if constants is not None:
         constants.HF_HUB_OFFLINE = True

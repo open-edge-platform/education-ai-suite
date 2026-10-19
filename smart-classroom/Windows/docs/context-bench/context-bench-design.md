@@ -1,6 +1,6 @@
 # Context Bench Design
 
-**Status:** Implementation design for `smart-classroom/components/context_bench/`.
+**Status:** Implementation design for `smart-classroom/Windows/components/context_bench/`.
 
 Companion document: [vlm-llm-serving-design.md](../vlm-llm-serving/vlm-llm-serving-design.md).
 
@@ -53,7 +53,7 @@ Capacity-search/bisection, synthetic dry-run PASS results, automatic production 
 
 ### Module Boundaries
 
-Keep all benchmark modules, model-specific YAML and PowerShell launchers in `smart-classroom/components/context_bench/`; tests remain in `smart-classroom/components/tests/`. Use `components.context_bench` for absolute imports and module entry points, or package-relative imports internally. Keep inference imports lazy and the package initializer lightweight so planning and pure tests need no OpenVINO or model files.
+Keep all benchmark modules, model-specific YAML and PowerShell launchers in `smart-classroom/Windows/components/context_bench/`; tests remain in `smart-classroom/Windows/components/tests/`. Use `components.context_bench` for absolute imports and module entry points, or package-relative imports internally. Keep inference imports lazy and the package initializer lightweight so planning and pure tests need no OpenVINO or model files.
 
 When adapting the reference, update package imports, test imports, launcher commands and path-derived defaults together. From a module in this package, the Smart Classroom root is `Path(__file__).resolve().parents[2]`; from a colocated PowerShell launcher it is two directories above `$PSScriptRoot`. Resolve the default `config_qwen3.6_35b.yaml` beside the module, not from the caller's directory. Keep the backend environment at the root's existing sibling `smartclassroom/`; moving this package must not change model, cache or result locations.
 
@@ -442,7 +442,7 @@ Use deterministic fixtures: 101 input tokens, five output tokens, 0.3-second gen
 
 ### Acceptance Workflow
 
-After the port exists, run from `smart-classroom/` in the prepared benchmark environment. The steps below cover pure tests, planning, an execution smoke test, a repeated throughput comparison and accuracy. The PowerShell entry point is `./components/context_bench/run_benchmark.ps1`, which forwards the same CLI arguments.
+After the port exists, run from the app root `smart-classroom/Windows/` in the prepared benchmark environment. The steps below cover pure tests, planning, an execution smoke test, a repeated throughput comparison and accuracy. The PowerShell entry point is `./components/context_bench/run_benchmark.ps1`, which forwards the same CLI arguments.
 
 ```powershell
 python -m unittest discover -s components/tests -p "test_context_bench_*.py"

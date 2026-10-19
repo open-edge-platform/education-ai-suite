@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """Case lifecycle with fake pipelines, queues, processes, samplers and clocks.
 
@@ -933,3 +933,12 @@ class TestPlanningIsSideEffectFree(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMessageSanitizing(unittest.TestCase):
+    def test_a_home_directory_with_a_space_is_fully_redacted(self):
+        home = r"C:\Users\John Smith"
+        with mock.patch.object(trial_runner.os.path, "expanduser", return_value=home):
+            text = trial_runner.sanitize_message(f"cannot open {home}" + r"\models\x.xml")
+        self.assertNotIn("Smith", text)
+        self.assertIn("<home>", text)

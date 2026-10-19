@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
 # Runs the context benchmark with the backend venv's Python from the Smart Classroom root.
@@ -14,7 +14,7 @@
 #   .\components\context_bench\run_benchmark.ps1 --config components/context_bench/config_qwen3.8_27b.yaml
 #   .\components\context_bench\run_benchmark.ps1 --profiles paged_min dflash_k7 --contexts 8000 --warmup 0 --iterations 1
 #
-# The venv (<smart-classroom>/../smartclassroom) is not created here: setup-smart-classroom.ps1
+# The venv (<app root>/../smartclassroom) is not created here: setup-smart-classroom.ps1
 # creates it with the application's requirements.txt, which pins everything the benchmark
 # needs. If PowerShell blocks local scripts, relax the policy for this process only:
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
@@ -25,7 +25,8 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = $PSScriptRoot
 if (-not $ScriptDir) { $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 
-# Two directories above this script: context_bench -> components -> smart-classroom.
+# Two directories above this script: context_bench -> components -> app root
+# (smart-classroom/Windows).
 $SmartClassroomRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptDir '..\..')).ProviderPath
 $VenvPath = Join-Path (Split-Path -Parent $SmartClassroomRoot) 'smartclassroom'
 $VenvPython = Join-Path $VenvPath 'Scripts\python.exe'

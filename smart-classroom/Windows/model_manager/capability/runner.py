@@ -64,6 +64,11 @@ class _SlotStream:
             if not deferred:
                 self._release()
 
+    def __del__(self) -> None:
+        # Safety net for a consumer that drops the stream without closing it,
+        # as the generator this replaced did on finalization.
+        self.close()
+
 
 class CapabilityRunner:
     def __init__(self, fn: Callable, *, max_concurrency: int = 1,

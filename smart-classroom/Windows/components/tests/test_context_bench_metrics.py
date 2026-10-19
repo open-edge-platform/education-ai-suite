@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """The measurement contract: units, sources, null handling, statistics, ranking and status,
 plus strict configuration validation. Hardware-independent."""

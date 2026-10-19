@@ -75,7 +75,7 @@ models:
 
   text_gen:
     provider: vlm
-    vlm_name: Qwen/Qwen3.6-35B-A3B
+    vlm_name: Qwen/Qwen3-VL-8B-Instruct
     device: GPU # GPU or CPU
     weight_format: int4 # int4,int 8-- shared with content_search.vlm.weight_format
     max_new_tokens: 5120
@@ -83,11 +83,12 @@ models:
     queue_max: 8      # CapabilityRunner queue depth before 503 backpressure
 
     # DFlash speculative decoding, supported only for vlm_name Qwen/Qwen3.6-35B-A3B
-    # with weight_format int4 (drafter z-lab/Qwen3.6-35B-A3B-DFlash). "off" keeps
-    # plain generation; auto falls back to plain when DFlash cannot run; "on"
-    # requires it. See docs/vlm-llm-serving/serving-guide.md.
+    # with weight_format int4 (drafter z-lab/Qwen3.6-35B-A3B-DFlash). Opt-in: set
+    # that vlm_name and mode: auto (falls back to plain when DFlash cannot run) or
+    # "on" (requires it). "off" is plain generation; the other fields are then
+    # ignored. See docs/vlm-llm-serving/serving-guide.md.
     speculative:
-      mode: "on"           # "off" | auto | "on"
+      mode: "off"          # "off" | auto | "on"
       method: dflash
       draft_source: null    # null = Hub drafter | local (draft_model = an exported IR directory)
       draft_model: null     # null = z-lab/Qwen3.6-35B-A3B-DFlash

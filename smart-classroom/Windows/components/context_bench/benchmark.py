@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """Offline, text-only OpenVINO LLM benchmark for Smart Classroom.
 
@@ -125,7 +125,7 @@ def _preflight_environment_check() -> None:
     redactor = evidence.PathRedactor(SC_ROOT)
     lines = [
         f"Missing required package(s) in this interpreter: {', '.join(missing)}.",
-        "The OpenVINO stack lives in the backend venv (<smart-classroom>/../smartclassroom), "
+        "The OpenVINO stack lives in the backend venv (<app root>/../smartclassroom), "
         "not the interpreter on PATH. Use the launcher, which runs that venv's Python:",
         f"  {redactor.redact(_LAUNCHER_SCRIPT)} <same arguments>",
         f"or prepare the venv first with {redactor.redact(_SETUP_SCRIPT)}",
@@ -346,9 +346,11 @@ def _new_case(planned: dict, settings, static: dict, redactor) -> dict:
         "num_assistant_tokens": mtp["num_assistant_tokens"],
         "mtp_device": settings["device"] if mtp["enabled"] else None,
         "draft_location": redactor.redact(resolve_path(mtp["model"])) if mtp.get("model") else None,
-        "effective_ov": dict(profile["ov"]),
+        # A profile's own CACHE_DIR is a local path: redacted like settings.cache_dir.
+        "effective_ov": {k: redactor.redact(v) if k == "CACHE_DIR" else v
+                         for k, v in profile["ov"].items()},
         "effective_scheduler": dict(profile["scheduler"]),
-        "ov_config": format_config(profile["ov"]),
+        "ov_config": format_config({k: v for k, v in profile["ov"].items() if k != "CACHE_DIR"}),
         "scheduler_config": format_config(profile["scheduler"]),
         "warmup": settings["warmup"],
         "planned_iterations": planned["planned_iterations"],
@@ -601,12 +603,17 @@ def _run_case(planned: dict, settings, static: dict, prepared, run, contaminated
         if case["device_diagnostics"]["device_name"] not in names:
             names.append(case["device_diagnostics"]["device_name"])
     if interrupted is None and result.get("memory_baseline") is not None and result.get("cleanup_confirmed", True):
-        settled = _wait_for_memory_settle(result["memory_baseline"], include_gpu)
-        case["memory_settled"] = settled
-        case["_next_contaminated"] = not settled
-        if not settled:
-            case["warnings"].append("memory did not return within 1 GiB of the pre-case baseline "
-                                    "after 30 s; the next case is flagged")
+        try:
+            settled = _wait_for_memory_settle(result["memory_baseline"], include_gpu)
+        except KeyboardInterrupt:
+            # The case itself completed: keep its records, then stop the run.
+            interrupted = True
+        else:
+            case["memory_settled"] = settled
+            case["_next_contaminated"] = not settled
+            if not settled:
+                case["warnings"].append("memory did not return within 1 GiB of the pre-case "
+                                        "baseline after 30 s; the next case is flagged")
     _finalize_case(case, settings, specs)
     if interrupted is not None:
         raise CaseInterrupted(case)
@@ -711,6 +718,8 @@ class RunState:
         if exported.get("cache_dir"):
             exported["cache_dir"] = redact(resolve_path(exported["cache_dir"]))
         for profile in exported["profiles"]:
+            if profile["ov"].get("CACHE_DIR"):
+                profile["ov"]["CACHE_DIR"] = redact(resolve_path(profile["ov"]["CACHE_DIR"]))
             if profile["mtp"].get("model"):
                 profile["mtp"]["model"] = redact(resolve_path(profile["mtp"]["model"]))
         exported["notices"] = [self.redactor.text(n) for n in exported.get("notices") or []]
@@ -857,7 +866,8 @@ def execute(settings, planned: list, redactor) -> int:
                 except CaseInterrupted as interrupted:
                     run.finish_case(interrupted.result)
                     raise KeyboardInterrupt from None
-                contaminated = bool(case.pop("_next_contaminated", False))
+                if "_next_contaminated" in case:  # a rejected case leaves memory as it was
+                    contaminated = bool(case.pop("_next_contaminated"))
                 run.finish_case(case)
                 print(report.format_case_line(run._export_case(case)), flush=True)
         run.completed = not run.refuse_more

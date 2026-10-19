@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """Tool-calling contract: request validation, history, output parsing, streaming."""
@@ -158,6 +158,9 @@ def test_history_collects_images_with_per_message_tags():
       "tool_calls": [_call(), _call()]}], "duplicates an earlier call id"),
     ([{"role": "user", "content": "hi"}, {"role": "assistant", "content": None,
       "tool_calls": [_call(args="not json")]}], "JSON-encoded object"),
+    ([{"role": "user", "content": "hi"}, {"role": "assistant", "content": None,
+      "tool_calls": [{"id": "call_a", "type": "function", "function": "invalid"}]}],
+     "function must be an object"),
     ([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "done"}],
      "last message"),
     ([{"role": "narrator", "content": "hi"}], "not supported"),
@@ -238,6 +241,17 @@ def test_truncated_call_reports_length_without_calls():
     text = HERMES + '\n<tool_call>\n{"name": "get_time", "argu'
     turn = tc.parse_completion(text, _tools(), _choice(), truncated=True)
     assert turn.finish_reason == "length" and turn.tool_calls == []
+
+
+def test_truncation_takes_precedence_over_complete_calls():
+    # A complete call, then text cut off by the token limit.
+    text = HERMES + "\nAnd then I will also"
+    turn = tc.parse_completion(text, _tools(), _choice(), truncated=True)
+    assert turn.finish_reason == "length" and turn.tool_calls == []
+    parser = tc.ToolStreamParser(_tools(), _choice())
+    parser.feed(text)
+    parser.finish(True)
+    assert parser.finish_reason == "length"
 
 
 def test_required_and_named_choices_demand_a_matching_call():

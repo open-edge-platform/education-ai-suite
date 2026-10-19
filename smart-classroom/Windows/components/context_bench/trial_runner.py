@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """Runs one benchmark case in an isolated, spawned child process.
 
@@ -138,7 +138,11 @@ def failing_stage(stage_reached: str) -> str:
 
 def sanitize_message(text, limit: int = 400, keep_newlines: bool = False) -> str:
     """A diagnostic without absolute paths (which carry user names) and bounded in length."""
-    text = _WINDOWS_PATH.sub("<path>", str(text or ""))
+    # The home directory first: the path patterns stop at a space in a user name.
+    text, home = str(text or ""), os.path.expanduser("~")
+    if home != "~":
+        text = text.replace(home, "<home>")
+    text = _WINDOWS_PATH.sub("<path>", text)
     text = _POSIX_PATH.sub("<path>", text)
     if keep_newlines:
         text = "\n".join(" ".join(line.split()) for line in text.splitlines())

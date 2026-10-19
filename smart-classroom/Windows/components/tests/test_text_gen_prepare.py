@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """Startup preparation: policy, drafter acquisition, DFlash target derivation, manifest.
@@ -9,6 +9,8 @@ IR files are tiny synthetic XML so derivation runs for real.
 
 import dataclasses
 import json
+import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -234,6 +236,17 @@ def test_export_failure_falls_back_in_auto_and_fails_in_on(env, monkeypatch):
         prep.prepare(_plan(env, mode="on"), genai_version=GENAI)
 
 
+def test_file_errors_fall_back_in_auto_and_fail_in_on(env, monkeypatch):
+    def locked(*args):
+        raise PermissionError("drafter file is in use")
+
+    monkeypatch.setattr(prep, "_download_source", locked)
+    result = prep.prepare(_plan(env, mode="auto"), genai_version=GENAI)
+    assert result.speculative is None and "in use" in result.speculative_error
+    with pytest.raises(PermissionError):
+        prep.prepare(_plan(env, mode="on"), genai_version=GENAI)
+
+
 def test_old_runtime_means_plain_in_auto(env):
     result = prep.prepare(_plan(env, mode="auto"), genai_version=lambda: "2025.4.0")
     assert result.speculative is None and "openvino-genai >= 2026.3" in result.speculative_error
@@ -333,6 +346,21 @@ def test_artifact_lock_excludes_and_recovers_stale(tmp_path):
     with prep.ArtifactLock(artifact, timeout_s=0):
         pass
     assert not stale.exists()
+
+
+def test_artifact_lock_tells_a_reused_process_id_from_its_owner(tmp_path):
+    pytest.importorskip("psutil")
+    lock = prep.ArtifactLock(tmp_path / "a")
+    parent = os.getppid()  # a live process other than this one
+    lock.path.write_text(f"{parent} {prep._process_started(parent)}", encoding="ascii")
+    assert not lock._stale()
+    lock.path.write_text(f"{parent} 12345", encoding="ascii")  # same id, another process
+    assert lock._stale()
+    lock.path.write_text("", encoding="ascii")  # owner died before writing its id
+    assert not lock._stale()
+    old = time.time() - prep._EMPTY_LOCK_GRACE_S - 5
+    os.utime(lock.path, (old, old))
+    assert lock._stale()
 
 
 # --- drafter with its own lm_head -------------------------------------------------

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 """Accuracy suites without a model: deterministic probes, option validation, exact probe
 counts, ground truth that survives filler truncation, scorer golden cases, cross-case

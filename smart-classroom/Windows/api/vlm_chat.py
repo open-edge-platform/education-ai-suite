@@ -169,6 +169,11 @@ async def _chat_completions(request: Request):
     prompt, image_urls = _extract_prompt_and_images(chat_req.messages, mods)
     if not prompt or not prompt.strip():
         return JSONResponse(status_code=400, content={"error": "Prompt is required"})
+    if any(not url.startswith("data:image/") for url in image_urls):
+        # Inline images only: request content never names a server-side file
+        # (any web page can reach this loopback API) or makes the server fetch.
+        return JSONResponse(status_code=400,
+                            content={"error": "image_url must be a data:image/ URL"})
 
     image_tensors = None
     if image_urls:
@@ -251,7 +256,9 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
     handler = ModelManager.instance().text_gen()
     offered = tc.offered_tools(tools, choice)
     uses_tool_turns = any(m["role"] == "tool" or m.get("tool_calls") for m in history)
-    if (offered or uses_tool_turns) and not handler.supports_tools:
+    # May load the model on first use: keep that off the event loop.
+    if ((offered or uses_tool_turns)
+            and not await run_in_threadpool(lambda: handler.supports_tools)):
         return _tool_error(400, f"{model_name} does not support tool calling",
                            "invalid_request_error")
 

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 """Processing-time statistics for workflow stages and individual model calls.
@@ -353,6 +353,11 @@ def call_groups(records: list, keys: tuple) -> list:
     return out
 
 
+# One writer at a time: on Windows an append through separate handles is not
+# atomic, and concurrent OCR, ASR and text_gen calls would drop lines.
+_SESSION_LINES_LOCK = threading.Lock()
+
+
 def _append_session_line(record: dict) -> None:
     """Mirror a call into ``<session>/logs/model_calls.jsonl``; never raises."""
     session_id = record.get("session_id")
@@ -363,8 +368,9 @@ def _append_session_line(record: dict) -> None:
 
         path = SessionPaths.logs_dir(session_id) / "model_calls.jsonl"
         os.makedirs(path.parent, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        with _SESSION_LINES_LOCK, open(path, "a", encoding="utf-8") as f:
+            f.write(line)
     except Exception as exc:  # noqa: BLE001 - observability must not break the flow
         logger.debug("model_calls.jsonl write skipped for %s: %s", session_id, exc)
 
