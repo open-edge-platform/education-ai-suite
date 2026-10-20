@@ -1,10 +1,10 @@
-# Get Started
+# Get Started on Linux
 
 This guide walks you through cloning the repository, configuring defaults, and running the application on Linux using the `setup.sh` script.
 
 ## Step 1: Prerequisites
 
-Make sure the following are installed. See [System Requirements](./get-started/system-requirements.md) for details.
+Make sure the following are installed. See [System Requirements](./system-requirements.md) for details.
 
 - Docker Engine and the Docker Compose plugin (your user must be able to run `docker` without `sudo`)
 - Git
@@ -18,7 +18,7 @@ Make sure the following are installed. See [System Requirements](./get-started/s
 
 Go to the target directory of your choice and clone the suite.
 If you want to clone a specific release branch, replace `main` with the desired tag.
-To learn more on partial cloning, check the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
+To learn more about partial cloning, see the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
 
 ```bash
 git clone --filter=blob:none --branch main https://github.com/open-edge-platform/education-ai-suite.git

@@ -18,8 +18,7 @@ transcription and summarization to provide comprehensive classroom intelligence.
 This application provides an end-to-end workflow, starting from file uploads or live recording,
 through parallel audio and video analysis, to generate insightful outputs like transcriptions,
 summaries, mind maps, and classroom engagement statistics. You can monitor system performance,
-switch between audio-video modes, and validate results seamlessly, ensuring an interactive and
-efficient classroom experience.
+switch between audio-video modes, and validate results.
 
 The main features are as follows:
 
@@ -49,7 +48,7 @@ The main features are as follows:
 :hidden:
 
 ./get-started
-./advance-setup-guide
+./advanced-setup-guide
 ./how-it-works
 ./application-flow
 ./content-search-flow

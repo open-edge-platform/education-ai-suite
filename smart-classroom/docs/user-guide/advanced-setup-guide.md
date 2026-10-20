@@ -1,39 +1,37 @@
-# Get Started
+# Advanced Setup Guide
 
 This guide walks you through installing dependencies, configuring defaults, and running the application.
 
 ## Step 1: Install Dependencies
 
-To install dependencies, do the following:
-
-### A. Install FFmpeg (required for audio processing)
+### A. Install FFmpeg (Required for Audio Processing)
 
 Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html), and add the `ffmpeg/bin` folder to your system `PATH`.
 
 ### B. Install DL Streamer
 
-Download the installer from [DL Streamer assets on GitHub](https://github.com/open-edge-platform/dlstreamer/releases).
+Download the Deep Learning Streamer (DL Streamer) installer from [DL Streamer assets on GitHub](https://github.com/open-edge-platform/dlstreamer/releases).
 For details, refer to the [Install Guide](https://docs.openedgeplatform.intel.com/dev/edge-ai-libraries/dlstreamer/install/install_guide_windows.html).
 
 > [!NOTE]
-> DL Streamer 2026.1.0 is lastest verified version, please also update your [NPU driver](./get-started/system-requirements.md#software-and-hardware-requirements) to latest for compatability.
+> DL Streamer 2026.1.0 is the latest verified version. Also update your [NPU driver](./get-started/system-requirements.md#software-and-hardware-requirements) to the latest version for compatibility.
 
-**Run your shell with admin privileges before starting the application**
+**Run your shell with administrator privileges before starting the application**
 
 ### C. Clone Repository
 
 Go to the target directory of your choice and clone the suite.
 If you want to clone a specific release branch, replace `main` with the desired tag.
-To learn more on partial cloning, check the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
+To learn more about partial cloning, see the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
 
 ```bash
 git clone --filter=blob:none --branch main https://github.com/open-edge-platform/education-ai-suite.git
 cd education-ai-suite/smart-classroom
 ```
 
-### D. Install Python dependencies
+### D. Install Python Dependencies
 
-It’s recommended to create a **dedicated Python virtual environment** for the base dependencies.
+It’s recommended to create a **dedicated Python virtual environment** for the base dependencies:
 
 ```bash
 python -m venv smartclassroom
@@ -45,7 +43,7 @@ python.exe -m pip install --upgrade pip
 pip install --upgrade -r requirements.txt
 ```
 
-### E. Install LibreOffice (optional, feature-dependent)
+### E. Install LibreOffice (Optional, Feature-Dependent)
 
 LibreOffice (the `soffice` executable) is an **optional** dependency used by two features. Install it only if you enable a feature that needs it:
 
@@ -65,7 +63,7 @@ shutil.which("soffice") is not None   # should return True
 
 ### A. Enable Feature Configuration
 
-The application is built using a modular feature architecture, allowing users to enable or disable individual features through the `features:` block in `smart-classroom/Windows/config.yaml`. Only enabled features are initialized at startup—they load their required models, register their API routes, and start their associated services.
+The application uses a modular feature architecture. You can enable or disable individual features through the `features:` block in `smart-classroom/Windows/config.yaml`. Only enabled features are initialized at startup: they load their required models, register their API routes, and start their associated services.
 
 ```yaml
 features:
@@ -106,13 +104,14 @@ text_gen:                     # Shared by summary, mindmap, segmentation and Q&A
 
 ### C. Chinese Audio Transcription
 
-For Chinese audio transcription, switch to funASR with Paraformer in your config (`smart-classroom/Windows/config.yaml`):
+For Chinese audio transcription, switch to FunASR with Paraformer in your configuration file (`smart-classroom/Windows/config.yaml`):
 
 ```yaml
 asr:
   provider: funasr
   name: paraformer-zh
 ```
+
 Please also set the language to Chinese at the app level:
 
 ```yaml
@@ -131,7 +130,7 @@ content_search:
     video_max_mb: 1024      # maximum upload size for videos (MB)
 ```
 
-**Document OCR** To also extract text from images embedded in uploaded documents, turn on OCR for content search:
+**Document OCR**: To also extract text from images embedded in uploaded documents, turn on OCR for content search:
 
 ```yaml
 content_search:
@@ -139,11 +138,11 @@ content_search:
 ```
 
 > [!NOTE]
-> This only affects document ingestion. Board OCR has its own OCR usage and is unaffected by this flag.
+> This flag affects only document ingestion. Board OCR uses OCR independently and is not affected.
 
 ### E. Board OCR Configuration
 
-Board OCR extracts text from the teacher's interactive display (IFPD) during a session, feeding the board summary and class report. It has below configurations:
+Board OCR extracts text from the teacher's interactive display (IFPD) during a session, feeding the board summary and class report. It has the following configurations:
 
 ```yaml
 board_ocr:
@@ -162,11 +161,11 @@ available:
 | Backend | Gated access | Speed (CPU) | Notes |
 | :--- | :--- | :--- | :--- |
 | `pyannote` (default) | Yes, Hugging Face token required | ~0.43x realtime | Detects overlapping speech |
-| `campplus` | No | ~0.01x realtime | FunASR VAD + CAM++, requires the funASR setup from section C |
+| `campplus` | No | ~0.01x realtime | FunASR VAD + CAM++, requires the FunASR setup from section C |
 
 Steps a-c below set up the default pyannote backend. Skip to step d for CAM++.
 
-#### a. Request Model Access on Hugging Face
+#### a. Request model access on Hugging Face
 
 Pyannote diarization models require gated access.
 
@@ -176,17 +175,17 @@ Request access here:
 
 Click "Request Access" on the model page and wait for approval.
 
-#### b. Create a Hugging Face Access Token
+#### b. Create a Hugging Face access token
 
 After approval:
 
 Go to the [Hugging Face Access Token](https://huggingface.co/settings/tokens) page.
 
-Create a Read access token
+Create a Read access token.
 
-Copy the generated token
+Copy the generated token.
 
-#### c. Configure Hugging Face Token in Project Config
+#### c. Configure Hugging Face token in project configuration
 
 Open `smart-classroom/Windows/config.yaml` and set `diarization: true` under `models.asr`, then add your Hugging Face token:
 
@@ -200,7 +199,7 @@ models:
 > [!NOTE]
 > The diarization model downloads automatically on next startup once `diarization: true` is set.
 
-#### d. CAM++ Backend (funASR only)
+#### d. CAM++ backend (FunASR only)
 
 `campplus` needs no token and no gated access, but it requires `provider: funasr` and
 `name: paraformer-zh` from section C. Its speaker and VAD models are downloaded from ModelScope
@@ -214,7 +213,7 @@ models:
     backend: campplus
 ```
 
-#### e. Whole-File Processing (funASR only)
+#### e. Whole-file processing (FunASR only)
 
 By default audio is transcribed and diarized in chunks, which streams results to the UI while
 the recording is still being processed. Setting `chunking: false` processes the whole recording
@@ -326,12 +325,14 @@ python -m venv venv_convert
 Open two new terminal windows (the Backend terminal must remain running):
 
 **Terminal — Layout Detection (port 9902):**
+
 ```PowerShell
 cd smart-classroom\Windows\components\grading\providers
 python .\layout_detection_service\layout_detection_server.py
 ```
 
 **Terminal — Grading Service (port 9012):**
+
 ```PowerShell
 cd smart-classroom\Windows\components\grading
 python grading_service.py
@@ -351,9 +352,9 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 > [!WARNING]
 > Keep the frontend bound to `127.0.0.1`. The dev server proxies `/api/v1` and
-> `/grading-api` to the Content Search and Grading backends, which have no
-> authentication. Binding it to `0.0.0.0` exposes those backends, including
-> their file read and write APIs, to every device on the network.
+  `/grading-api` to the Content Search and Grading backends, which have no
+  authentication. Binding it to `0.0.0.0` exposes those backends, including
+  their file read and write APIs, to every device on the network.
 
 ### Optional: Run as an Electron Desktop App
 
@@ -378,15 +379,15 @@ npm run electron:build
 
 > [!NOTE]
 > The Electron runtime binary is fetched lazily the **first time Electron runs**
-> (`npm run electron:dev` / `electron:preview`). Behind a proxy, the first launch
-> needs the proxy variables `ELECTRON_GET_USE_PROXY=true` and
-> `GLOBAL_AGENT_HTTPS_PROXY=<proxy>` in addition to the usual
-> `HTTP_PROXY` / `HTTPS_PROXY`. The `npm run electron:build` downloads
-> its own copy via electron-builder and honors the standard `HTTPS_PROXY`.
+  (`npm run electron:dev` / `electron:preview`). Behind a proxy, the first launch
+  needs the proxy variables `ELECTRON_GET_USE_PROXY=true` and
+  `GLOBAL_AGENT_HTTPS_PROXY=<proxy>` in addition to the usual
+  `HTTP_PROXY` / `HTTPS_PROXY`. The `npm run electron:build` downloads
+  its own copy via electron-builder and honors the standard `HTTPS_PROXY`.
 
-## Step 6: Access the UI
+## Step 7: Access the UI
 
-After starting the frontend you can open the Smart Classroom UI in a browser
+After starting the frontend, you can open the Smart Classroom UI in a browser
 (or, if you used `npm run electron:dev`, in the Electron desktop window
 that opens automatically):
 
@@ -422,7 +423,7 @@ the port, adjust the URL accordingly.
 
   2. Rerun only Step 1, option D. If the virtual environment already exists, rerun the required pip commands.
 
-- **Application crash during bring-up on Intel® Core™ Ultra Series 3 and Intel® Core™ Series 3 (WCL) processors without any error indication:** Sometimes OpenVINO™ GenAI models may crash on newer hardware. Try running the model on CPU by setting `device: CPU` under `models.text_gen` in `config.yaml`.
+- **Application crash during bring-up on Intel® Core™ Ultra Series 3 and Intel® Core™ Series 3 processors without any error indication:** Sometimes OpenVINO™ GenAI models may crash on newer hardware. Try running the model on CPU by setting `device: CPU` under `models.text_gen` in `config.yaml`.
 
 - **Tokenizer load issue:**
 
@@ -434,7 +435,7 @@ the port, adjust the URL accordingly.
 
   Delete the models folder from `education-ai-suite/smart-classroom/Windows/models` and try again.
 
-- If you see below error while running dls setup script,
+- If you see the following error while running the DL Streamer setup script:
 
   ```text
   .\setup_dls_env.ps1
@@ -448,16 +449,17 @@ the port, adjust the URL accordingly.
   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
   ```
 
-- **Error: `CL_OUT_OF_RESOURCES`** during summarization of longer audio inputs
+- **Error: `CL_OUT_OF_RESOURCES`** during summarization of longer audio inputs:
   Summarization of longer transcripts may require additional GPU memory. If this error occurs, increase the GPU memory allocation in the **Intel® Graphics Software** application under the **Graphics** tab before rerunning the workflow.
+
   ![GPU Troubleshooting](./_assets/troubleshooting-gpu.png)
 
 ### Known Issues
 
-- **Manual Video File Path Input**: In web browser, users are required to manually specify the path to video files from their local system in the base directory input. It is recommended to use Electron desktop app for seamless operation.
-- **Live Video Monitoring Timeout**: Live video monitoring sessions will automatically stop after 45 minutes if the user does not reload the page to start a new session.
-- **Stream End Notification**: Once the video streaming ends, the user will see a "Stream not found" message on the screen, indicating that the stream has concluded.
-- **Do Not Reload During Active Streaming**: Users should not reload the page while the stream is active. Reloading the page will terminate the session, and the user will lose the current stream. Wait until the "Stream not found" notification appears on the screen before reloading.
+- **Manual Video File Path Input**: In a web browser, you must manually specify the path to video files from your local system in the base directory input. Using the Electron desktop app is recommended for seamless operation.
+- **Live Video Monitoring Timeout**: Live video monitoring sessions stop automatically after 45 minutes unless you reload the page to start a new session.
+- **Stream End Notification**: When video streaming ends, a "Stream not found" message appears on the screen, indicating that the stream has concluded.
+- **Do Not Reload During Active Streaming**: Do not reload the page while the stream is active. Reloading terminates the session, and you lose the current stream. Wait until the "Stream not found" notification appears before reloading.
 - **Video Ready Notification**: If the URL is configured in the settings, the notification will display "Video Ready" unless the screen is reloaded. Reloading the screen will reset the session and the notification.
 
 ## Uninstall the Application
@@ -466,21 +468,12 @@ To uninstall the application, follow these steps:
 
 1. **Delete the Python virtual environment folder:** \
    Navigate to the directory and remove \
-  *education-ai-suite/smart-classroom/smartclassroom*. \
-  For grading model conversion environment (if created): *education-ai-suite/smart-classroom/Windows/components/grading/providers/layout_detection_service/venv_convert*.
+   *education-ai-suite/smart-classroom/smartclassroom*. \
+   For the grading model conversion environment (if created): *education-ai-suite/smart-classroom/Windows/components/grading/providers/layout_detection_service/venv_convert*.
 2. **Remove the models directory:**
-  Remove the models folder located under *education-ai-suite/smart-classroom/Windows*.
+   Remove the models folder located under *education-ai-suite/smart-classroom/Windows*.
 3. **Remove the content search database:**
-  Remove uploaded files, vector database and upload record at *education-ai-suite/smart-classroom/Windows/content_search/data*.
-
-<!--hide_directive
-:::{toctree}
-:hidden:
-
-./get-started/system-requirements.md
-
-:::
-hide_directive-->
+   Remove uploaded files, the vector database, and the upload record at *education-ai-suite/smart-classroom/Windows/content_search/data*.
 
 ## Learn More
 

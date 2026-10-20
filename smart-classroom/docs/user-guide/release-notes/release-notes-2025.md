@@ -10,7 +10,7 @@
 - **Room View Tab**: Displays live classroom video with captions and engagement metrics.
 - **Board Captures Tab**: Chronological snapshots of smart board content.
 - **Mind Map Tab**: Keyword-indexed graph of class content for visual learning.
-- **Class Engagement Panel**: Video-based engagement scoring for students
+- **Class Engagement Panel**: Video-based engagement scoring for students.
 
 ## Release EAS-2025.2.0
 
