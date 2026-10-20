@@ -98,7 +98,7 @@ def write_transcript_files(
             if display == LABEL_TEACHER:
                 teacher_lines.append(f"[{s}-{e}] {text}")
             full_updated_lines.append(f"{display}: {text}")
-            full_labeled_ts_lines.append(f"{display}: [{s}-{e}] {text}")
+            full_labeled_ts_lines.append(f"[{s}-{e}] {display}: {text}")
             full_timestamped_lines.append(f"[{s}-{e}] {text}")
 
         StorageManager.save(str(SessionPaths.transcript_path(session_id)), "\n".join(full_updated_lines) + "\n", append=False)

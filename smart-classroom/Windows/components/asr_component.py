@@ -326,7 +326,7 @@ class ASRComponent(PipelineComponent):
                             speaker_label = spk
 
                     full_updated_lines.append(f"{speaker_label}: {text}")
-                    full_labeled_ts_lines.append(f"{speaker_label}: [{start}-{end}] {text}")
+                    full_labeled_ts_lines.append(f"[{start}-{end}] {speaker_label}: {text}")
                     full_timestamped_lines.append(f"[{start}-{end}] {text}")
 
 
