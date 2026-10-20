@@ -26,8 +26,8 @@ To learn more on partial cloning, check the [Repository Cloning guide](https://d
 ```bash
 git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/education-ai-suite.git
 cd education-ai-suite
-git sparse-checkout set smart-classroom
-cd smart-classroom
+git sparse-checkout set smart-classroom/Windows
+cd smart-classroom/Windows
 ```
 
 ---
@@ -78,8 +78,8 @@ The backend cannot start until the Python environment exists.
 ### Step 3: Review the Settings
 
 **Get started** shows the settings most people change. The **Configuration** screen has
-the full list from `config.yaml`, `runtime_config.yaml` and `.proxy-config`, grouped and
-searchable. Saving a change while the services are running offers a restart.
+the full list from `config.yaml` and `.proxy-config`, grouped and searchable. Saving a
+change while the services are running offers a restart.
 
 > [!NOTE]
 > Speaker diarization (identifying who is speaking) is optional and requires a
@@ -96,7 +96,7 @@ The backend starts automatically once setup is complete, unless you passed
 |--------|--------------|
 | **Get started** | Overview of what is ready, what is missing, and the settings most people change |
 | **Setup** | Prerequisite checks plus the Python environment and model preparation |
-| **Configuration** | Edit `config.yaml`, `runtime_config.yaml` and `.proxy-config` |
+| **Configuration** | Edit `config.yaml` and `.proxy-config` |
 | **Services** | Start / stop / restart the backend and watch live logs for it and every child service |
 
 ---

@@ -104,10 +104,10 @@ If port 9011 is occupied by a non-Python process, kill it and restart the backen
 
 ## 5. Read backend logs
 
-The backend logs to `smart-classroom/content_search/logs/`. Read recent lines:
+The backend logs to `smart-classroom/Windows/content_search/logs/`. Read recent lines:
 
 ```powershell
-$logDir = "smart-classroom\content_search\logs"
+$logDir = "smart-classroom\Windows\content_search\logs"
 if (Test-Path $logDir) {
     Get-ChildItem $logDir -Filter "*.log" |
         Sort-Object LastWriteTime -Descending |
@@ -164,7 +164,7 @@ is running.
 | `fastapi`/`langchain` missing in venv | Incomplete setup | Run `sc-setup` |
 | Port 9011 occupied by non-Python process | Stale process | Kill PID (step 4) and restart backend |
 | `flutter doctor` shows `[✗] Windows` | Visual Studio / SDK missing | Install Visual Studio 2022 with "Desktop development with C++" workload |
-| LLM service sub-health degraded | Model endpoint not configured | Check `smart-classroom/content_search/` config files for LLM URL/API key |
+| LLM service sub-health degraded | Model endpoint not configured | Check `smart-classroom/Windows/content_search/` config files for LLM URL/API key |
 
 ---
 
