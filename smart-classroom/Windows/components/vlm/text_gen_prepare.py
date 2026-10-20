@@ -485,14 +485,17 @@ def ensure_dflash_target(target_dir: Path, draft_dir: Path) -> Path:
 
     derived = target_dir.with_name(target_dir.name + "-dflash")
     source_hash = sha256_file(xml_path)
+    layer_ids = validate_dflash_pair(target_dir, draft_dir, 1)
 
     def current() -> bool:
+        # The annotation names the drafter's layers: another drafter needs a new one.
         stamp = _read_json(derived / ".derived.json")
-        return stamp.get("source_xml_sha256") == source_hash and (derived / xml_path.name).is_file()
+        return (stamp.get("source_xml_sha256") == source_hash
+                and stamp.get("target_layer_ids") == layer_ids
+                and (derived / xml_path.name).is_file())
 
     if current():
         return derived
-    layer_ids = validate_dflash_pair(target_dir, draft_dir, 1)
     with ArtifactLock(derived):
         if current():  # another start built it while this one waited
             return derived

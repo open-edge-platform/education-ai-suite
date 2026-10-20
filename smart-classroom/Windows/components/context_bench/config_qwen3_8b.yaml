@@ -1,0 +1,113 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Qwen3-VL-8B-Instruct (the application's default text_gen model), plain generation only:
+# paged attention versus the stateful pipeline. Text-only: the VLM export is driven through
+# VLMPipeline with text prompts; image handling is not measured.
+#
+#   .\components\context_bench\run_benchmark.ps1 --config components/context_bench/config_qwen3_8b.yaml
+#   ... --list-profiles                       # the plan below; loads nothing
+#   ... --weight-format int8                  # the INT8 artifact, same profiles and steps
+#   ... --accuracy
+#
+# TEST STEPS. Every case below is one child process: load the model, run the warm-up(s), then
+# the measured generations, while RAM/GPU memory are sampled. IDs follow execution order, row
+# by row, so each task runs on every profile back to back under the same thermal conditions.
+# CLI filters (--profiles, --contexts, --throughput-task) renumber the steps; --list-profiles
+# prints the exact plan, with its IDs, before anything loads.
+#
+# Throughput run (default): 4 cases, each 1 warm-up + 3 measured generations of up to 1024
+# tokens (EOS respected), back to back.
+#
+#   Context       Task              | paged_min  stateful
+#   8,000 tokens  summary_2s        | c01        c02
+#   8,000 tokens  classroom_summary | c03        c04
+#
+#   Context   a synthetic classroom transcript, then the task, 8,000 rendered tokens in total
+#   Task      summary_2s         two-sentence summary of the transcript (~45 tokens)
+#             classroom_summary  the application's summarizer request (prompts/summarizer;
+#                                language and mode from config.yaml), a long Markdown summary
+#   Profile   paged_min  continuous-batching (paged attention) pipeline, runtime-managed pool
+#             stateful   stateful pipeline: one SDPA prefill, KV cache as model state; the
+#                        construction serving uses for this model (no scheduler config)
+#
+# Accuracy run (--accuracy): 2 cases replace the throughput cases, one per profile:
+#
+#   Context       Task     | paged_min  stateful
+#   8,000 tokens  accuracy | c01        c02
+#
+#   accuracy  1 warm-up + 32 probes (`accuracy` below): 28 RULER retrieval probes scored
+#             against planted ground truth, and 4 generation probes (summary, fact_sheet)
+#             scored against paged_min's answer to the identical prompt.
+#
+# Artifacts (prepared by the serving workflow, never downloaded here) are derived from
+# `models_base_path` and the weight format, so --weight-format selects the artifact:
+#   models/openvino/Qwen3-VL-8B-Instruct/int4   (OpenVINO/Qwen3-VL-8B-Instruct-int4-ov)   default
+#   models/openvino/Qwen3-VL-8B-Instruct/int8   (OpenVINO/Qwen3-VL-8B-Instruct-int8-ov)   --weight-format int8
+# Results of both go under output_dir; each report's header names the weights it ran.
+#
+# No speculative profile: speculative decoding for this model requires its own qualified
+# profile. Qwen3-VL-8B is a dense full-attention model (36 layers, 8 KV heads), so the KV
+# estimate needs no linear-attention state and the Instruct chat template has no thinking
+# mode to disable.
+
+model:
+  provider: openvino
+  device: GPU
+  weight_format: int4
+  models_base_path: models
+
+benchmark:
+  models: [Qwen3-VL-8B-Instruct]
+  context_tokens: [8000]
+  # A ceiling, EOS respected: summary_2s stops at ~45 tokens, and 1024 lets
+  # classroom_summary's long Markdown answer finish instead of being cut off at 512.
+  output_tokens: 1024
+  warmup: 1
+  iterations: 3
+  throughput_task: [summary_2s, classroom_summary]
+  timeout_sec: 5400
+  max_system_memory_pct: 100
+  gpu_memory_budget_gb: 59
+  cache_dir: null
+  output_dir: monitoring/executionlogs/context_bench/qwen3_8b
+
+# Read only with --accuracy; the same suites as the Qwen3.6/3.8 reference configurations.
+accuracy:
+  suites: [retrieval, generation]
+  baseline_profile: paged_min
+  seed: 20260917
+  embedding_model: sentence-transformers/all-mpnet-base-v2
+  retrieval:
+    tasks: [niah_single, niah_multikey, niah_multivalue, niah_multiquery, vt, cwe, fwe, qa]
+    depths: [0.0, 0.5, 1.0]
+    samples: 2
+    output_tokens: 64
+    options:
+      niah_multikey: {num_distractors: 3}
+      niah_multivalue: {num_values: 4}
+      niah_multiquery: {num_queries: 4}
+      vt: {chain_length: 3, num_chains: 3}
+      cwe: {num_target_words: 10}
+      fwe: {top_k: 3}
+  generation:
+    tasks: [summary, fact_sheet]
+    depths: [0.5]
+    samples: 2
+    output_tokens: 256
+    options:
+      fact_sheet: {num_facts: 6}
+
+profiles:
+  - name: paged_min
+    ov: &ov_qwen3_8b
+      GPU_ENABLE_LARGE_ALLOCATIONS: "YES"
+      KV_CACHE_PRECISION: f16
+    scheduler:
+      max_num_batched_tokens: 65536
+      max_num_seqs: 1
+      enable_prefix_caching: false
+
+  # No scheduler: one SDPA prefill over the whole context, KV cache as model state.
+  - name: stateful
+    ov: *ov_qwen3_8b

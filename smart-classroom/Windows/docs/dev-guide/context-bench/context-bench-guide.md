@@ -31,6 +31,9 @@ application's `requirements.txt` pins everything it needs. Then:
 
 # Accuracy
 .\components\context_bench\run_benchmark.ps1 --profiles paged_min dflash_k7 --contexts 8000 --accuracy --accuracy-tasks niah_single fact_sheet --accuracy-depths 0.5 --accuracy-samples 1
+
+# All four INT4 models, performance and accuracy, one Markdown report (see Cross-model evaluation)
+.\components\context_bench\run_evaluation.ps1 --quick
 ```
 
 The launcher forwards every argument to `python -m components.context_bench.benchmark` using
@@ -62,10 +65,14 @@ files. Missing files are reported per case as `missing_ir` with a hint.
 | `config_qwen3.6_35b.yaml` (default) | Qwen3.6-35B-A3B INT4, `models/openvino/Qwen3.6-35B-A3B/int4` | `paged_min`, `dflash_k3/5/7/15` (draft `models/openvino/Qwen3.6-35B-A3B-DFlash/int4-lmhead`) | 35 cases: contexts 0 and 8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30 s gap. `--accuracy`: 5 cases |
 | `config_qwen3.8_27b.yaml` | Qwen3.8-27B INT8 (`--weight-format int4` for INT4), `models/openvino/Qwen3.8-27B/<weight_format>` | `paged_min` (plain only) | 1 case: 8000; `summary_2s`; 64 tokens; no gap. `--accuracy`: 1 case |
 | `config_qwen3.5_9b.yaml` | Qwen3.5-9B INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3.5-9B/<weight_format>` | `paged_min`, `stateful` (plain only) | 4 cases: 8000; `summary_2s`, `classroom_summary`; 1024 tokens; no gap. `--accuracy`: 2 cases |
+| `config_qwen3_8b.yaml` | Qwen3-VL-8B-Instruct INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3-VL-8B-Instruct/<weight_format>` | `paged_min`, `stateful` (plain only) | 4 cases: 8000; `summary_2s`, `classroom_summary`; 1024 tokens; no gap. `--accuracy`: 2 cases |
 
 One config per model: the weight formats differ only in the artifact, so `--weight-format`
 selects it (the path is derived) rather than a second, otherwise identical file. The accuracy
-sections are identical in all three and match the reference configuration.
+sections are identical in all four and match the reference configuration.
+`config_qwen3_8b.yaml` benchmarks the application's default `text_gen` model through its VLM
+export (`openvino_language_model.xml`, so `VLMPipeline`) with text prompts only; `stateful`
+is the construction serving uses for it (no scheduler config).
 
 ### Test steps (c01, c02, ...)
 
@@ -113,9 +120,18 @@ setting); `8,000 tokens` is a synthetic classroom transcript followed by the tas
   8,000 tokens  classroom_summary | c03        c04
 ```
 
+`config_qwen3_8b.yaml` -- the same plan as Qwen3.5-9B: 1 warm-up + 3 measured generations, up
+to 1024 tokens, back to back.
+
+```text
+  Context       Task              | paged_min  stateful
+  8,000 tokens  summary_2s        | c01        c02
+  8,000 tokens  classroom_summary | c03        c04
+```
+
 With `--accuracy` the throughput cases are replaced by one accuracy case per profile at every
 context with a transcript (context 0 has nowhere to plant a fact): `8,000 tokens | accuracy`,
-`c01` ... one per profile (5, 1 and 2 cases). Each runs 1 warm-up and 32 probes: 28 RULER
+`c01` ... one per profile (5, 1, 2 and 2 cases). Each runs 1 warm-up and 32 probes: 28 RULER
 retrieval probes scored against planted ground truth and 4 generation probes scored against
 the baseline profile's answer to the identical prompt.
 
@@ -139,7 +155,8 @@ directory; the IR's actual weight compression (NNCF rt_info) is always reported 
 mismatch is flagged.
 
 Speculative decoding is benchmarked only where serving supports it: DFlash on
-Qwen3.6-35B-A3B INT4 with the z-lab drafter. The Qwen3.8 and Qwen3.5 configs are plain only.
+Qwen3.6-35B-A3B INT4 with the z-lab drafter. The Qwen3.8, Qwen3.5 and Qwen3-VL configs are
+plain only.
 
 ### DFlash artifacts
 
@@ -155,6 +172,89 @@ does). For an older export without it, serving derives
 `models/openvino/Qwen3.6-35B-A3B/int4-dflash` (same weights, annotated XML); the benchmark
 never modifies the target, so preflight fails with `missing_ir` until `model_dirs` points
 there.
+
+## Cross-model evaluation
+
+`run_evaluation.ps1` (`python -m components.context_bench.evaluate`) measures performance and
+accuracy of the four INT4 text-generation models under one shared workload and writes a single
+Markdown report. It drives `benchmark` once per model and suite, reusing the configs above, so
+every number in the report comes from a normal `results.json`.
+
+| Model key | Config | Profiles |
+| --- | --- | --- |
+| `qwen3-vl-8b` | `config_qwen3_8b.yaml` | `paged_min` |
+| `qwen3.5-9b` | `config_qwen3.5_9b.yaml` | `paged_min` |
+| `qwen3.6-35b-a3b` | `config_qwen3.6_35b.yaml` | `paged_min` (DFlash off) and `dflash_k3` (DFlash on) |
+| `qwen3.8-27b` | `config_qwen3.8_27b.yaml` | `paged_min` |
+
+| Suite | Workload (identical for every model) |
+| --- | --- |
+| `throughput` | `code`, `math`, `chat` at context 0 and 8,000 tokens, `summary_2s` at 8,000; up to 512 tokens; 1 warm-up + 3 measured |
+| `classroom` | `classroom_summary` (the application's summarizer request) at 8,000 tokens; up to 1024 tokens; 1 warm-up + 3 measured |
+| `accuracy` | `--accuracy` at 8,000 tokens: 28 RULER retrieval probes and 4 generation probes per profile |
+
+```powershell
+# Every plan, validated by the benchmark's own --list-profiles; loads nothing
+.\components\context_bench\run_evaluation.ps1 --list-profiles
+
+# Smoke test of the whole pipeline (no warm-up, one iteration, 1 sample at depth 0.5)
+.\components\context_bench\run_evaluation.ps1 --quick
+
+# The full evaluation (all models, all suites)
+.\components\context_bench\run_evaluation.ps1
+
+# Subsets and variations
+.\components\context_bench\run_evaluation.ps1 --models qwen3.6-35b-a3b --dflash-k 3 7
+.\components\context_bench\run_evaluation.ps1 --models qwen3-vl-8b qwen3.5-9b --suites throughput accuracy
+.\components\context_bench\run_evaluation.ps1 --iteration-gap 30      # burst instead of sustained
+
+# Re-render the Markdown report of an existing evaluation
+.\components\context_bench\run_evaluation.ps1 --report monitoring/executionlogs/context_bench/evaluation/<timestamp>
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--models K ...` | Model keys from the table above (default: all four) |
+| `--suites S ...` | `throughput`, `classroom`, `accuracy` (default: all three) |
+| `--dflash-k K ...` | DFlash windows for Qwen3.6-35B-A3B; each must be a `dflash_k<K>` profile of its config (3, 5, 7, 15). Default 3, the window serving uses |
+| `--weight-format` | Weights of every model (default `int4`); selects the derived artifact directory |
+| `--device` | Override every config's device (`CPU`, `GPU`, `GPU.1`) |
+| `--iteration-gap S` | Untimed idle before each measured generation (default 0 = sustained load for every model) |
+| `--quick` | Smoke test: zero warm-up, one measured iteration, `summary_2s` only at 128 tokens, reduced accuracy plan |
+| `--output-dir` | Evaluation base directory (default `monitoring/executionlogs/context_bench/evaluation`) |
+| `--list-profiles` | Print each invocation's plan and exit |
+| `--report DIR` | Only re-render `evaluation_report.md` from `DIR/evaluation.json` |
+
+DFlash off and on run in the same invocation, so each DFlash case has its matched `paged_min`
+baseline (same artifact, prompt hash, task, device and scheduler) and the speedup isolates the
+drafter. The artifacts must already be prepared (see [DFlash artifacts](#dflash-artifacts));
+a model that is not prepared finishes its cases as `missing_ir` with a preparation hint, the
+other models still run, and the report lists it under failures. The evaluation exits 0 only
+when every invocation exited 0; Ctrl-C stops after the benchmark has cleaned up and checkpointed,
+and the report then covers the finished runs (exit 130).
+
+Each evaluation writes `<output-dir>/<UTC-timestamp>/`:
+
+- `evaluation.json` -- the manifest: options, and per invocation its arguments, exit code,
+  duration and benchmark run directory.
+- `<model>/<suite>/console.log` and `<model>/<suite>/<run-id>/{results.json,report.txt}` --
+  the benchmark's own console output and evidence.
+- `evaluation_report.md` -- rendered from those `results.json` files: hardware and runtime,
+  workload, runs (with links to each `report.txt`), throughput and classroom-summary tables
+  (TTFT, TPOT, decode/prefill tok/s, generation time, peak GPU/RAM) with a model-by-task
+  comparison on `paged_min`, the DFlash off-vs-on table (decode and total-call speedup,
+  acceptance length, pass cost, TTFT, whether the greedy output stayed identical), retrieval
+  accuracy per task and generation fact coverage plus DFlash fidelity against `paged_min`,
+  and every failed, partial or not-run case.
+
+The full plan is 12 invocations (45 cases) and runs for hours on an iGPU: the 27B dense model
+and the 512-token decodes dominate. Start with `--quick`, then run the full plan, or a subset
+with `--models` / `--suites`, when the machine is otherwise idle (memory is sampled
+system-wide). On an iGPU the GPU allocations are system memory: on an idle 64 GiB Arc 140T
+machine, Qwen3.6-35B-A3B with the DFlash drafter peaked at about 38 GB committed. The manifest
+and every `results.json` are checkpointed as the sweep runs, so if the evaluation process is
+ended before it writes `evaluation_report.md`, `--report <evaluation dir>` renders it from what
+was recorded.
 
 ## Configuration reference
 

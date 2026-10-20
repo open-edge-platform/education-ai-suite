@@ -123,6 +123,22 @@ class TestReservations(unittest.TestCase):
         self.assertAlmostEqual(capped - plain, per_token * 4096 / GIB, places=6)
         self.assertIsNone(estimate_cache(DENSE, 0, {}, 32000, draft_config=None, dflash=True)["gib"])
 
+    def test_draft_sliding_layers_are_counted_and_only_they_are_window_capped(self):
+        # The shipped Qwen3.6 DFlash draft: five sliding-window layers and one full layer.
+        draft = {"num_hidden_layers": 6, "num_key_value_heads": 8, "head_dim": 128,
+                 "sliding_window": 4096,
+                 "layer_types": ["sliding_attention"] * 5 + ["full_attention"]}
+        per_layer = 2 * 8 * 128 * 2
+        detail = estimate_cache(DENSE, 0, {}, 8516, draft_config=draft, dflash=True)
+        self.assertEqual(detail["speculative_bytes"], per_layer * (8516 + 5 * 4096))
+        # Below the window every layer holds every token.
+        self.assertEqual(sizing.draft_kv_bytes(draft, 1000), per_layer * 6 * 1000)
+        for bad in ({**draft, "layer_types": ["sliding_attention"] * 5},
+                    {**draft, "layer_types": ["linear_attention"] * 5 + ["full_attention"]}):
+            with self.subTest(layer_types=bad["layer_types"]):
+                self.assertIsNone(estimate_cache(DENSE, 0, {}, 8516, draft_config=bad,
+                                                 dflash=True)["gib"])
+
     def test_expected_kv_keeps_the_reference_shape(self):
         kv = estimate_cache(HYBRID, FIXED, {"KV_CACHE_PRECISION": "f16"}, 160000)["gib"]
         self.assertAlmostEqual(kv, (2 * 8 * 4 * 256 * 2 * 160000 + FIXED) / GIB)
@@ -323,7 +339,8 @@ class TestIrReads(unittest.TestCase):
 class TestShippedConfigs(unittest.TestCase):
     # One config per model; the weight formats each documents are selected with --weight-format.
     WEIGHTS = {"config_qwen3.6_35b.yaml": ("int4",), "config_qwen3.8_27b.yaml": ("int8", "int4"),
-               "config_qwen3.5_9b.yaml": ("int4", "int8")}
+               "config_qwen3.5_9b.yaml": ("int4", "int8"),
+               "config_qwen3_8b.yaml": ("int4", "int8")}
     CONFIGS = tuple(WEIGHTS)
 
     def _load(self, name, *argv):
@@ -437,6 +454,17 @@ class TestShippedConfigs(unittest.TestCase):
         self.assertTrue(all(not p["mtp"]["enabled"] for p in resolved["profiles"]))
         self.assertEqual([p["pipeline_mode"] for p in resolved["profiles"]],
                          [settings.PIPELINE_PAGED, settings.PIPELINE_STATEFUL])
+
+    def test_qwen3_vl_8b_config_is_plain_and_reads_the_vlm_export(self):
+        resolved = self._load("config_qwen3_8b.yaml")
+        self.assertEqual(resolved["models"], ("Qwen3-VL-8B-Instruct",))
+        self.assertTrue(all(not p["mtp"]["enabled"] for p in resolved["profiles"]))
+        self.assertEqual([p["pipeline_mode"] for p in resolved["profiles"]],
+                         [settings.PIPELINE_PAGED, settings.PIPELINE_STATEFUL])
+        # A dense model with its text architecture nested under text_config, as in the export.
+        config = {"text_config": {"num_hidden_layers": 36, "num_key_value_heads": 8,
+                                  "head_dim": 128}}
+        self.assertEqual(sizing.theoretical_kv_bytes_per_token(config), 36 * 2 * 8 * 128 * 2)
 
     def test_profiles_that_resolve_identically_are_refused(self):
         with self.assertRaisesRegex(settings.ConfigError, "resolve to the same configuration"):
