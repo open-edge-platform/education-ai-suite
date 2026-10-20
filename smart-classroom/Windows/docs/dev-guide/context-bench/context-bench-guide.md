@@ -63,13 +63,19 @@ files. Missing files are reported per case as `missing_ir` with a hint.
 | Config | Model / precision | Profiles | Default run |
 | --- | --- | --- | --- |
 | `config_qwen3.6_35b.yaml` (default) | Qwen3.6-35B-A3B INT4, `models/openvino/Qwen3.6-35B-A3B/int4` | `paged_min`, `dflash_k3/5/7/15` (draft `models/openvino/Qwen3.6-35B-A3B-DFlash/int4-lmhead`) | 35 cases: contexts 0 and 8000; `code`, `math`, `chat`, `summary_2s`; 512-token ceiling; 30 s gap. `--accuracy`: 5 cases |
-| `config_qwen3.8_27b.yaml` | Qwen3.8-27B INT8 (`--weight-format int4` for INT4), `models/openvino/Qwen3.8-27B/<weight_format>` | `paged_min` (plain only) | 1 case: 8000; `summary_2s`; 64 tokens; no gap. `--accuracy`: 1 case |
-| `config_qwen3.5_9b.yaml` | Qwen3.5-9B INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3.5-9B/<weight_format>` | `paged_min`, `stateful` (plain only) | 4 cases: 8000; `summary_2s`, `classroom_summary`; 1024 tokens; no gap. `--accuracy`: 2 cases |
-| `config_qwen3_8b.yaml` | Qwen3-VL-8B-Instruct INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3-VL-8B-Instruct/<weight_format>` | `paged_min`, `stateful` (plain only) | 4 cases: 8000; `summary_2s`, `classroom_summary`; 1024 tokens; no gap. `--accuracy`: 2 cases |
+| `config_qwen3.8_27b.yaml` | Qwen3.8-27B INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3.8-27B/<weight_format>` | `paged_min` (plain only) | 7 cases: same contexts, tasks, ceiling and gap. `--accuracy`: 1 case |
+| `config_qwen3.5_9b.yaml` | Qwen3.5-9B INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3.5-9B/<weight_format>` | `paged_min`, `stateful` (plain only) | 14 cases: same contexts, tasks, ceiling and gap. `--accuracy`: 2 cases |
+| `config_qwen3_8b.yaml` | Qwen3-VL-8B-Instruct INT4 (`--weight-format int8` for INT8), `models/openvino/Qwen3-VL-8B-Instruct/<weight_format>` | `paged_min`, `stateful` (plain only) | 14 cases: same contexts, tasks, ceiling and gap. `--accuracy`: 2 cases |
 
 One config per model: the weight formats differ only in the artifact, so `--weight-format`
-selects it (the path is derived) rather than a second, otherwise identical file. The accuracy
-sections are identical in all four and match the reference configuration.
+selects it (the path is derived) rather than a second, otherwise identical file. All four share
+the core settings of `config_qwen3.6_35b.yaml` -- INT4 weights on GPU, contexts 0 and 8,000,
+`throughput_task: [code, math, chat, summary_2s]`, a 512-token ceiling, 1 warm-up + 3 measured
+iterations, a 30 s iteration gap, the timeout and memory budgets, and an identical accuracy
+section that matches the reference configuration -- so a default run of each is directly
+comparable; a test keeps them aligned. Only the model, its output directory and its profiles
+differ: DFlash profiles (`dflash_k*`), `model_dirs` and `speculative_reference` exist only in
+the Qwen3.6 config.
 `config_qwen3_8b.yaml` benchmarks the application's default `text_gen` model through its VLM
 export (`openvino_language_model.xml`, so `VLMPipeline`) with text prompts only; `stateful`
 is the construction serving uses for it (no scheduler config).
@@ -105,28 +111,33 @@ setting); `8,000 tokens` is a synthetic classroom transcript followed by the tas
   8,000 tokens      summary_2s | c31        c32        c33        c34        c35
 ```
 
-`config_qwen3.8_27b.yaml` -- 1 warm-up + 3 measured generations, up to 64 tokens, back to back.
+The other three configs run the same rows with the same repetition, ceiling and gap; only the
+profile columns differ.
+
+`config_qwen3.8_27b.yaml`:
 
 ```text
-  Context       Task       | paged_min
-  8,000 tokens  summary_2s | c01
+  Context           Task       | paged_min
+  none (task only)  code       | c01
+  none (task only)  math       | c02
+  none (task only)  chat       | c03
+  8,000 tokens      code       | c04
+  8,000 tokens      math       | c05
+  8,000 tokens      chat       | c06
+  8,000 tokens      summary_2s | c07
 ```
 
-`config_qwen3.5_9b.yaml` -- 1 warm-up + 3 measured generations, up to 1024 tokens, back to back.
+`config_qwen3.5_9b.yaml` and `config_qwen3_8b.yaml` (the same grid for each model):
 
 ```text
-  Context       Task              | paged_min  stateful
-  8,000 tokens  summary_2s        | c01        c02
-  8,000 tokens  classroom_summary | c03        c04
-```
-
-`config_qwen3_8b.yaml` -- the same plan as Qwen3.5-9B: 1 warm-up + 3 measured generations, up
-to 1024 tokens, back to back.
-
-```text
-  Context       Task              | paged_min  stateful
-  8,000 tokens  summary_2s        | c01        c02
-  8,000 tokens  classroom_summary | c03        c04
+  Context           Task       | paged_min  stateful
+  none (task only)  code       | c01        c02
+  none (task only)  math       | c03        c04
+  none (task only)  chat       | c05        c06
+  8,000 tokens      code       | c07        c08
+  8,000 tokens      math       | c09        c10
+  8,000 tokens      chat       | c11        c12
+  8,000 tokens      summary_2s | c13        c14
 ```
 
 With `--accuracy` the throughput cases are replaced by one accuracy case per profile at every
@@ -178,7 +189,9 @@ there.
 `run_evaluation.ps1` (`python -m components.context_bench.evaluate`) measures performance and
 accuracy of the four INT4 text-generation models under one shared workload and writes a single
 Markdown report. It drives `benchmark` once per model and suite, reusing the configs above, so
-every number in the report comes from a normal `results.json`.
+every number in the report comes from a normal `results.json`. Its `throughput` suite is the
+configs' shared default grid restricted to the profiles below, but run back to back
+(`--iteration-gap 0`, sustained load) unless `--iteration-gap` says otherwise.
 
 | Model key | Config | Profiles |
 | --- | --- | --- |
@@ -288,10 +301,10 @@ back to plain generation.
 `config.yaml` for `app.language` and `models.summarizer.mode`, resolves the template with
 `load_prompt("summarizer", language, mode)`, renders with thinking disabled and applies
 `/no_think` exactly where the application's renderer does. Content is synthetic; an
-unresolvable template is a configuration error. Its answer needs about 1024 output tokens:
-the Qwen3.5-9B config sets that ceiling, and the Qwen3.6 default run leaves the task out (as
-the reference does) -- run it there with
-`--throughput-task classroom_summary --output-tokens 1024`.
+unresolvable template is a configuration error. Its answer needs about 1024 output tokens, so
+no config's default run includes it (512-token ceiling, as in the reference) -- run it with
+`--throughput-task classroom_summary --output-tokens 1024` on any config, or through the
+evaluation's `classroom` suite.
 
 ### Cache pools
 

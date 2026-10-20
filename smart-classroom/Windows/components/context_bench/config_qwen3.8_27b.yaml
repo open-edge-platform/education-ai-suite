@@ -1,12 +1,13 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
-# Qwen3.8-27B, plain generation only: the paged-attention baseline at 8K context.
+# Qwen3.8-27B, plain generation only: the paged-attention baseline.
 #
 #   .\components\context_bench\run_benchmark.ps1 --config components/context_bench/config_qwen3.8_27b.yaml
 #   ... --list-profiles                       # the plan below; loads nothing
-#   ... --weight-format int4                  # the INT4 artifact, same profiles and steps
+#   ... --weight-format int8                  # the INT8 artifact, same profiles and steps
 #   ... --accuracy
+#   ... --throughput-task classroom_summary --output-tokens 1024       # the app's own request
 #
 # TEST STEPS. Every case below is one child process: load the model, run the warm-up(s), then
 # the measured generations, while RAM/GPU memory are sampled. IDs follow execution order, row
@@ -14,14 +15,24 @@
 # CLI filters (--profiles, --contexts, --throughput-task) renumber the steps; --list-profiles
 # prints the exact plan, with its IDs, before anything loads.
 #
-# Throughput run (default): 1 case, 1 warm-up + 3 measured generations of up to 64 tokens
-# (EOS respected), back to back.
+# Throughput run (default): 7 cases, each 1 warm-up + 3 measured generations of up to 512
+# tokens (EOS respected), 30 s idle before each measured one.
 #
-#   Context       Task       | paged_min
-#   8,000 tokens  summary_2s | c01
+#   Context           Task       | paged_min
+#   none (task only)  code       | c01
+#   none (task only)  math       | c02
+#   none (task only)  chat       | c03
+#   8,000 tokens      code       | c04
+#   8,000 tokens      math       | c05
+#   8,000 tokens      chat       | c06
+#   8,000 tokens      summary_2s | c07
 #
-#   Context   a synthetic classroom transcript, then the task, 8,000 rendered tokens in total
-#   Task      summary_2s two-sentence summary of the transcript (~45 tokens)
+#   Context   none: the task prompt alone; 8,000 tokens: a synthetic classroom transcript,
+#             then the task, 8,000 rendered tokens in total.
+#   Task      code       a Python module with tests (HumanEval-like)
+#             math       six worked physics/arithmetic/algebra problems (GSM8K-like)
+#             chat       eight open-ended assistant requests (MT-Bench-like)
+#             summary_2s two-sentence summary of the transcript (~45 tokens; transcript only)
 #   Profile   paged_min  continuous-batching (paged attention) pipeline, runtime-managed pool
 #
 # Accuracy run (--accuracy): 1 case replaces the throughput case:
@@ -35,8 +46,8 @@
 #
 # Artifacts (prepared by the serving workflow, never downloaded here) are derived from
 # `models_base_path` and the weight format, so --weight-format selects the artifact:
-#   models/openvino/Qwen3.8-27B/int8   (OpenVINO/Qwen3.8-27B-int8-ov)   default
-#   models/openvino/Qwen3.8-27B/int4   (OpenVINO/Qwen3.8-27B-int4-ov)   --weight-format int4
+#   models/openvino/Qwen3.8-27B/int4   (OpenVINO/Qwen3.8-27B-int4-ov)   default
+#   models/openvino/Qwen3.8-27B/int8   (OpenVINO/Qwen3.8-27B-int8-ov)   --weight-format int8
 # Results of both go under output_dir; each report's header names the weights it ran.
 #
 # No speculative profile: speculative decoding for this model requires its own qualified
@@ -45,18 +56,27 @@
 model:
   provider: openvino
   device: GPU
-  weight_format: int8
+  weight_format: int4
   models_base_path: models
 
 benchmark:
   models: [Qwen3.8-27B]
-  context_tokens: [8000]
-  # Throughput decode length. Accuracy probes use the per-suite budgets under `accuracy`.
-  # throughput_task and iteration_gap_sec keep their defaults, as in the reference:
-  # summary_2s, back-to-back.
-  output_tokens: 64
+  # 0 = no transcript: code/math/chat run as standalone prompts; the summaries and the
+  # accuracy suites skip it. Positive values are the total rendered input-token target.
+  context_tokens: [0, 8000]
+  # Decode ceiling for every throughput task and the warm-up; EOS is respected. 512 lets
+  # math/code answers run past the first decode pass's one-time cost.
+  output_tokens: 512
   warmup: 1
   iterations: 3
+  # Untimed idle before each measured generation: the iGPU boosts after idle, so 30 s
+  # reports what an occasional classroom request sees (burst). --iteration-gap 0 measures
+  # sustained load.
+  iteration_gap_sec: 30
+  # The reference's four domains, as in config_qwen3.6_35b.yaml. classroom_summary (the
+  # application's summarizer request) is left out: at 512 tokens its long Markdown answer is
+  # cut off, so run it on its own with --output-tokens 1024 (see the usage lines above).
+  throughput_task: [code, math, chat, summary_2s]
   timeout_sec: 5400
   max_system_memory_pct: 100
   gpu_memory_budget_gb: 59

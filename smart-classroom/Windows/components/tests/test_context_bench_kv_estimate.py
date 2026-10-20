@@ -338,7 +338,8 @@ class TestIrReads(unittest.TestCase):
 
 class TestShippedConfigs(unittest.TestCase):
     # One config per model; the weight formats each documents are selected with --weight-format.
-    WEIGHTS = {"config_qwen3.6_35b.yaml": ("int4",), "config_qwen3.8_27b.yaml": ("int8", "int4"),
+    # The first label is the config's default.
+    WEIGHTS = {"config_qwen3.6_35b.yaml": ("int4",), "config_qwen3.8_27b.yaml": ("int4", "int8"),
                "config_qwen3.5_9b.yaml": ("int4", "int8"),
                "config_qwen3_8b.yaml": ("int4", "int8")}
     CONFIGS = tuple(WEIGHTS)
@@ -346,6 +347,20 @@ class TestShippedConfigs(unittest.TestCase):
     def _load(self, name, *argv):
         path = settings.TOOL_DIR / name
         return settings._load_settings(settings._parse_args(["--config", str(path), *argv]))
+
+    def test_every_config_shares_the_qwen36_core_settings(self):
+        """Same workload, repetition, budgets and default weights; only the model, its output
+        directory and its profiles differ (DFlash profiles exist only for Qwen3.6)."""
+        core = ("weight_format", "device", "context_tokens", "output_tokens", "warmup",
+                "iterations", "iteration_gap_sec", "throughput_tasks", "timeout_sec",
+                "max_system_memory_pct", "gpu_memory_budget_gb", "cache_dir")
+        expected = {k: self._load("config_qwen3.6_35b.yaml")[k] for k in core}
+        self.assertEqual(expected["throughput_tasks"], ("code", "math", "chat", "summary_2s"))
+        for name, labels in self.WEIGHTS.items():
+            with self.subTest(config=name):
+                resolved = self._load(name)
+                self.assertEqual({k: resolved[k] for k in core}, expected)
+                self.assertEqual(resolved["weight_format"], labels[0])
 
     def test_only_the_documented_configs_ship(self):
         shipped = sorted(p.name for p in settings.TOOL_DIR.glob("config_*.yaml"))
@@ -442,9 +457,6 @@ class TestShippedConfigs(unittest.TestCase):
             with self.subTest(weights=label):
                 resolved = self._load("config_qwen3.8_27b.yaml", "--weight-format", label)
                 self.assertEqual(resolved["weight_format"], label)
-                self.assertEqual((resolved["context_tokens"], resolved["output_tokens"],
-                                  resolved["iteration_gap_sec"]), ((8000,), 64, 0.0))
-                self.assertEqual(resolved["throughput_tasks"], ("summary_2s",))
                 self.assertEqual([(p["name"], p["pipeline_mode"], p["mtp"]["enabled"])
                                   for p in resolved["profiles"]],
                                  [("paged_min", settings.PIPELINE_PAGED, False)])
