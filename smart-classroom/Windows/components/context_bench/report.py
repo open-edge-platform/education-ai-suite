@@ -38,9 +38,8 @@ _MEMORY_LEGEND = (
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
-def _fmt(value, spec="{:.1f}") -> str:
-    value = metrics.finite_number(value)
-    return spec.format(value) if value is not None else "--"
+# The console formatter, shared so the live log and the report render a value identically.
+_fmt = metrics._f
 
 
 def _ttft_seconds(case: dict) -> str:
@@ -531,7 +530,7 @@ def _retrieval_section(cases: list, context: int, settings: dict) -> list:
     baseline_name = settings["accuracy"].get("baseline_profile")
     ordered = _ordered_cases(cases, accuracy.SUITE_RETRIEVAL)
     task_names = list(section["tasks"])
-    lines = _heading(f"{context:,} tokens -- RETRIEVAL ACCURACY (RULER)")
+    lines = _heading(f"{context_label(context)} -- RETRIEVAL ACCURACY (RULER)")
     lines += [
         "Cells are each task's own RULER score: share of planted items found, or "
         "intersection-over-union for the aggregation tasks (cwe/fwe) which must punish "
@@ -591,7 +590,7 @@ def _generation_section(cases: list, context: int, settings: dict,
     units = sorted({p.get("divergence_unit") for c in ordered for p in c.get("probes", [])
                     if p.get("divergence_unit")})
     unit = units[0] if len(units) == 1 else ("mixed units" if units else "tokens")
-    lines = _heading(f"{context:,} tokens -- GENERATION FIDELITY (who_what_benchmark)")
+    lines = _heading(f"{context_label(context)} -- GENERATION FIDELITY (who_what_benchmark)")
     lines += [
         "The model does the real classroom task at full answer length; each answer is scored "
         f"against the baseline profile `{baseline_name or '--'}`'s answer to the identical "

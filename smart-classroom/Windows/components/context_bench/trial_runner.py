@@ -37,13 +37,13 @@ be imported, and tested, without the OpenVINO stack.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import sys
 import time
 import traceback
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from queue import Empty
 
 from components.context_bench import metrics
@@ -53,6 +53,7 @@ from components.context_bench.context_builder import (
     build_probe_prompt,
 )
 from components.context_bench.tasks import word_list_ranking_holds
+from components.vlm.text_gen_profiles import DFLASH_TARGET_RT_INFO_KEY
 
 # How far an accuracy probe's prompt may land from the configured context, per tokenizer
 # count. Throughput stays exact; a retrieval verdict does not depend on one token, and the
@@ -115,7 +116,6 @@ ACK_RECORDED = "recorded"
 EVENTS = ("device", "loaded", "prompt", "iteration_start", "prefilled", "iteration", "probe",
           "done")
 
-DFLASH_TARGET_RT_INFO_KEY = "hidden_states_decoder_layers"
 LANGUAGE_MODEL_IRS = ("openvino_language_model.xml", "openvino_model.xml")
 
 PASS_PROFILE_FIELDS = ("first_decode_ms", "steady_pass_ms", "steady_tpot")
@@ -155,35 +155,11 @@ def sanitize_message(text, limit: int = 400, keep_newlines: bool = False) -> str
 # ---------------------------------------------------------------------------
 # Artifact checks (pure filesystem/XML reads)
 # ---------------------------------------------------------------------------
-def dflash_config(draft_model_dir: str) -> dict:
-    """The draft's `dflash_config` block from its config.json, or {} if it has none."""
-    try:
-        with open(os.path.join(draft_model_dir, "config.json"), encoding="utf-8") as config_file:
-            section = json.load(config_file).get("dflash_config")
-    except (OSError, AttributeError, ValueError):
-        return {}
-    return section if isinstance(section, dict) else {}
-
-
-def dflash_target_layer_ids(draft_model_dir: str) -> list:
-    layer_ids = dflash_config(draft_model_dir).get("target_layer_ids")
-    if (
-        not isinstance(layer_ids, list)
-        or not layer_ids
-        or any(not isinstance(layer_id, int) or isinstance(layer_id, bool) or layer_id < 0
-               for layer_id in layer_ids)
-        or len(set(layer_ids)) != len(layer_ids)
-    ):
-        raise ValueError(
-            "the dflash draft model must declare dflash_config.target_layer_ids in config.json "
-            "as a non-empty list of unique non-negative integers"
-        )
-    return layer_ids
-
-
-def dflash_block_size(draft_model_dir: str) -> int | None:
+def dflash_block_size(draft_model_dir) -> int | None:
     """The draft's trained block size (seed token included), or None if not declared."""
-    block_size = dflash_config(draft_model_dir).get("block_size")
+    from components.vlm.text_gen_prepare import dflash_settings
+
+    block_size = dflash_settings(Path(draft_model_dir)).get("block_size")
     if isinstance(block_size, int) and not isinstance(block_size, bool) and block_size > 1:
         return block_size
     return None
@@ -201,29 +177,14 @@ def language_model_ir(model_dir: str) -> str | None:
 def has_model_rt_info(xml_path: str, key: str) -> bool | None:
     """Whether the IR's model-level ``<rt_info>`` (a direct child of ``<net>``) has `key`.
 
-    Structured streaming parse; None when the XML cannot be read.
+    The serving preparation's own check; None when the XML cannot be read.
     """
-    depth = 0
-    in_model_rt_info = False
+    from components.vlm.text_gen_prepare import has_model_rt_info as serving_has_model_rt_info
+
     try:
-        # An explicit handle: returning from inside iterparse must not leave the file open.
-        with open(xml_path, "rb") as handle:
-            for event, elem in ET.iterparse(handle, events=("start", "end")):
-                if event == "start":
-                    depth += 1
-                    if depth == 2 and elem.tag == "rt_info":
-                        in_model_rt_info = True
-                    elif in_model_rt_info and depth == 3 and elem.tag == key:
-                        return True
-                else:
-                    if depth == 2 and elem.tag == "rt_info":
-                        in_model_rt_info = False
-                    depth -= 1
-                    if depth >= 2:
-                        elem.clear()
+        return serving_has_model_rt_info(xml_path, key)
     except (ET.ParseError, OSError):
         return None
-    return False
 
 
 DFLASH_METADATA_HINT = (
@@ -561,8 +522,6 @@ class _Channel:
                 raise OrchestrationError(f"control channel closed: {type(exc).__name__}") from exc
             if not isinstance(message, dict) or message.get("case_id") != self.case_id:
                 continue
-            if message.get("ack") == "abort":
-                raise OrchestrationError("the parent aborted the case")
             if message.get("iteration") == iteration and message.get("ack") == kind:
                 return
 

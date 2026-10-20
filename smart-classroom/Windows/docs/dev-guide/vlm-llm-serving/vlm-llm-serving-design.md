@@ -25,13 +25,13 @@ Keep one target per serving instance. Generating tool calls and consuming tool r
 
 | Feature | Current implementation |
 | --- | --- |
-| Model choice | Catalog in [text_gen_profiles.py](../../components/vlm/text_gen_profiles.py): Qwen3-VL-8B-Instruct (default) and Qwen3.5-9B INT4/INT8, Qwen3.6-35B-A3B INT4, Qwen3.8-27B INT4/INT8, all declared tool-capable. Models outside the catalog keep the existing export path. |
+| Model choice | Catalog in [text_gen_profiles.py](../../../components/vlm/text_gen_profiles.py): Qwen3-VL-8B-Instruct (default) and Qwen3.5-9B INT4/INT8, Qwen3.6-35B-A3B INT4, Qwen3.8-27B INT4/INT8, all declared tool-capable. Models outside the catalog keep the existing export path. |
 | Speculative decoding | DFlash for Qwen3.6-35B-A3B INT4 only. `dflash2` and `mtp` are accepted settings without a profile: plain generation under `auto`, a startup failure under `"on"`. |
-| First-run preparation | [text_gen_prepare.py](../../components/vlm/text_gen_prepare.py), run by the model owner at load (Section 5). |
-| Tool calling | [tool_calls.py](../../components/vlm/tool_calls.py) and [vlm_chat.py](../../api/vlm_chat.py) (Section 3). |
+| First-run preparation | [text_gen_prepare.py](../../../components/vlm/text_gen_prepare.py), run by the model owner at load (Section 5). |
+| Tool calling | [tool_calls.py](../../../components/vlm/tool_calls.py) and [vlm_chat.py](../../../api/vlm_chat.py) (Section 3). |
 | Controlled activation | Warm-up before readiness; `/health` reports `hub.text_gen.serving` (Section 6). |
 | Timing statistics | Stage and model-call records, `GET /processing-stats`, per-session logs and a report script: [processing-time-statistics.md](processing-time-statistics.md) (Section 7). |
-| `context_bench` | [components/context_bench](../../components/context_bench/): [context-bench-design.md](../context-bench/context-bench-design.md). |
+| `context_bench` | [components/context_bench](../../../components/context_bench/): [context-bench-design.md](../context-bench/context-bench-design.md). |
 
 ## 2. Model Profiles
 
@@ -99,7 +99,7 @@ Tool-call validation and failure handling from the design requirements:
 - The controller independently validates arguments, authorizes execution, and limits tool-loop iterations.
 - The controller treats tool results as untrusted conversation data; it does not authorize further actions.
 
-**Implemented** ([tool_calls.py](../../components/vlm/tool_calls.py), [vlm_chat.py](../../api/vlm_chat.py)):
+**Implemented** ([tool_calls.py](../../../components/vlm/tool_calls.py), [vlm_chat.py](../../../api/vlm_chat.py)):
 
 - A request uses the tool path when it has `tools` or `tool_choice`, or its history contains tool calls or results; any other request keeps the existing chat path (last user turn).
 - The supported JSON Schema subset covers `type`, `properties`, `required`, `items`, `enum`, `const`, `additionalProperties`, numeric, length and item bounds, `anyOf`/`oneOf`/`allOf`, `nullable` and annotations. Other keywords, such as `$ref` and `pattern`, are rejected with HTTP 400, as are malformed definitions, history or choices.
@@ -117,7 +117,7 @@ Tool-call validation and failure handling from the design requirements:
 - Continue to select the target with `vlm_name` and `weight_format`.
 - Do not rename existing keys or add top-level blocks.
 
-The following example uses the structure of [config.yaml](../../config.yaml), selects Qwen3.6 INT4 and enables DFlash, the implemented accelerated profile. It is an illustrative profile, not a snapshot of every installation's values. Preserve existing generation, admission, chunking and segmentation settings when merging it. Omitting `speculative` preserves plain generation. The shipped `config.yaml` keeps Qwen3-VL-8B-Instruct with `mode: "off"`. A DFlash2 selection (Qwen3.8 with `method: dflash2`, `draft_model: z-lab/Qwen3.8-27B-DFlash2`) is validated the same way, but runs plain under `auto` until its profile exists.
+The following example uses the structure of [config.yaml](../../../config.yaml), selects Qwen3.6 INT4 and enables DFlash, the implemented accelerated profile. It is an illustrative profile, not a snapshot of every installation's values. Preserve existing generation, admission, chunking and segmentation settings when merging it. Omitting `speculative` preserves plain generation. The shipped `config.yaml` keeps Qwen3-VL-8B-Instruct with `mode: "off"`. A DFlash2 selection (Qwen3.8 with `method: dflash2`, `draft_model: z-lab/Qwen3.8-27B-DFlash2`) is validated the same way, but runs plain under `auto` until its profile exists.
 
 ```yaml
 models:
@@ -193,7 +193,7 @@ Resolve and Validate:
 - The model-serving software never changes an explicitly selected method if it fails; in `mode: auto`, the software falls back to the plain generation method.
 - Unknown methods, contradictory sources, mismatched drafters, and out-of-range tuning fail the validation rather than triggering fallback. 
 - In `"off"` mode, the helper ignores dormant speculative settings and prepares only the target.
-- **Implemented:** `resolve_plan()` in [text_gen_profiles.py](../../components/vlm/text_gen_profiles.py) applies these rules before any model work, so invalid settings under `auto` or `"on"` fail at startup. Bare YAML `off`/`on` booleans are accepted for `mode`.
+- **Implemented:** `resolve_plan()` in [text_gen_profiles.py](../../../components/vlm/text_gen_profiles.py) applies these rules before any model work, so invalid settings under `auto` or `"on"` fail at startup. Bare YAML `off`/`on` booleans are accepted for `mode`.
 
 Prepare Artifacts:
 - The helper uses the catalog’s pinned Hub sources for first-run downloads. `draft_source: local` requires a non-empty `draft_model` directory and a null `draft_revision`; the helper validates the existing IR and does not download a replacement if it is missing. 
@@ -208,7 +208,7 @@ Tool definitions and selection are per-request API fields (`tools`, `tool_choice
 
 ## 5. Model Preparation
 
-The model owner prepares its artifacts when it loads the warm model, before it reports ready (`components/vlm/text_gen_prepare.py`, called from the VLM load). Every startup path therefore prepares the same way and needs no launcher step or switch: [start-smart-classroom.ps1](../../start-smart-classroom.ps1), the desktop app ([start-desktop-app.ps1](../../start-desktop-app.ps1)) and `python main.py`. The first start downloads or converts what is missing; later starts only validate. Dependent services already wait for the owner's `/health` before using the model. Request handlers never download or convert files.
+The model owner prepares its artifacts when it loads the warm model, before it reports ready (`components/vlm/text_gen_prepare.py`, called from the VLM load). Every startup path therefore prepares the same way and needs no launcher step or switch: [start-smart-classroom.ps1](../../../start-smart-classroom.ps1), the desktop app ([start-desktop-app.ps1](../../../start-desktop-app.ps1)) and `python main.py`. The first start downloads or converts what is missing; later starts only validate. Dependent services already wait for the owner's `/health` before using the model. Request handlers never download or convert files.
 
 1. **Select:** Resolve the target and speculative policy, method and source. Validate explicit settings, then select the compatible catalog profile. A recognized method without runtime/profile support means plain generation in `auto` or an actionable failure in `"on"`.
 2. **Prepare:** Download the target's catalog IR and, for Hub drafters, the pinned drafter files over HTTPS. For `local`, validate the specified IR directory without downloading a replacement drafter. For MTP, acquire the target's bundled head and metadata without downloading an unrelated external model. Use runtime-ready IR directly; convert downloaded sources only through the profile's qualified recipe. Network failures do not trigger unrelated export attempts.
@@ -256,7 +256,7 @@ If native cleanup cannot be confirmed, stop the model process before recovery. R
 
 Health reports the target, tool-call capability, requested/effective method, drafter identity or target-bundled head, warm-up result and sanitized fallback reason. Detailed revisions, tuning and runtime versions remain available for diagnostics without exposing private local paths. Do not log sensitive tool arguments or results by default.
 
-**Implemented** ([text_gen_vlm.py](../../components/vlm/text_gen_vlm.py)):
+**Implemented** ([text_gen_vlm.py](../../../components/vlm/text_gen_vlm.py)):
 
 - **Warm-up and fallback.** Readiness follows one 2-token greedy generation. Under `auto`, a failed load or warm-up with the drafter discards that in-process pipeline (released and garbage-collected) before the plain pipeline is warmed. The plain decision is kept for the process lifetime.
 - **Request policy.** While DFlash is active, requests are greedy with the profile's fixed draft window. A request with `temperature > 0` is rejected with HTTP 400 before generation, and image requests run on the same pipeline.
@@ -311,7 +311,7 @@ For every model/precision in Section 2, report call-latency mean/p50/p95, TTFT a
 
 ### Collection and Reporting
 
-Reuse existing timing sources while preserving their meanings: [ASR](../../components/asr_component.py) writes `performance.transcription_time`; [Summary](../../components/summarizer_component.py) writes `performance.summarizer_time`, `performance.summary_map_time`, `performance.ttft`, `performance.reduce_ttft` and `performance.tps`; [Report](../../components/report_generator/report_generator.py) writes collection, generation and total times. These are component timers, not isolated model benchmarks. ASR includes upstream input waiting and optional diarization; the report generation timer also includes rendering/persistence. [Hardware monitoring](../../monitoring/monitor.py) provides utilization, memory and power samples, not model-call latency. Keep these existing fields compatible and add the missing stage/call measurements at their owning boundaries.
+Reuse existing timing sources while preserving their meanings: [ASR](../../../components/asr_component.py) writes `performance.transcription_time`; [Summary](../../../components/summarizer_component.py) writes `performance.summarizer_time`, `performance.summary_map_time`, `performance.ttft`, `performance.reduce_ttft` and `performance.tps`; [Report](../../../components/report_generator/report_generator.py) writes collection, generation and total times. These are component timers, not isolated model benchmarks. ASR includes upstream input waiting and optional diarization; the report generation timer also includes rendering/persistence. [Hardware monitoring](../../../monitoring/monitor.py) provides utilization, memory and power samples, not model-call latency. Keep these existing fields compatible and add the missing stage/call measurements at their owning boundaries.
 
 Retain one record per stage attempt and model invocation so repeated calls, retries and failures are not overwritten by a last-value metric. Use monotonic clocks and finalize timers on success, failure or cancellation; for streaming, measure through generator completion, not generator creation. Separate client cancellation time from the end of any continuing native inference. Record status, counts and timing metadata only, with bounded retention; exclude prompts, transcripts, images, tool arguments/results, student identifiers, credentials and private paths.
 
@@ -325,12 +325,12 @@ See [processing-time-statistics.md](processing-time-statistics.md) for fields an
 
 | Level | Recorded now | Not yet recorded |
 | --- | --- | --- |
-| Workflow stages ([stage_tracker.py](../../utils/stage_tracker.py)) | `transcribe`, `va`, `summarize`, `mindmap`, `segmentation` and `report`: one record per attempt with status, UTC start/end and duration | Media preparation, content-search ingestion, and the retrieval/reranking breakdown of RAG Q&A |
+| Workflow stages ([stage_tracker.py](../../../utils/stage_tracker.py)) | `transcribe`, `va`, `summarize`, `mindmap`, `segmentation` and `report`: one record per attempt with status, UTC start/end and duration | Media preparation, content-search ingestion, and the retrieval/reranking breakdown of RAG Q&A |
 | Stages seen through model calls | `board_ocr`, `document_ocr`, and `/v1/chat/completions` callers named by the `X-SC-Stage` header (`qa`, `video_captioning`, `grading`, otherwise `chat_api`) | — |
-| Model calls ([processing_stats.py](../../utils/processing_stats.py)) | `text_gen`, `asr` and `ocr`: queue wait, latency, status, client cancellation, and for text generation TTFT, TPOT, token counts and DFlash accepted/drafted tokens | VA, embedding, reranking and grading layout/detection models; target-versus-drafter time inside a DFlash call |
+| Model calls ([processing_stats.py](../../../utils/processing_stats.py)) | `text_gen`, `asr` and `ocr`: queue wait, latency, status, client cancellation, and for text generation TTFT, TPOT, token counts and DFlash accepted/drafted tokens | VA, embedding, reranking and grading layout/detection models; target-versus-drafter time inside a DFlash call |
 | Startup | Preparation, load and warm-up seconds in `/health` | A per-run history |
 
-Records are held in memory (the latest 4,000 of each kind) for `GET /processing-stats` and appended to `<session>/logs/stage_events.jsonl` and `model_calls.jsonl`. They contain timing metadata only. [processing_stats_report.py](../../Scripts/processing_stats_report.py) turns either source into a Markdown report with a per-session timeline. That report:
+Records are held in memory (the latest 4,000 of each kind) for `GET /processing-stats` and appended to `<session>/logs/stage_events.jsonl` and `model_calls.jsonl`. They contain timing metadata only. [processing_stats_report.py](../../../Scripts/processing_stats_report.py) turns either source into a Markdown report with a per-session timeline. That report:
 - counts each stage attempt's own model calls, failed and cancelled included;
 - computes DFlash acceptance only from calls that report both counters.
 

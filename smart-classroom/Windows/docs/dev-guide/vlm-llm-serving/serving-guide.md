@@ -14,7 +14,7 @@ described in [context-bench-design.md](../context-bench/context-bench-design.md)
 ## Model Choice
 
 The target is selected as before, under `models.text_gen` in
-[config.yaml](../../config.yaml). Existing selections keep working unchanged.
+[config.yaml](../../../config.yaml). Existing selections keep working unchanged.
 
 | `vlm_name` | `weight_format` | Optional accelerator |
 | --- | --- | --- |
@@ -26,7 +26,7 @@ The target is selected as before, under `models.text_gen` in
 Pre-converted OpenVINO IR is downloaded on first start into
 `models/openvino/<model>/<weight_format>`. Other models keep the existing
 export path. The catalog lives in
-[components/vlm/text_gen_profiles.py](../../components/vlm/text_gen_profiles.py).
+[components/vlm/text_gen_profiles.py](../../../components/vlm/text_gen_profiles.py).
 
 ## Speculative Decoding
 
@@ -70,7 +70,7 @@ While a speculative pipeline is active:
 * Requests are greedy. A request with `temperature > 0` is rejected with HTTP 400
   instead of being changed. Classroom stages already generate greedily; grading
   does not (`vlm.temperature: 0.2` in
-  [components/grading/config.yaml](../../components/grading/config.yaml)), so set
+  [components/grading/config.yaml](../../../components/grading/config.yaml)), so set
   that to 0 before using grading with DFlash.
 * Image requests run on the same pipeline; image-encoding speedups are not
   claimed.
@@ -86,10 +86,10 @@ deleted. Preparation of the drafter is described in
 
 No model files need to exist beforehand. The backend prepares the configured
 model when it loads the warm VLM at startup, so
-[start-smart-classroom.ps1](../../start-smart-classroom.ps1), the desktop app
+[start-smart-classroom.ps1](../../../start-smart-classroom.ps1), the desktop app
 and `python main.py` all prepare the same way, with no extra switch. Code:
-[text_gen_prepare.py](../../components/vlm/text_gen_prepare.py) (preparation)
-and [text_gen_vlm.py](../../components/vlm/text_gen_vlm.py) (load and warm-up).
+[text_gen_prepare.py](../../../components/vlm/text_gen_prepare.py) (preparation)
+and [text_gen_vlm.py](../../../components/vlm/text_gen_vlm.py) (load and warm-up).
 
 ### First start
 

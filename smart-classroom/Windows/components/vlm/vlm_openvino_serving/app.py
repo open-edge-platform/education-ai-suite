@@ -242,7 +242,7 @@ async def chat_completions(request: ChatRequest):
             if isinstance(last_user_message.content, str):
                 prompt = last_user_message.content
             else:
-                for content in last_user_message.content:
+                for content in last_user_message.content or []:
                     if isinstance(content, MessageContentImageUrl):
                         image_urls.append(content.image_url.get("url"))
                     elif isinstance(content, MessageContentText):

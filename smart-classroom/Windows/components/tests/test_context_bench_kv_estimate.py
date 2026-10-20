@@ -18,7 +18,6 @@ from components.context_bench.sizing import (
     auto_cache_size_gb,
     check_ir_layout,
     estimate_cache,
-    expected_kv_gb,
     fixed_state_cache_bytes,
     ir_weight_precision,
     theoretical_kv_bytes_per_token,
@@ -125,7 +124,7 @@ class TestReservations(unittest.TestCase):
         self.assertIsNone(estimate_cache(DENSE, 0, {}, 32000, draft_config=None, dflash=True)["gib"])
 
     def test_expected_kv_keeps_the_reference_shape(self):
-        kv = expected_kv_gb(HYBRID, FIXED, {"KV_CACHE_PRECISION": "f16"}, 160000)
+        kv = estimate_cache(HYBRID, FIXED, {"KV_CACHE_PRECISION": "f16"}, 160000)["gib"]
         self.assertAlmostEqual(kv, (2 * 8 * 4 * 256 * 2 * 160000 + FIXED) / GIB)
 
 
@@ -213,9 +212,8 @@ class TestCasePreflight(unittest.TestCase):
     def test_infeasible_auto_is_an_error_not_a_clamp_or_backend_change(self):
         raw = self._scheduler(cache_size="auto")
         raw["benchmark"]["gpu_memory_budget_gb"] = 9
-        resolved, planned, _ = None, None, None
         with self.assertRaises(benchmark._Rejected) as caught:
-            resolved, planned, _ = self._preflight(raw)
+            self._preflight(raw)
         self.assertEqual(caught.exception.category, "cache_infeasible")
         # The requested profile is still paged with `auto`: nothing was removed.
         profile = _resolve(dict(raw, model={**raw["model"], "model_dirs": {"M": str(self.model_dir)}}))["profiles"][0]
@@ -385,7 +383,7 @@ class TestShippedConfigs(unittest.TestCase):
                                         for line in documented), kind)
 
     def test_the_guide_shows_each_default_plan(self):
-        guide = (settings.SC_ROOT / "docs" / "context-bench" /
+        guide = (settings.SC_ROOT / "docs" / "dev-guide" / "context-bench" /
                  "context-bench-guide.md").read_text(encoding="utf-8").splitlines()
         for name in self.CONFIGS:
             with self.subTest(config=name):

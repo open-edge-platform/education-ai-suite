@@ -39,7 +39,8 @@ SPECULATIVE_KEYS = frozenset({
 # Target rt_info GenAI reads to locate the hidden states a DFlash drafter consumes.
 DFLASH_TARGET_RT_INFO_KEY = "hidden_states_decoder_layers"
 
-_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+# Revisions become path components and pins; only full commit hashes qualify.
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class SpeculativeConfigError(ValueError):
@@ -304,11 +305,14 @@ def resolve_plan(text_gen) -> TextGenPlan:
         raise SpeculativeConfigError(
             f"speculative.num_assistant_tokens must be a positive integer or null (got {tokens!r})"
         )
-    if revision is not None and not _COMMIT_RE.match(revision.lower()):
-        raise SpeculativeConfigError(
-            "speculative.draft_revision must be a full 40-character commit hash "
-            "(branches and tags are mutable)"
-        )
+    if revision is not None:
+        # Preparation, pins and the manifest compare lowercase hashes.
+        revision = revision.lower()
+        if not COMMIT_RE.match(revision):
+            raise SpeculativeConfigError(
+                "speculative.draft_revision must be a full 40-character commit hash "
+                "(branches and tags are mutable)"
+            )
     _check_source_shape(method, source, draft_model, revision)
 
     resolved_method = method

@@ -16,7 +16,7 @@ import torch
 import yaml
 from PIL import Image
 from providers.utils.model_utils import is_model_ready
-from .common import ErrorMessages, logger, settings
+from .common import ErrorMessages, logger
 
 __all__ = ["convert_model", "is_model_ready", "load_images", "load_model_config", "setup_seed"]
 

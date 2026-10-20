@@ -13,7 +13,7 @@ A source is a session directory (its ``logs/stage_events.jsonl`` and
 ``GET /processing-stats?raw=true``. Each session gets a timeline: one lane per
 workflow stage plus one per model capability, drawn as a Mermaid Gantt chart
 and as plain text. Distributions reuse ``utils.processing_stats``, so they match
-the API. See docs/vlm-llm-serving/processing-time-statistics.md.
+the API. See docs/dev-guide/vlm-llm-serving/processing-time-statistics.md.
 """
 
 import argparse

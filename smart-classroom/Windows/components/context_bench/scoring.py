@@ -103,7 +103,7 @@ def string_match_all(prediction: str, truths: list[str]) -> float:
     if not truths:
         return 0.0
     haystack = normalize(prediction)
-    hits = sum(1 for truth in truths if normalize(truth) and normalize(truth) in haystack)
+    hits = sum(1 for truth in truths if _found(truth, haystack))
     return round(hits / len(truths), 4)
 
 
@@ -113,7 +113,13 @@ def string_match_part(prediction: str, truths: list[str]) -> float:
     if not truths:
         return 0.0
     haystack = normalize(prediction)
-    return 1.0 if any(normalize(t) and normalize(t) in haystack for t in truths) else 0.0
+    return 1.0 if any(_found(t, haystack) for t in truths) else 0.0
+
+
+def _found(item: str, normalized_haystack: str) -> bool:
+    """Whether a non-empty normalized `item` occurs in an already normalized haystack."""
+    needle = normalize(item)
+    return bool(needle) and needle in normalized_haystack
 
 
 def token_f1(prediction: str, truths: list[str]) -> float:
@@ -123,22 +129,8 @@ def token_f1(prediction: str, truths: list[str]) -> float:
     if not pred_tokens or not truth_tokens:
         # SQuAD's convention: F1 is 1.0 only when both sides are empty.
         return 1.0 if pred_tokens == truth_tokens else 0.0
-    common = _multiset_overlap(pred_tokens, truth_tokens)
-    if not common:
-        return 0.0
-    precision = common / len(pred_tokens)
-    recall = common / len(truth_tokens)
-    return round(2 * precision * recall / (precision + recall), 4)
-
-
-def _multiset_overlap(a: list, b: list) -> int:
-    counts = Counter(a)
-    overlap = 0
-    for item in b:
-        if counts[item] > 0:
-            counts[item] -= 1
-            overlap += 1
-    return overlap
+    common = sum((Counter(pred_tokens) & Counter(truth_tokens)).values())
+    return _f_measure(common, len(pred_tokens), len(truth_tokens))
 
 
 def intersection_over_union(prediction_items: list[str], truths: list[str]) -> float:
@@ -178,7 +170,7 @@ def distractor_rate(prediction: str, distractors: list[str]) -> float | None:
     if not distractors:
         return None
     haystack = normalize(prediction)
-    hits = sum(1 for d in distractors if normalize(d) and normalize(d) in haystack)
+    hits = sum(1 for d in distractors if _found(d, haystack))
     return round(hits / len(distractors), 4)
 
 

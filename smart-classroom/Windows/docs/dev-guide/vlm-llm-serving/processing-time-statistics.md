@@ -130,7 +130,7 @@ With `raw=true` the response also contains `raw.stages` and `raw.model_calls`.
 
 ## Generate a Report
 
-[Scripts/processing_stats_report.py](../../Scripts/processing_stats_report.py)
+[Scripts/processing_stats_report.py](../../../Scripts/processing_stats_report.py)
 turns the raw records into a Markdown report. Run it from `smart-classroom/Windows/`
 with the backend virtual environment active:
 

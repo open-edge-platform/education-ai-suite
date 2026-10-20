@@ -104,7 +104,7 @@ class ModelCall:
     """
 
     def __init__(self, capability: str, *, model=None, precision=None, device=None,
-                 decoding=None, artifact=None, stream: bool = False,
+                 decoding=None, stream: bool = False,
                  recorder: Optional["ProcessingStats"] = None) -> None:
         session_id, stage = current_stage()
         self._recorder = recorder or STATS
@@ -124,7 +124,6 @@ class ModelCall:
             "precision": precision,
             "device": device,
             "decoding": decoding,
-            "artifact": artifact,
             "stream": bool(stream),
             "submitted_at": _now_iso(),
         }
@@ -235,11 +234,6 @@ class ProcessingStats:
         with self._lock:
             self._calls.append(record)
         _append_session_line(record)
-
-    def clear(self) -> None:
-        with self._lock:
-            self._stages.clear()
-            self._calls.clear()
 
     def records(self, session_id=None) -> tuple:
         with self._lock:

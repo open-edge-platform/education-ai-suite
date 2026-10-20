@@ -75,13 +75,14 @@ def stage_tracker(session_id, stage):
 
 def _finish(session_id, stage, status, started_at, t0, exc) -> None:
     duration = round(time.perf_counter() - t0, 3)
-    STATS.record_stage(session_id, stage, status, duration, started_at, _now_iso())
+    ended_at = _now_iso()  # one timestamp, so the API and stage_events.jsonl agree
+    STATS.record_stage(session_id, stage, status, duration, started_at, ended_at)
     if exc is None:
-        StageEventWriter.write(session_id, stage, status, started_at, _now_iso(), duration)
+        StageEventWriter.write(session_id, stage, status, started_at, ended_at, duration)
         logger.info(f"[stage] {session_id} {stage} done in {duration}s")
     else:
         StageEventWriter.write(
-            session_id, stage, status, started_at, _now_iso(), duration,
+            session_id, stage, status, started_at, ended_at, duration,
             error_class=type(exc).__name__, error_detail=str(exc),
         )
         if status == "failed":
@@ -116,9 +117,10 @@ def stage_finished(session_id, stage, status, error_class=None, error_detail=Non
     with _MANUAL_LOCK:
         started_at, t0 = _MANUAL_STARTS.pop((session_id, stage), (None, None))
     duration = round(time.perf_counter() - t0, 3) if t0 is not None else None
-    STATS.record_stage(session_id, stage, status, duration, started_at, _now_iso())
+    ended_at = _now_iso()
+    STATS.record_stage(session_id, stage, status, duration, started_at, ended_at)
     StageEventWriter.write(
-        session_id, stage, status, started_at, _now_iso(), duration,
+        session_id, stage, status, started_at, ended_at, duration,
         error_class=error_class, error_detail=error_detail,
     )
     logger.info(

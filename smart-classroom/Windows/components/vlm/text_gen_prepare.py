@@ -41,13 +41,12 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from components.vlm.text_gen_profiles import (
+    COMMIT_RE as _COMMIT_RE,
     DFLASH_TARGET_RT_INFO_KEY,
-    SpeculativeConfigError,
     SpeculativeSettings,
     SpeculativeUnavailableError,
     TextGenPlan,
     preconverted_repo,
-    resolve_plan,
     version_at_least,
 )
 from utils.model_paths import OPENVINO_MODELS_DIR, SC_ROOT
@@ -64,8 +63,6 @@ LOCK_TIMEOUT_S = 3600.0
 EXPORT_DISK_FACTOR = 2.2
 
 _LANGUAGE_MODEL_XML = ("openvino_language_model.xml", "openvino_model.xml")
-# Revisions become path components and pins; only full commit hashes qualify.
-_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _DRAFT_IR_FILES = ("openvino_model.xml", "openvino_model.bin", "config.json")
 # Drafter checkpoint files fetched from the Hub: configuration and weights only,
 # never repository code.
@@ -433,19 +430,21 @@ def has_model_rt_info(xml_path: Path, key: str) -> bool:
     """Whether the IR's model-level ``<rt_info>`` (a direct child of ``<net>``) has ``key``."""
     depth = 0
     in_model_rt_info = False
-    for event, elem in ET.iterparse(str(xml_path), events=("start", "end")):
-        if event == "start":
-            depth += 1
-            if depth == 2 and elem.tag == "rt_info":
-                in_model_rt_info = True
-            elif in_model_rt_info and depth == 3 and elem.tag == key:
-                return True
-        else:
-            if depth == 2 and elem.tag == "rt_info":
-                in_model_rt_info = False
-            depth -= 1
-            if depth >= 2:
-                elem.clear()
+    # An explicit handle: returning from inside iterparse must not leave the file open.
+    with open(xml_path, "rb") as handle:
+        for event, elem in ET.iterparse(handle, events=("start", "end")):
+            if event == "start":
+                depth += 1
+                if depth == 2 and elem.tag == "rt_info":
+                    in_model_rt_info = True
+                elif in_model_rt_info and depth == 3 and elem.tag == key:
+                    return True
+            else:
+                if depth == 2 and elem.tag == "rt_info":
+                    in_model_rt_info = False
+                depth -= 1
+                if depth >= 2:
+                    elem.clear()
     return False
 
 

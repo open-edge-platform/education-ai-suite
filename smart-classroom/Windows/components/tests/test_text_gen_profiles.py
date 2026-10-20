@@ -99,6 +99,11 @@ def test_explicit_revision_and_tuning_are_kept():
     assert plan.speculative.describe() == f"z-lab/Qwen3.6-35B-A3B-DFlash@{COMMIT[:12]}"
 
 
+def test_uppercase_revision_is_normalized_for_preparation():
+    plan = resolve_plan(_text_gen(speculative={"mode": "auto", "draft_revision": COMMIT.upper()}))
+    assert plan.speculative.draft_revision == COMMIT
+
+
 def test_local_relative_dir_resolves_from_smart_classroom_root():
     plan = resolve_plan(_text_gen(speculative={
         "mode": "auto", "draft_source": "local", "draft_model": "models/my-draft"}))

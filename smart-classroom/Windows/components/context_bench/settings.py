@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import math
-import os
 import re
 from pathlib import Path
 
@@ -586,7 +585,9 @@ def _resolve_accuracy(section, args, profiles: list, notices: list | None = None
     wanted = args.accuracy_suites if args.accuracy_suites else section.get(
         "suites", [accuracy.SUITE_RETRIEVAL, accuracy.SUITE_GENERATION]
     )
-    if not isinstance(wanted, list) or not wanted or any(s not in _SUITE_DEFAULTS for s in wanted):
+    if not isinstance(wanted, list) or not wanted or any(
+        not isinstance(s, str) or s not in _SUITE_DEFAULTS for s in wanted
+    ):
         raise ConfigError(
             f"accuracy.suites must be a non-empty subset of {{{', '.join(_SUITE_DEFAULTS)}}}"
         )

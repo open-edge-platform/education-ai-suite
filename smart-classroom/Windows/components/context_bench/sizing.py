@@ -275,13 +275,6 @@ def estimate_cache(model_config: dict | None, fixed_state_bytes: int | None, ov_
     return detail
 
 
-def expected_kv_gb(model_config: dict | None, fixed_bytes: int | None, ov_config: dict,
-                   context_tokens: int, sequences: int = 1) -> float | None:
-    """Estimated persistent cache for `context_tokens` (GiB), or None when unknown."""
-    return estimate_cache(model_config, fixed_bytes, ov_config, context_tokens,
-                          state_rows=sequences)["gib"]
-
-
 def state_rows(scheduler: dict | None) -> int:
     """Linear-attention state rows the pool reserves: the explicit row count when set,
     else one per schedulable sequence; 1 on the stateful pipeline."""

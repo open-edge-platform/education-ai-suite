@@ -110,7 +110,10 @@ def optimum_cli(argv: list) -> int:
     try:
         cli_main()
     except SystemExit as exc:  # argparse and the export commands exit this way
-        return exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        if exc.code is None or isinstance(exc.code, int):
+            return exc.code or 0
+        print(exc.code, file=sys.stderr)  # as the interpreter does for sys.exit(msg)
+        return 1
     return 0
 
 
