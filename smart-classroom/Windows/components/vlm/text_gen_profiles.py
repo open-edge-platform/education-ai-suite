@@ -98,8 +98,10 @@ _QWEN36_DFLASH = SpeculativeProfile(
     draft_repo="z-lab/Qwen3.6-35B-A3B-DFlash",
     draft_revision="f181eece646affea2c38b2765f1aaa01a9734ccd",
     draft_export_weight_format="int4",
-    # k=3 was best for classroom summaries at 8K; k=7 for code/math.
-    num_assistant_tokens=3,
+    # Measured on the Arc B390 iGPU (context_bench, 30 s idle gap): k=5 is best for the
+    # classroom summary at 8K (1.34x vs 1.29x at k=3) and for chat (1.43x vs 1.38x), and
+    # keeps most of k=7's code/math gain (2.2-2.4x vs 1.8x at k=3). k=7 suits code/math only.
+    num_assistant_tokens=5,
     # block_size 16 includes the seed token, and the 17 linear-attention rows
     # cover max_num_seqs + k + 1 up to k=15.
     num_assistant_tokens_range=(1, 15),

@@ -402,7 +402,8 @@ def _reference_lines(rows: list, reference: dict | None) -> list:
         )
     missing = [task for task in names if task not in at_k]
     if missing:
-        lines.append(f"No k={k} profile ran for {', '.join(missing)}; add one to compare.")
+        # A blank line first: Markdown would otherwise read the sentence as a table row.
+        lines += ["", f"No k={k} profile ran for {', '.join(missing)}; add one to compare."]
     lines.append("")
     return lines
 

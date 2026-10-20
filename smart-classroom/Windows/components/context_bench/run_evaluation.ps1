@@ -11,7 +11,7 @@
 #   .\components\context_bench\run_evaluation.ps1 --list-profiles
 #   .\components\context_bench\run_evaluation.ps1 --quick
 #   .\components\context_bench\run_evaluation.ps1
-#   .\components\context_bench\run_evaluation.ps1 --models qwen3.6-35b-a3b --dflash-k 3 7
+#   .\components\context_bench\run_evaluation.ps1 --models qwen3.6-35b-a3b --dflash-k 3 5 7
 #
 # If PowerShell blocks local scripts, relax the policy for this process only:
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned

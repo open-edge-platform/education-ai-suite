@@ -62,8 +62,8 @@ class TestPlan(unittest.TestCase):
         for invocation in planned:
             args = invocation["args"]
             self.assertEqual(args[args.index("--weight-format") + 1], "int4")
-            expected = (["paged_min", "dflash_k3"] if invocation["model"] == "qwen3.6-35b-a3b"
-                        else ["paged_min"])
+            expected = (["paged_min", "dflash_k5", "dflash_k7"]
+                        if invocation["model"] == "qwen3.6-35b-a3b" else ["paged_min"])
             self.assertEqual(invocation["profiles"], expected)
 
     def test_every_invocation_resolves_through_the_benchmark_settings(self):
@@ -77,10 +77,17 @@ class TestPlan(unittest.TestCase):
                     self.assertEqual([p["name"] for p in resolved["profiles"]], invocation["profiles"])
                     self.assertEqual(resolved["warmup"], 0 if quick else 1)
                     self.assertEqual(resolved["iterations"], 1 if quick else 3)
-                    self.assertEqual(resolved["iteration_gap_sec"], 0.0)
+                    timed = not quick and invocation["suite"] != evaluate.SUITE_ACCURACY
+                    self.assertEqual(resolved["iteration_gap_sec"], 30.0 if timed else 0.0)
                     self.assertEqual(bool(resolved.get("accuracy")),
                                      invocation["suite"] == evaluate.SUITE_ACCURACY)
                     self.assertTrue(settings.plan_run(resolved))
+
+    def test_an_explicit_iteration_gap_applies_to_every_suite(self):
+        for invocation in evaluate.plan_invocations(["qwen3-vl-8b"], evaluate.SUITES,
+                                                    iteration_gap=0.0):
+            with self.subTest(suite=invocation["suite"]):
+                self.assertEqual(_resolve(invocation)["iteration_gap_sec"], 0.0)
 
     def test_all_models_share_one_workload(self):
         planned = evaluate.plan_invocations(evaluate.MODEL_KEYS, [evaluate.SUITE_THROUGHPUT])
@@ -166,6 +173,26 @@ class TestRunAndReport(unittest.TestCase):
         self.assertIn("| 8,000 tokens | code | 25.00 (2.00) | missing_ir |", text)
         self.assertIn("qwen3.8-27b / accuracy: no evidence written", text)
         self.assertIn("(qwen3.6-35b-a3b/throughput/20261020T000000Z-abcd0123/report.txt)", text)
+
+    def test_the_published_reference_is_compared_at_its_own_window(self):
+        reference = {"source": "blog", "num_assistant_tokens": 7,
+                     "tasks": {"code": {"dataset": "HumanEval", "acceptance_length": 6.4,
+                                        "speedup": 2.2, "throughput": 89.8}}}
+        snapshot = _snapshot([
+            _case("c01", "paged_min", context=0, tpot=22.0),
+            _case("c02", "dflash_k3", context=0, tpot=12.0),
+            _case("c03", "dflash_k7", context=0, tpot=10.0, num_assistant_tokens=7,
+                  tokens_per_step=6.0)])
+        snapshot["settings"]["speculative_reference"] = reference
+        _write_run(self.root, "qwen3.6-35b-a3b", evaluate.SUITE_THROUGHPUT, snapshot)
+        evidence.atomic_write_json(str(self.root / evaluate.MANIFEST_NAME), {
+            "evaluation_id": "x", "options": {},
+            "runs": [{"model": "qwen3.6-35b-a3b", "suite": evaluate.SUITE_THROUGHPUT}]})
+        text = (evaluate.write_report(self.root)).read_text(encoding="utf-8")
+        section = text[text.index("## DFlash against the published reference"):]
+        self.assertIn("### qwen3.6-35b-a3b, no transcript (task prompt only)", section)
+        # k=7 is the measured column (22 / 10 ms), not k=3's 1.83x.
+        self.assertIn("| code | HumanEval | 6.40 | 6.00 | 2.20x | 2.20x |", section)
 
     def test_all_ok_is_exit_zero_and_ctrl_c_stops_the_sweep(self):
         snapshot = _snapshot([_case("c01", "paged_min")])

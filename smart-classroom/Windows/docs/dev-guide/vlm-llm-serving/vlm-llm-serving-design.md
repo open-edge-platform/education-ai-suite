@@ -48,7 +48,7 @@ A maintained catalog supplies compatible combinations of targets and methods, de
 
 A source checkpoint is not runtime-ready IR. Each accelerated profile must provide downloadable compatible IR or a tested conversion recipe for downloaded source files, including target hidden-state outputs where needed. Qualify the DFlash2 exporter and runtime independently. Multi-token prediction (MTP) uses the target's bundled prediction head and requires its own artifact and runtime qualification; it does not use either of the two external Dflash and Dflash2 z-lab drafters listed above. Select one mechanism per pipeline, never silently substitute or combine them.
 
-**Implemented:** the Qwen3.6 DFlash profile pins drafter commit `f181eece646affea2c38b2765f1aaa01a9734ccd`, downloads only its configuration and weight files, and exports it to INT4 IR with the DFlash classes built into optimum-intel 2.2.0 (no repository code). The tested defaults are `num_assistant_tokens: 3` (range 1–15), OpenVINO GenAI 2026.3 or later, an f16 KV cache, and a scheduler with `max_num_seqs: 1`, `num_linear_attention_blocks: 17` and prefix caching off; the cache size is left to the runtime. When the stock target export lacks the hidden-state metadata the drafter needs, a derived target directory carries it (Section 5).
+**Implemented:** the Qwen3.6 DFlash profile pins drafter commit `f181eece646affea2c38b2765f1aaa01a9734ccd`, downloads only its configuration and weight files, and exports it to INT4 IR with the DFlash classes built into optimum-intel 2.2.0 (no repository code). The tested defaults are `num_assistant_tokens: 5` (range 1–15), OpenVINO GenAI 2026.3 or later, an f16 KV cache, and a scheduler with `max_num_seqs: 1`, `num_linear_attention_blocks: 17` and prefix caching off; the cache size is left to the runtime. When the stock target export lacks the hidden-state metadata the drafter needs, a derived target directory carries it (Section 5).
 
 ## 3. Architecture
 
@@ -168,7 +168,7 @@ models:
 | `draft_source` | `null` (profile default), `huggingface`, `local`, `target` | Distinguish a Hub repository, an explicit local IR directory, and target-bundled MTP artifacts. Other sources require a supported adapter and profile. |
 | `draft_model` | Repository ID or local directory; `null` selects the profile default | Identify the external drafter for DFlash or DFlash2. For MTP, set to null: use the target's prediction head, not a second model. |
 | `draft_revision` | Immutable repository commit (a full 40-character hash); `null` selects the profile's pinned revision | Reproduce a Hub download. Reject non-null values for `local` or `target`; bundled MTP inherits the target revision. |
-| `num_assistant_tokens` | Positive integer; `null` selects the tested default for the selected method and profile (DFlash: 3, range 1–15, and at most the drafter's block size minus one) | Control the draft block size within the selected runtime's supported range. Do not reuse DFlash tuning with either DFlash2 or MTP without validation. |
+| `num_assistant_tokens` | Positive integer; `null` selects the tested default for the selected method and profile (DFlash: 5, range 1–15, and at most the drafter's block size minus one) | Control the draft block size within the selected runtime's supported range. Do not reuse DFlash tuning with either DFlash2 or MTP without validation. |
 
 | Selected Target and Method | Draft Settings |
 | --- | --- |

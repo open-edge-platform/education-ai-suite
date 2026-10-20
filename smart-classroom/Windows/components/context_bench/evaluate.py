@@ -9,7 +9,7 @@ under identical contexts, tasks, decode ceilings and repetition, then renders ev
   Model             Config                      Profiles
   qwen3-vl-8b       config_qwen3_8b.yaml        paged_min
   qwen3.5-9b        config_qwen3.5_9b.yaml      paged_min
-  qwen3.6-35b-a3b   config_qwen3.6_35b.yaml     paged_min (DFlash off), dflash_k<K> (DFlash on)
+  qwen3.6-35b-a3b   config_qwen3.6_35b.yaml     paged_min (DFlash off), dflash_k5 and dflash_k7 (on)
   qwen3.8-27b       config_qwen3.8_27b.yaml     paged_min
 
   Suite       What each invocation measures
@@ -51,7 +51,10 @@ MANIFEST_NAME = "evaluation.json"
 REPORT_NAME = "evaluation_report.md"
 DEFAULT_OUTPUT_DIR = "monitoring/executionlogs/context_bench/evaluation"
 BASELINE_PROFILE = "paged_min"
-DEFAULT_DFLASH_K = (3,)  # serving's tested window (text_gen_profiles), the "DFlash on" case
+# k=5: serving's window (text_gen_profiles), best for summaries and chat; k=7: the published
+# reference's window, best for code and math. Without k=7 the blog comparison is empty.
+DEFAULT_DFLASH_K = (5, 7)
+DEFAULT_TIMING_GAP_SEC = 30.0  # the configs' iteration_gap_sec; see default_iteration_gap
 
 
 @dataclass(frozen=True)
@@ -110,15 +113,28 @@ def dflash_profiles(config: str, windows) -> list:
     return [BASELINE_PROFILE] + [f"dflash_k{k}" for k in windows]
 
 
-def suite_arguments(suite: str, quick: bool, iteration_gap: float) -> list:
+def default_iteration_gap(suite: str, quick: bool) -> float:
+    """Idle before each measured generation when --iteration-gap is not given.
+
+    The timing suites idle like the configs (and the published reference): back to back, the
+    iGPU's clocks sag over the iterations, and DFlash, which works the GPU harder per step,
+    loses more than the plain baseline it is compared against. Accuracy timings are not used,
+    and its gap would apply to every probe, so it runs back to back; so does --quick.
+    """
+    return 0.0 if quick or suite == SUITE_ACCURACY else DEFAULT_TIMING_GAP_SEC
+
+
+def suite_arguments(suite: str, quick: bool, iteration_gap: float | None) -> list:
     workload = list(_WORKLOADS[suite][1 if quick else 0])
     repeat = ["--warmup", "0", "--iterations", "1"] if quick else ["--warmup", "1", "--iterations", "3"]
+    if iteration_gap is None:
+        iteration_gap = default_iteration_gap(suite, quick)
     return workload + repeat + ["--iteration-gap", f"{iteration_gap:g}"]
 
 
 def plan_invocations(models, suites, *, quick: bool = False, windows=DEFAULT_DFLASH_K,
                      weight_format: str = "int4", device: str | None = None,
-                     iteration_gap: float = 0.0) -> list:
+                     iteration_gap: float | None = None) -> list:
     """One benchmark invocation per (model, suite), model by model."""
     selected = [m for m in MODELS if m.key in models]
     invocations = []
@@ -296,6 +312,10 @@ def _header_section(manifest: dict, loaded: list, evaluation_dir: Path) -> list:
     packages = environment.get("packages") or {}
     state = ("complete" if manifest.get("completed")
              else "interrupted" if manifest.get("interrupted") else "incomplete")
+    gap = options.get("iteration_gap")
+    gap_label = (f"{gap:g} s" if gap is not None else
+                 f"{DEFAULT_TIMING_GAP_SEC:g} s (throughput, classroom), 0 s (accuracy)"
+                 if not options.get("quick") else "0 s")
     lines = [
         "# Context Bench Model Evaluation",
         "",
@@ -307,8 +327,7 @@ def _header_section(manifest: dict, loaded: list, evaluation_dir: Path) -> list:
         f"- Runtime: openvino {packages.get('openvino') or '--'}, openvino-genai "
         f"{packages.get('openvino-genai') or '--'}, transformers {packages.get('transformers') or '--'}",
         f"- Weights: {options.get('weight_format', '--')} | device: "
-        f"{options.get('device') or 'per config (GPU)'} | iteration gap: "
-        f"{options.get('iteration_gap', 0):g} s"
+        f"{options.get('device') or 'per config (GPU)'} | iteration gap: {gap_label}"
         + (" | DFlash windows: " + ", ".join(f"k={k}" for k in options['dflash_k'])
            if options.get("dflash_k") else ""),
         "",
@@ -407,15 +426,31 @@ def _performance_section(loaded: list, suite: str, title: str) -> list:
     return lines
 
 
+def _speculative_references(loaded: list) -> dict:
+    """Each model's `speculative_reference` (the published DFlash figures) from its snapshots."""
+    references = {}
+    for run, _, snapshot in loaded:
+        reference = ((snapshot or {}).get("settings") or {}).get("speculative_reference")
+        if reference:
+            references.setdefault(run["model"], reference)
+    return references
+
+
 def _dflash_section(loaded: list) -> list:
     rows = []
+    reference_lines = []
+    references = _speculative_references(loaded)
     for suite in (SUITE_THROUGHPUT, SUITE_CLASSROOM):
         pairs = _cases(loaded, suite)
         for model in sorted({r["model"] for r, _ in pairs}, key=_model_order):
             cases = [c for r, c in pairs if r["model"] == model]
             for context in sorted({c.get("context_tokens") or 0 for c in cases}):
                 at_context = [c for c in cases if (c.get("context_tokens") or 0) == context]
-                for entry in report._window_sweep_rows(at_context):
+                sweep = report._window_sweep_rows(at_context)
+                lines = report._reference_lines(sweep, references.get(model))
+                if lines:
+                    reference_lines += [f"### {model}, {context_label(context)}", "", *lines]
+                for entry in sweep:
                     case = entry["case"]
                     plain = report._matched_baseline(case, report._leaderboard(at_context)) or {}
                     acceptance = metrics.finite_number(case.get("mtp_acceptance_rate"))
@@ -449,6 +484,11 @@ def _dflash_section(loaded: list) -> list:
         *_table(["Model", "Suite", "Context", "Task", "k", "Plain TPOT ms", "DFlash TPOT ms",
                  "Decode speedup", "Total-call speedup", "AL", "Accepted", "Pass cost",
                  "TTFT s off / on", "Output"], rows),
+        *(["## DFlash against the published reference", "",
+           "The reference measured whole datasets without a long-context prefix, so the "
+           "no-transcript rows are its comparable setting; one prompt per domain here, so "
+           "compare ordering and size, not the second decimal.", "", *reference_lines]
+          if reference_lines else []),
     ]
 
 
@@ -571,11 +611,14 @@ def _parse_args(argv=None):
                         help="suites to run per model (default: all)")
     parser.add_argument("--dflash-k", type=int, nargs="+", default=list(DEFAULT_DFLASH_K),
                         metavar="K", help="DFlash windows for Qwen3.6-35B-A3B, each a dflash_k<K> "
-                        "profile of its config (default: 3, serving's tested value)")
+                        "profile of its config (default: 5 7 -- serving's window and the "
+                        "published reference's)")
     parser.add_argument("--weight-format", default="int4", help="weights of every model (default int4)")
     parser.add_argument("--device", help="override every config's device (CPU, GPU, GPU.1)")
-    parser.add_argument("--iteration-gap", type=float, default=0.0, metavar="SECONDS",
-                        help="untimed idle before each measured generation (default 0, sustained)")
+    parser.add_argument("--iteration-gap", type=float, default=None, metavar="SECONDS",
+                        help="untimed idle before each measured generation, every suite "
+                        f"(default {DEFAULT_TIMING_GAP_SEC:g} s for throughput/classroom, 0 for "
+                        "accuracy and --quick; 0 measures sustained load)")
     parser.add_argument("--quick", action="store_true",
                         help="smoke test: no warm-up, one iteration, reduced accuracy plan")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
@@ -610,7 +653,7 @@ def main(argv=None) -> int:
             return EXIT_CONFIG
         write_report(evaluation_dir)
         return EXIT_OK
-    if args.iteration_gap < 0:
+    if args.iteration_gap is not None and args.iteration_gap < 0:
         print("evaluation: --iteration-gap must be >= 0", file=sys.stderr)
         return EXIT_CONFIG
     try:

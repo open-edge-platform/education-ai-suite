@@ -66,7 +66,7 @@ def test_auto_method_selects_catalog_dflash_for_qwen36():
     assert spec.method == "dflash"
     assert spec.source == "huggingface"
     assert spec.draft_model == "z-lab/Qwen3.6-35B-A3B-DFlash"
-    assert spec.num_assistant_tokens == 3
+    assert spec.num_assistant_tokens == 5
     assert spec.draft_dir() == OPENVINO_MODELS_DIR / "Qwen3.6-35B-A3B-DFlash" / "int4"
     assert spec.profile.scheduler["enable_prefix_caching"] is False
 

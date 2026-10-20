@@ -190,14 +190,18 @@ there.
 accuracy of the four INT4 text-generation models under one shared workload and writes a single
 Markdown report. It drives `benchmark` once per model and suite, reusing the configs above, so
 every number in the report comes from a normal `results.json`. Its `throughput` suite is the
-configs' shared default grid restricted to the profiles below, but run back to back
-(`--iteration-gap 0`, sustained load) unless `--iteration-gap` says otherwise.
+configs' shared default grid restricted to the profiles below. The timing suites (`throughput`,
+`classroom`) idle 30 s before each measured generation, as the configs do; `accuracy` and
+`--quick` run back to back. Back to back, the iGPU's clocks sag over the iterations and DFlash,
+which works the GPU harder per step, loses more than its plain baseline: on the Arc B390 its
+k=3 TPOT rose 11.6 -> 13.7 ms over three iterations while the baseline stayed at 21.8 ms, and
+the code speedup read 1.72x instead of 1.82x. `--iteration-gap 0` measures that sustained load.
 
 | Model key | Config | Profiles |
 | --- | --- | --- |
 | `qwen3-vl-8b` | `config_qwen3_8b.yaml` | `paged_min` |
 | `qwen3.5-9b` | `config_qwen3.5_9b.yaml` | `paged_min` |
-| `qwen3.6-35b-a3b` | `config_qwen3.6_35b.yaml` | `paged_min` (DFlash off) and `dflash_k3` (DFlash on) |
+| `qwen3.6-35b-a3b` | `config_qwen3.6_35b.yaml` | `paged_min` (DFlash off), `dflash_k5` and `dflash_k7` (DFlash on) |
 | `qwen3.8-27b` | `config_qwen3.8_27b.yaml` | `paged_min` |
 
 | Suite | Workload (identical for every model) |
@@ -217,9 +221,9 @@ configs' shared default grid restricted to the profiles below, but run back to b
 .\components\context_bench\run_evaluation.ps1
 
 # Subsets and variations
-.\components\context_bench\run_evaluation.ps1 --models qwen3.6-35b-a3b --dflash-k 3 7
+.\components\context_bench\run_evaluation.ps1 --models qwen3.6-35b-a3b --dflash-k 3 5 7
 .\components\context_bench\run_evaluation.ps1 --models qwen3-vl-8b qwen3.5-9b --suites throughput accuracy
-.\components\context_bench\run_evaluation.ps1 --iteration-gap 30      # burst instead of sustained
+.\components\context_bench\run_evaluation.ps1 --iteration-gap 0       # sustained instead of burst
 
 # Re-render the Markdown report of an existing evaluation
 .\components\context_bench\run_evaluation.ps1 --report monitoring/executionlogs/context_bench/evaluation/<timestamp>
@@ -229,10 +233,10 @@ configs' shared default grid restricted to the profiles below, but run back to b
 | --- | --- |
 | `--models K ...` | Model keys from the table above (default: all four) |
 | `--suites S ...` | `throughput`, `classroom`, `accuracy` (default: all three) |
-| `--dflash-k K ...` | DFlash windows for Qwen3.6-35B-A3B; each must be a `dflash_k<K>` profile of its config (3, 5, 7, 15). Default 3, the window serving uses |
+| `--dflash-k K ...` | DFlash windows for Qwen3.6-35B-A3B; each must be a `dflash_k<K>` profile of its config (3, 5, 7, 15). Default `5 7`: the window serving uses and the published reference's window |
 | `--weight-format` | Weights of every model (default `int4`); selects the derived artifact directory |
 | `--device` | Override every config's device (`CPU`, `GPU`, `GPU.1`) |
-| `--iteration-gap S` | Untimed idle before each measured generation (default 0 = sustained load for every model) |
+| `--iteration-gap S` | Untimed idle before each measured generation, every suite (default 30 s for `throughput`/`classroom`, 0 for `accuracy` and `--quick`; 0 = sustained load) |
 | `--quick` | Smoke test: zero warm-up, one measured iteration, `summary_2s` only at 128 tokens, reduced accuracy plan |
 | `--output-dir` | Evaluation base directory (default `monitoring/executionlogs/context_bench/evaluation`) |
 | `--list-profiles` | Print each invocation's plan and exit |

@@ -59,7 +59,7 @@ but quoting avoids surprises).
 | `method` | `dflash` is the only method with a profile, for Qwen3.6 INT4; `auto` selects it there. `dflash2` and `mtp` are valid settings without a profile yet: plain generation under `auto`, a startup failure under `"on"`. |
 | `draft_source: local` | `draft_model` names an existing OpenVINO IR directory (relative paths resolve from `smart-classroom/Windows/`). It is validated, never downloaded or replaced. |
 | `draft_revision` | A full 40-character commit. `null` uses the catalog pin (`f181eece646a…` for the Qwen3.6 drafter). |
-| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 3. Range 1–15. |
+| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 5 (best for classroom summaries and chat; 7 suits code/math). Range 1–15. |
 
 Invalid settings (unknown method or key, contradictory source, cross-model
 drafter, out-of-range `k`) fail validation at startup under `auto` and `"on"`;
@@ -265,7 +265,7 @@ model is loaded:
   "tool_calls": true,
   "speculative": {"requested_mode": "auto", "requested_method": "auto",
                   "effective_method": "dflash", "draft": "z-lab/Qwen3.6-35B-A3B-DFlash@0123456789ab",
-                  "num_assistant_tokens": 3, "fallback_reason": null},
+                  "num_assistant_tokens": 5, "fallback_reason": null},
   "warmup": {"status": "ok", "seconds": 1.8},
   "startup": {"prepare_s": 0.4, "load_s": 61.2, "warmup_s": 1.8},
   "diagnostics": {"openvino_genai": "2026.4.1.0", "draft_revision": "...", "scheduler": {}}
