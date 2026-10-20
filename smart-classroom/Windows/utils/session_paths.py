@@ -54,6 +54,10 @@ class SessionPaths:
         return SessionPaths.raw_dir(session_id) / "transcription.txt"
 
     @staticmethod
+    def timestamped_transcript_path(session_id: str) -> Path:
+        return SessionPaths.raw_dir(session_id) / "transcription_ts.txt"
+
+    @staticmethod
     def teacher_transcript_path(session_id: str) -> Path:
         return SessionPaths.raw_dir(session_id) / "teacher_transcription.txt"
 

@@ -299,6 +299,7 @@ class ASRComponent(PipelineComponent):
             if teacher_speaker:
                 teacher_lines = []
                 full_updated_lines = []
+                full_labeled_ts_lines = []
                 full_timestamped_lines = []
 
                 # Merge consecutive same-speaker segments for the summarizer:
@@ -325,12 +326,19 @@ class ASRComponent(PipelineComponent):
                             speaker_label = spk
 
                     full_updated_lines.append(f"{speaker_label}: {text}")
+                    full_labeled_ts_lines.append(f"[{start}-{end}] {speaker_label}: {text}")
                     full_timestamped_lines.append(f"[{start}-{end}] {text}")
 
 
                 StorageManager.save(
                     transcript_path,
                     "\n".join(full_updated_lines) + "\n",
+                    append=False
+                )
+
+                StorageManager.save(
+                    str(SessionPaths.timestamped_transcript_path(self.session_id)),
+                    "\n".join(full_labeled_ts_lines) + "\n",
                     append=False
                 )
 

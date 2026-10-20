@@ -72,6 +72,13 @@ def test_transcript_path():
         )
 
 
+def test_timestamped_transcript_path():
+    with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
+        assert SessionPaths.timestamped_transcript_path("s1") == (
+            Path(tmp) / "proj" / "s1" / "raw" / "transcription_ts.txt"
+        )
+
+
 def test_teacher_transcript_path():
     with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
         assert SessionPaths.teacher_transcript_path("s1") == (
