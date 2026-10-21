@@ -1212,7 +1212,10 @@ if ($noProxy) {
 # ============================================================================
 # Desktop-app mode exits long before this point, so the browser dev server is
 # the only frontend this path starts.
-$frontendProxyCommands = ""
+# The tab does not inherit this script's environment (wt and WMI start it), so
+# the proxy is passed in. Without it npm install goes direct, and behind a
+# corporate proxy hangs on the registry for minutes before giving up.
+$frontendProxyCommands = $proxyCommands
 # Loopback only: the dev server proxies to the unauthenticated content-search and
 # grading backends, so binding 0.0.0.0 would expose them to the whole network.
 $frontendStartCommand = "npm run dev -- --host 127.0.0.1 --port 5173"
@@ -1420,7 +1423,7 @@ python main.py
         $frontendScript = @"
 `$ErrorActionPreference = 'Continue'
 
-# Set proxy for Electron download (if applicable)
+# Proxy for npm's registry access
 $frontendProxyCommands
 
 Write-Host '========================================' -ForegroundColor Cyan
@@ -1432,8 +1435,17 @@ Set-Location '$ScriptDir\ui'
 Write-Host "Working directory: `$PWD" -ForegroundColor Gray
 Write-Host ''
 
-Write-Host 'Installing npm dependencies...' -ForegroundColor Yellow
-npm install
+# npm writes node_modules\.package-lock.json at the end of every install; newer
+# than package.json and package-lock.json means nothing changed since. A no-op
+# install still takes 10+ s of registry round trips (audit included).
+`$installed = Get-Item 'node_modules\.package-lock.json' -ErrorAction SilentlyContinue
+`$manifests = Get-Item 'package.json', 'package-lock.json' -ErrorAction SilentlyContinue
+if (`$installed -and -not (`$manifests | Where-Object { `$_.LastWriteTime -gt `$installed.LastWriteTime })) {
+    Write-Host 'npm dependencies up to date, skipping npm install.' -ForegroundColor Gray
+} else {
+    Write-Host 'Installing npm dependencies...' -ForegroundColor Yellow
+    npm install --no-audit --no-fund
+}
 
 Write-Host ''
 Write-Host '$frontendStartMsg' -ForegroundColor Green
@@ -1454,7 +1466,9 @@ $frontendStartCommand
     
     # Wait for Frontend to be healthy
     $frontendDeps = if ($gradingEnabled) { @(8000, 9011, 9012) } else { @(8000, 9011) }
-    $frontendHealthy = Wait-ForService -ServiceName "Frontend" -Url "http://localhost:5173" -Port 5173 -DependentPorts $frontendDeps -CommandLinePattern "npm"
+    # 127.0.0.1, the address Vite binds: "localhost" tries ::1 first, and the
+    # refused IPv6 connect costs about 2 s on every probe.
+    $frontendHealthy = Wait-ForService -ServiceName "Frontend" -Url "http://127.0.0.1:5173" -Port 5173 -DependentPorts $frontendDeps -CommandLinePattern "npm"
     if (-not $frontendHealthy) {
         Write-Host "Exiting script due to Frontend startup failure." -ForegroundColor Red
         exit 1
