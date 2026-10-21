@@ -123,6 +123,24 @@ class VideoAnalyticsPipelineService:
         # pipeline_name -> why the watchdog killed it; reported as the exit's error.
         self.pipeline_stall_reasons: Dict[str, str] = {}
 
+        # Skipping a bad segment of a file source. A restart that fails again
+        # before getting this far past the furthest point any earlier run of
+        # the pipeline reached counts as no progress: content that fails the
+        # same way every time (a corrupt stretch the decoder cannot get past)
+        # would otherwise send every resume back into it until the retries run
+        # out, losing the rest of the video.
+        self.resume_progress_min_sec = 1.0
+        # After no progress, the next resume jumps this far past that point --
+        # one GOP of the classroom cameras' 1 s keyframe interval -- doubling on
+        # each further failure, up to the cap.
+        self.resume_skip_first_sec = 1.0
+        self.resume_skip_max_sec = 30.0
+        # pipeline_name -> {"reached": furthest ns any run got to, "stuck": runs
+        # in a row without progress, "floor": ns no resume may go back below}
+        self.pipeline_resume_state: Dict[str, Dict] = {}
+        # pipeline_name -> [(start_ns, end_ns)] of video skipped over
+        self.pipeline_skipped_segments: Dict[str, List[tuple]] = {}
+
         # "eos" (normal), "failed" (gave up after max retries), or "stopped" (manual stop).
         self.pipeline_final_status: Dict[str, str] = {}
 
@@ -664,6 +682,11 @@ class VideoAnalyticsPipelineService:
         relaunch writes each frame from there on exactly once. A file with no
         frames yet puts the resume point at the top, and the files are emptied.
 
+        A restart that made no progress -- see ``resume_progress_min_sec`` --
+        skips instead: it resumes past the furthest point reached, by a jump
+        that doubles with each such restart in a row. What lies between is
+        never analysed; it is logged and reported as a pipeline error.
+
         Returns:
             Resume position in ns, or None to start from the top.
         """
@@ -676,6 +699,15 @@ class VideoAnalyticsPipelineService:
                 for p in files
             ]
             position = min(0 if ts is None else ts for ts in lasts)
+            reached = max(0 if ts is None else ts for ts in lasts)
+            skip = self._plan_skip(pipeline_name, reached)
+            state = self.pipeline_resume_state[pipeline_name]
+            if skip is not None:
+                position = max(position, skip)
+                state["floor"] = position
+            # Never back into a segment already skipped: a branch that wrote
+            # nothing since the skip still ends before it.
+            position = max(position, state.get("floor", 0))
             removed = sum(self._trim_metadata_from(p, position) for p in files if p.exists())
         except OSError as e:
             # Better a replay with duplicated frames than no restart at all.
@@ -686,6 +718,47 @@ class VideoAnalyticsPipelineService:
             f"cut {removed} metadata lines at or past it"
         )
         return position or None
+
+    def _plan_skip(self, pipeline_name: str, reached: int) -> Optional[int]:
+        """Return where to resume to skip a segment, or None to resume normally.
+
+        ``reached`` is the furthest frame the run that just ended wrote. The
+        state kept per pipeline makes this a judgement across runs: one that
+        failed without getting ``resume_progress_min_sec`` past the best any
+        earlier run managed is stuck, and stuck runs in a row skip further.
+        """
+        state = self.pipeline_resume_state.setdefault(
+            pipeline_name, {"reached": None, "stuck": 0}
+        )
+        best = state["reached"]
+        progress_ns = int(self.resume_progress_min_sec * 1e9)
+        if best is not None and reached < best + progress_ns:
+            state["stuck"] += 1
+        else:
+            state["stuck"] = 0
+        state["reached"] = reached if best is None else max(best, reached)
+        if not state["stuck"]:
+            return None
+
+        jump = min(
+            self.resume_skip_first_sec * 2 ** (state["stuck"] - 1),
+            self.resume_skip_max_sec,
+        )
+        start, end = state["reached"], state["reached"] + int(jump * 1e9)
+        segments = self.pipeline_skipped_segments.setdefault(pipeline_name, [])
+        if state["stuck"] > 1 and segments and segments[-1][0] == start:
+            # The same stuck point again: the skip grows rather than adding one.
+            segments[-1] = (start, end)
+        else:
+            segments.append((start, end))
+        message = (
+            f"Skipped {start / 1e9:.1f}s-{end / 1e9:.1f}s of the video: "
+            f"{state['stuck']} restart(s) in a row failed without getting past "
+            f"{state['reached'] / 1e9:.1f}s"
+        )
+        self.logger.warning(f"[VA][monitor] '{pipeline_name}' {message}")
+        self.pipeline_errors.setdefault(pipeline_name, []).append(message)
+        return end
 
     def _finalize_pipeline(self, pipeline_name: str, status: str) -> None:
         """Record a pipeline's terminal status, then fire the all-done callback.
@@ -1145,6 +1218,9 @@ class VideoAnalyticsPipelineService:
 
             # Initialize retry count
             self.pipeline_retry_counts[pipeline_name] = 0
+            # A fresh launch starts with no history of where earlier runs got to.
+            self.pipeline_resume_state.pop(pipeline_name, None)
+            self.pipeline_skipped_segments.pop(pipeline_name, None)
             # Clear any prior final status for a fresh launch
             self.pipeline_final_status.pop(pipeline_name, None)
 
