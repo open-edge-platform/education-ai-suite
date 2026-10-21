@@ -40,7 +40,7 @@ python -m venv smartclassroom
 smartclassroom\Scripts\activate
 
 # Use Python 3.12.x before running pip.
-cd smart-classroom
+cd Windows
 python.exe -m pip install --upgrade pip
 pip install --upgrade -r requirements.txt
 ```
@@ -65,7 +65,7 @@ shutil.which("soffice") is not None   # should return True
 
 ### A. Enable Feature Configuration
 
-The application is built using a modular feature architecture, allowing users to enable or disable individual features through the `features:` block in `smart-classroom/config.yaml`. Only enabled features are initialized at startup—they load their required models, register their API routes, and start their associated services.
+The application is built using a modular feature architecture, allowing users to enable or disable individual features through the `features:` block in `smart-classroom/Windows/config.yaml`. Only enabled features are initialized at startup—they load their required models, register their API routes, and start their associated services.
 
 ```yaml
 features:
@@ -84,7 +84,7 @@ features:
 
 ### B. Default Configuration
 
-By default, the project uses Whisper for transcription, and summarization runs on the shared OpenVINO™ vision-language model configured under `models.text_gen`. You can modify these settings in the configuration file (`smart-classroom/config.yaml`):
+By default, the project uses Whisper for transcription, and summarization runs on the shared OpenVINO™ vision-language model configured under `models.text_gen`. You can modify these settings in the configuration file (`smart-classroom/Windows/config.yaml`):
 
 ```yaml
 asr:
@@ -106,7 +106,7 @@ text_gen:                     # Shared by summary, mindmap, segmentation and Q&A
 
 ### C. Chinese Audio Transcription
 
-For Chinese audio transcription, switch to funASR with Paraformer in your config (`smart-classroom/config.yaml`):
+For Chinese audio transcription, switch to funASR with Paraformer in your config (`smart-classroom/Windows/config.yaml`):
 
 ```yaml
 asr:
@@ -188,7 +188,7 @@ Copy the generated token
 
 #### c. Configure Hugging Face Token in Project Config
 
-Open `smart-classroom/config.yaml` and set `diarization: true` under `models.asr`, then add your Hugging Face token:
+Open `smart-classroom/Windows/config.yaml` and set `diarization: true` under `models.asr`, then add your Hugging Face token:
 
 ```yaml
 models:
@@ -307,7 +307,7 @@ Smart Grading uses a layout detection model that requires a one-time conversion 
 ### A. Create the Model Conversion Environment
 
 ```PowerShell
-cd smart-classroom\components\grading\providers\layout_detection_service
+cd smart-classroom\Windows\components\grading\providers\layout_detection_service
 python -m venv venv_convert
 .\venv_convert\Scripts\pip install -r requirements_convert.txt
 ```
@@ -327,13 +327,13 @@ Open two new terminal windows (the Backend terminal must remain running):
 
 **Terminal — Layout Detection (port 9902):**
 ```PowerShell
-cd smart-classroom\components\grading\providers
+cd smart-classroom\Windows\components\grading\providers
 python .\layout_detection_service\layout_detection_server.py
 ```
 
 **Terminal — Grading Service (port 9012):**
 ```PowerShell
-cd smart-classroom\components\grading
+cd smart-classroom\Windows\components\grading
 python grading_service.py
 ```
 
@@ -344,7 +344,7 @@ python grading_service.py
 > The backend and Content Search terminals stay busy serving requests.
 
 ```bash
-cd <path-to>\education-ai-suite\smart-classroom\ui
+cd <path-to>\education-ai-suite\smart-classroom\Windows\ui
 npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
@@ -362,7 +362,7 @@ This is an additive layer: it connects to the same backend services,
 so those must be running as in the previous steps.
 
 ```bash
-cd <path-to>\education-ai-suite\smart-classroom\ui
+cd <path-to>\education-ai-suite\smart-classroom\Windows\ui
 npm install
 
 # Development: opens the desktop window and starts the dev server on 5173
@@ -417,7 +417,7 @@ the port, adjust the URL accordingly.
   1. Delete the models directory:
 
      ```text
-     education-ai-suite/smart-classroom/models
+     education-ai-suite/smart-classroom/Windows/models
      ```
 
   2. Rerun only Step 1, option D. If the virtual environment already exists, rerun the required pip commands.
@@ -432,7 +432,7 @@ the port, adjust the URL accordingly.
   Either openvino_tokenizer.xml was not provided or it was not loaded correctly. Tokenizer::encode is not available
   ```
 
-  Delete the models folder from `education-ai-suite/smart-classroom/models` and try again.
+  Delete the models folder from `education-ai-suite/smart-classroom/Windows/models` and try again.
 
 - If you see below error while running dls setup script,
 
@@ -466,12 +466,12 @@ To uninstall the application, follow these steps:
 
 1. **Delete the Python virtual environment folder:** \
    Navigate to the directory and remove \
-  *education-ai-suite/smartclassroom*. \
-  For grading model conversion environment (if created): *education-ai-suite/smart-classroom/components/grading/providers/layout_detection_service/venv_convert*.
+  *education-ai-suite/smart-classroom/smartclassroom*. \
+  For grading model conversion environment (if created): *education-ai-suite/smart-classroom/Windows/components/grading/providers/layout_detection_service/venv_convert*.
 2. **Remove the models directory:**
-  Remove the models folder located under *education-ai-suite/smart-classroom*.
+  Remove the models folder located under *education-ai-suite/smart-classroom/Windows*.
 3. **Remove the content search database:**
-  Remove uploaded files, vector database and upload record at *education-ai-suite/smart-classroom/content_search/data*.
+  Remove uploaded files, vector database and upload record at *education-ai-suite/smart-classroom/Windows/content_search/data*.
 
 <!--hide_directive
 :::{toctree}

@@ -6,7 +6,7 @@
 ## Running
 
 The suite is written as pytest functions, so `unittest discover` will collect
-nothing. From `education-ai-suite/smart-classroom`, with the project venv
+nothing. From `education-ai-suite/smart-classroom/Windows`, with the project venv
 active:
 
 ```sh
