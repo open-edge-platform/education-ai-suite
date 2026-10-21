@@ -8,7 +8,7 @@ Smart Classroom 2026.2 refactors the backend around a **modular feature-module
 architecture** and adds two new classroom AI capabilities — **VLM-based exam grading with
 graded reports** and **Board (content-screen) OCR**. It also introduces a cross-platform
 **Flutter application** for Content Search. All new capabilities run locally on Intel
-hardware using OpenVINO.
+hardware using OpenVINO™.
 
 **New**:
 
@@ -57,7 +57,7 @@ hardware using OpenVINO.
 
 Smart Classroom 2026.1, a modular, extensible framework for the Windows OS, adds a Content Search subsystem, document upload, text/image retrieval,
 OCR, QnA, and multilingual processing including Mandarin/Chinese. This release also adds
-WebRTC WHEP streaming, Intel® Wildcat Lake (WCL) platform support, and updates to audio transcription.
+WebRTC WHEP streaming, Intel® Core™ Series 3 (codenamed Wildcat Lake) platform support, and updates to audio transcription.
 
 **New**:
 
@@ -67,9 +67,9 @@ WebRTC WHEP streaming, Intel® Wildcat Lake (WCL) platform support, and updates 
 - **OCR** in Content Search with OpenVINO™ and PaddleOCR for printed and handwritten documents.
 - **Mandarin/Chinese language support** for QnA and transcription pipelines.
 - **File listing and file removal endpoints** in the Content Search API.
-- **Config API endpoint** in Content Search for runtime search and embedding settings.
+- **Configuration API endpoint** in Content Search for runtime search and embedding settings.
 - **WebRTC WHEP streaming** for low-latency live video delivery.
-- **Intel(R) Core(TM) Series 3** (Wildcat Lake) processor support.
+- **Intel® Core™ Series 3** processor support.
 - **Video start and end timestamps** in Content Search results for precise navigation.
 - **Resource utilization monitoring** to cap pipeline resource usage.
 
@@ -86,7 +86,7 @@ WebRTC WHEP streaming, Intel® Wildcat Lake (WCL) platform support, and updates 
 - Error tracking for pipeline status reporting.
 - Video summarization output consistency.
 - UI behavior to stop active streaming sessions automatically after 10 minutes.
-- Support for DL Streamer 2026.1.
+- Support for Deep Learning Streamer (DL Streamer) 2026.1.
 - Summary scoring formula updates and reranker configuration refactoring.
 - Content Search download streaming optimization to reduce memory overhead for large file
   transfers.
@@ -109,7 +109,7 @@ WebRTC WHEP streaming, Intel® Wildcat Lake (WCL) platform support, and updates 
 
 **Release Date**: April 1, 2026
 
-The Smart Classroom application now offers a series after-class summary enhancements in the form of next‑generation real-time audio and visual analytics, giving teachers and schools a better understanding of classroom dynamics through AI‑driven summaries and engagement metrics.
+The Smart Classroom application now offers after-class summary enhancements through next‑generation real-time audio and visual analytics. Teachers and schools gain a better understanding of classroom dynamics through AI‑driven summaries and engagement metrics.
 
 The Education AI Suite now also includes built-in telemetry hooks and benchmarking.
 
@@ -130,9 +130,9 @@ The Education AI Suite now also includes built-in telemetry hooks and benchmarki
   - track posture changes (stand up/sit down)
   - track teacher movement
 
-- **Built‑in telemetry** to measure classroom workloads across Intel platforms (CPU core utilization, iGPU load, NPU load, memory usage, workload-specific performance counters)
+- **Built‑in telemetry** to measure classroom workloads across Intel platforms (CPU core utilization, iGPU load, NPU load, memory usage, and workload-specific performance counters)
 
-- **Benchmarking scripts** to reproduce Intel internal performance measurements, and validate XPU performance
+- **Benchmarking scripts** to reproduce Intel internal performance measurements and validate XPU performance
 
 **Improved**:
 
@@ -142,7 +142,7 @@ The Education AI Suite now also includes built-in telemetry hooks and benchmarki
 
 - [GitHub](https://github.com/open-edge-platform/education-ai-suite/tree/main/smart-classroom)
 
-## Previous releases
+## Previous Releases
 
 - [Release notes 2025](./release-notes/release-notes-2025.md)
 
