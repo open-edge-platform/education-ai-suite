@@ -73,6 +73,8 @@ class ChatRequest(BaseModel):
         temperature (Optional[float]): The temperature for randomness.
         top_p (Optional[float]): The top-p sampling value.
         stream (Optional[bool]): Whether to stream the response.
+        stream_options (Optional[dict]): ``{"include_usage": true}`` ends the
+            stream with a chunk carrying token usage (OpenAI convention).
         top_k (Optional[int]): The top-k sampling value.
         do_sample (Optional[bool]): Whether to sample.
         seed (Optional[int]): The seed for reproducibility.
@@ -100,6 +102,10 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = Field(None, json_schema_extra={"example": 0.3})
     top_p: Optional[float] = Field(None, json_schema_extra={"example": 0.5})
     stream: Optional[bool] = Field(False, json_schema_extra={"example": True})
+    stream_options: Optional[Dict[str, Any]] = Field(
+        None,
+        json_schema_extra={"example": {"include_usage": True}},
+    )
     top_k: Optional[int] = Field(None, json_schema_extra={"example": 40})
     do_sample: Optional[bool] = Field(None, json_schema_extra={"example": True})
     seed: Optional[int] = Field(

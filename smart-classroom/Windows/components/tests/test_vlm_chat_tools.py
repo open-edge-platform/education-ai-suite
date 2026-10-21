@@ -96,6 +96,40 @@ def test_plain_stream_shape_is_unchanged(client_for):
     assert events[-2]["choices"][0]["finish_reason"] == "stop" and events[-1] == "[DONE]"
 
 
+def test_plain_chat_reports_runtime_usage(client_for):
+    r = client_for(FakeHandler("hello")).post("/v1/chat/completions", json={
+        "messages": [{"role": "user", "content": "x"}]})
+    assert r.json()["usage"] == {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_plain_chat_cut_at_max_tokens_finishes_with_length(client_for, stream):
+    client = client_for(FakeHandler("hello", truncated=True))
+    payload = {"stream": stream, "messages": [{"role": "user", "content": "x"}]}
+    if not stream:
+        assert client.post("/v1/chat/completions", json=payload).json()[
+            "choices"][0]["finish_reason"] == "length"
+        return
+    with client.stream("POST", "/v1/chat/completions", json=payload) as r:
+        events = _sse(r)
+    assert events[-2]["choices"][0]["finish_reason"] == "length"
+
+
+@pytest.mark.parametrize("tools", [None, TOOLS])
+def test_stream_include_usage_ends_with_a_usage_chunk(client_for, tools):
+    payload = {"stream": True, "stream_options": {"include_usage": True},
+               "messages": [{"role": "user", "content": "x"}]}
+    if tools:
+        payload["tools"] = tools
+    with client_for(FakeHandler("hello")).stream("POST", "/v1/chat/completions",
+                                                  json=payload) as r:
+        events = _sse(r)
+    assert events[-1] == "[DONE]"
+    assert events[-2]["choices"] == [] and events[-2]["usage"] == {
+        "prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+    assert events[-3]["choices"][0]["finish_reason"] == "stop"
+
+
 @pytest.mark.parametrize("url", ["C:/Users/x/photo.png", "https://example.com/x.png"])
 def test_plain_chat_accepts_only_inline_images(client_for, url):
     handler = FakeHandler("ok")
