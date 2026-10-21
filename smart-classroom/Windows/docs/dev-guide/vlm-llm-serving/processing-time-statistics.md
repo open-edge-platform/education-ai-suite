@@ -21,18 +21,28 @@ calls to see what inference costs. The requirements behind this feature are in
 | Stage name | Covers | Record |
 | --- | --- | --- |
 | `transcribe` | Audio input through the final transcript, including waiting for live audio and optional diarization | Stage + ASR calls |
-| `va` | Video analytics, from start through final analytics output | Stage only |
+| `va` | Video analytics, from launching the pipelines through final analytics output | Stage only; per pipeline, the runner logs (see [Generate a Report](#generate-a-report)) |
 | `summarize` | Summary generation through the saved summary (all map/reduce calls when chunking) | Stage + text-generation calls |
 | `mindmap` | Mindmap generation, validation and saving | Stage + text-generation calls |
 | `segmentation` | Topic segmentation through saved topics | Stage + text-generation calls |
 | `report` | Session data collection through the generated report | Stage + text-generation calls |
-| `board_ocr` | Board OCR worker during a session | OCR calls only |
+| `board_ocr` | Board OCR worker during a session, from its start until the frame backlog is drained (or it is stopped) | Stage + OCR calls; not mirrored onto the session row, which does not declare it |
 | `document_ocr` | `POST /ocr/extract-text` | OCR calls only |
 | `qa`, `video_captioning`, `grading` | Content-search Q&A, video captioning and grading requests to `/v1/chat/completions` | Text-generation calls only |
 | `chat_api` | Any other `/v1/chat/completions` request | Text-generation calls only |
 
 Stages recorded through calls only have no stage record. The report script
 draws them as a span from their first to their last call.
+
+A stage still running when the backend shuts down (VA above all, which lasts
+as long as its videos) is recorded as `interrupted`, with error class
+`Shutdown` and the time it had run up to the stop signal. It is recorded the
+moment Ctrl+C (or Ctrl+Break) reaches the backend, before the server waits
+for open connections to close, because `start-smart-classroom.ps1`
+force-kills the backend within a second of Ctrl+C. A kill with no signal
+before it (`taskkill /F` alone, which the desktop app's service manager uses)
+leaves no time for that. The report then still shows each VA pipeline from
+its runner log.
 
 A client of `/v1/chat/completions` can name its stage with the
 `X-SC-Stage: <lowercase_name>` header (letters, digits and `_`, up to 32
@@ -63,7 +73,8 @@ images, tool arguments or local paths.
 ### Not Recorded
 
 * Per-call times inside VA, embedding, reranking and grading layout or detection
-  models. VA has a stage record only.
+  models. VA has a stage record; its per-pipeline times and frame rates come
+  from the runner logs.
 * Model download, conversion, load and warm-up. These appear once per start in
   `GET /health` under `text_gen.serving.startup` (`prepare_s`, `load_s`,
   `warmup_s`).
@@ -79,6 +90,12 @@ images, tool arguments or local paths.
 `<project>` is the `Project` location and name in `runtime_config.yaml`
 (`storage/smart-classroom` by default). Calls that belong to no session, such
 as plain chat API requests, are kept only in memory.
+
+Recording costs about 0.25 ms per model call and 0.2 ms per stage attempt,
+including the file append. Each line is written when its call or stage ends,
+so a forced kill loses only work still in progress. VA pipeline times cost
+nothing at run time: the report reads them from the runner logs and result
+files afterwards.
 
 ## Query the API
 
@@ -147,19 +164,57 @@ python Scripts/processing_stats_report.py stats.json --session 20261017-235509-d
 
 Without `-o`, the report is printed to the console. For each session it shows:
 
-* **Workflow window**: from the first stage or call to the end of the last one.
-  The report also shows how long the remaining outputs took after transcription
-  ended.
-* **Timeline**: one lane per stage and one per model capability, along a shared
-  time axis. The chart is drawn twice: as a Mermaid Gantt chart (rendered by
-  GitHub, and by VS Code with a Mermaid preview extension) and as plain text.
-  Failed or interrupted work is red in Mermaid and `X` in the text view. Lanes
-  marked `*` are drawn from model calls only.
+* **Session state**: when `sessions.db` sits next to the session directory (the
+  default layout), the session's final state and how each declared stage ended,
+  including stages that never started because the session ended first. The
+  store keeps a session `running` until the app's next start marks it failed.
+  If VA runners were interrupted, or stages were recorded as interrupted at
+  shutdown, the report says the app stopped while the session ran, and does
+  not present the session as in progress.
+* **Workflow window**: from the first stage, call or VA pipeline to the end of
+  the last one. The report also shows how long the remaining outputs took after
+  transcription ended.
+* **Timeline**: one lane per stage, one per VA pipeline (`va front`, `va back`,
+  `va content`) and one per model capability, along a shared time axis. The
+  chart is drawn twice: as a Mermaid Gantt chart (rendered by GitHub, and by VS
+  Code with a Mermaid preview extension) and as plain text. Failed or
+  interrupted work is red in Mermaid and `X` in the text view. Lanes marked `*`
+  are drawn from model calls only.
 * **Stages**: one row per attempt, with start and end offsets, duration, the
   number of model calls, their total model time (failed and cancelled calls
   included) and their queue wait. A call is counted for the last attempt of its
   stage that started before the call was submitted, so a retried stage does not
   show the same calls twice.
+* **Video analytics**: one row per pipeline attempt, read from the runner logs in
+  `<session>/raw/va/logs` (`<pipeline>_<launch epoch>.log`; a restarted pipeline
+  has one log per attempt). Each row has the input (file name, or "RTSP stream"),
+  the status, start, end and duration (wall time from `PLAYING` to the last log
+  line, or to the report for a pipeline still running), the input length (an
+  MP4's own length, read from its header), the input processed (the input
+  position of the last frame in the pipeline's result files, with its share of
+  the input length), the speed (input processed per second of processing), the
+  gvafpscounter average frame rate, the line count of each result file (one
+  line per frame with published metadata) and the models with their devices.
+  A pipeline that ended before the end of its input (stopped, failed or
+  interrupted) is listed under **Input not fully processed**. Its duration is
+  shorter than the input length because part of the input was never
+  processed, not because processing was faster.
+  Status is `done` (EOS), `stopped` (stop requested), `failed` (an error was
+  logged), `running` or `interrupted` (the runner never tore down normally:
+  the backend was stopped or killed while it ran). The runners write these logs
+  themselves, so the rows are there even when no `va` stage record was written;
+  the report says which. A pipeline the session requested (from `sessions.db`)
+  that has no runner log is listed as never launched.
+
+  A VA duration is not always the input's length. When the pipeline streams
+  its video (the UI's sessions), the stream output plays the file in real
+  time, so a 5-minute file takes about 300 s (speed about 1.0x). A headless
+  `/api/v1/sessions/process` session turns the stream output off, nothing
+  holds the pipeline to the clock, and the same file can finish in about
+  50 s (speed about 6x) with the same frames analyzed. Compare the duration
+  with the processed column, not with the input length. For example, a
+  real-time pipeline that ran 260 s and processed 261 s of a 300 s file did not
+  run fast: the backend was stopped 40 s before the end of the video.
 
 After the per-session sections, the report adds two tables for all sessions:
 stage-duration statistics, and model-call statistics. The model-call table
@@ -185,10 +240,17 @@ text_gen calls  |                                ██████████�
 
 In this run, segmentation is marked `*` because the application was closed
 before that stage finished: its model call completed, but no stage record was
-written.
+written. The backend now records such a stage as `interrupted` on a normal
+shutdown.
 
 ## Reading the Numbers
 
+* **A report of a running session is a snapshot.** It opens with an
+  "In progress" note: VA pipelines still playing show their time so far and
+  the input processed so far (with 5-minute videos, about 175 s three minutes
+  in, not 300 s), the `va` stage is
+  still open, and later stages have not started. Re-run the report once the
+  session state is `completed`.
 * **Do not add up stage durations.** ASR, VA and board OCR run at the same time,
   and summary, mindmap, segmentation and report share one text-generation
   queue. Use the workflow window for end-to-end time.

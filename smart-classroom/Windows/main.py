@@ -36,7 +36,12 @@ async def lifespan(app: FastAPI):
     from utils.session_store import SessionStore
     SessionStore.recover_after_restart()
     yield
-    # Shutdown: drain in-flight capability work and release device (GPU) memory.
+    # Shutdown: record stages still running (VA on its daemon thread) as
+    # interrupted before anything else can stall the exit. Usually a no-op by
+    # now: _Server.handle_exit already did it when the stop signal arrived.
+    from utils.stage_tracker import close_open_stages
+    close_open_stages()
+    # Then drain in-flight capability work and release device (GPU) memory.
     from model_manager import ModelManager
     logger.info("Shutdown: draining capabilities and releasing devices...")
     ModelManager.instance().shutdown()
@@ -90,12 +95,38 @@ if __name__ == "__main__":
 
     ensure_model()
 
+    import threading
     import uvicorn
+    from utils.stage_tracker import close_open_stages
+
+    class _Server(uvicorn.Server):
+        """Records running stages as interrupted the moment a stop signal arrives.
+
+        The lifespan shutdown runs only after open connections close (up to
+        timeout_graceful_shutdown), and a second Ctrl+C skips it. Meanwhile
+        start-smart-classroom.ps1 force-kills the backend within a second of
+        Ctrl+C, so VA, which runs as long as its videos, was left with no
+        record. On a thread: a signal handler interrupts the main thread,
+        which may hold the locks close_open_stages() takes.
+        """
+
+        def handle_exit(self, sig, frame):
+            if not self.should_exit:
+                threading.Thread(target=close_open_stages, name="close-open-stages",
+                                 daemon=True).start()
+            super().handle_exit(sig, frame)
+
     logger.info("App started, Starting Server...")
-    uvicorn.run(
+    server = _Server(uvicorn.Config(
         "main:app",
         host="127.0.0.1",
         port=8000,
         reload=False,
         timeout_graceful_shutdown=5,
-    )
+    ))
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass  # as uvicorn.run(): the captured Ctrl+C is re-raised after shutdown
+    if not server.started:
+        sys.exit(3)  # uvicorn's STARTUP_FAILURE

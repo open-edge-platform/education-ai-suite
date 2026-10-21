@@ -93,3 +93,61 @@ def test_store_failure_does_not_break_the_stage():
     ):
         with stage_tracker("s1", "summarize"):
             pass  # no exception escapes
+
+
+def test_shutdown_records_a_running_stage_once():
+    """VA runs inside stage_tracker on a daemon thread; at interpreter exit that
+    thread is frozen mid-stage, so shutdown must write the record for it."""
+    from utils.stage_tracker import close_open_stages
+
+    with patch("utils.stage_tracker.StageEventWriter.write") as mw, patch(
+        "utils.stage_tracker.SessionStore.set_stage"
+    ):
+        with stage_tracker("s1", "va"):
+            assert close_open_stages() == 1
+            args, kwargs = mw.call_args
+            assert args[1:3] == ("va", "interrupted") and args[3] is not None
+            assert args[5] >= 0 and kwargs.get("error_class") == "Shutdown"
+        # The stage's own end, arriving later, does not add a second record.
+        assert mw.call_count == 1
+        assert close_open_stages() == 0
+
+
+def test_shutdown_closes_a_manually_opened_stage_once():
+    """The UI's VA stage spans two endpoints (stage_started/stage_finished)."""
+    from utils.stage_tracker import close_open_stages, stage_finished, stage_started
+
+    with patch("utils.stage_tracker.StageEventWriter.write") as mw, patch(
+        "utils.stage_tracker.SessionStore.set_stage"
+    ):
+        stage_started("s2", "va")
+        assert close_open_stages() == 1
+        stage_finished("s2", "va", "failed")  # e.g. the atexit cleanup ending VA
+        assert [c.args[2] for c in mw.call_args_list] == ["interrupted"]
+        # A new attempt of the same stage records normally again.
+        stage_started("s2", "va")
+        stage_finished("s2", "va", "done")
+        assert [c.args[2] for c in mw.call_args_list] == ["interrupted", "done"]
+
+
+def test_a_stage_that_never_started_is_still_recorded():
+    from utils.stage_tracker import stage_finished
+
+    with patch("utils.stage_tracker.StageEventWriter.write") as mw, patch(
+        "utils.stage_tracker.SessionStore.set_stage"
+    ):
+        stage_finished("s3", "va", "failed", error_detail="no pipeline launched")
+    args, kwargs = mw.call_args
+    assert args[2] == "failed" and args[3] is None and args[5] is None
+
+
+def test_a_side_stage_is_recorded_but_never_reaches_the_session_row():
+    """Board OCR is no declared session stage; mirroring it would make it the
+    session's current_stage."""
+    with patch("utils.stage_tracker.StageEventWriter.write") as mw, patch(
+        "utils.stage_tracker.SessionStore.set_stage"
+    ) as mset:
+        with stage_tracker("s4", "board_ocr"):
+            pass
+    assert mw.call_args.args[1:3] == ("board_ocr", "done")
+    assert not mset.called

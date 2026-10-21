@@ -59,3 +59,15 @@ def test_rtsp_video_source_is_accepted(client):
 def test_stages_not_a_list_returns_422(client):
     resp = _post(client, {"stages": "transcribe"})
     assert resp.status_code == 422
+
+# A video source that names no VA pipeline is rejected before a session starts;
+# it used to be accepted and then skipped at launch with only a log warning.
+def test_unknown_video_source_returns_400(client):
+    resp = _post(client, {"stages": ["va"],
+                          "video_sources": {"side": "rtsp://127.0.0.1:8554/live"}})
+    assert resp.status_code == 400
+    assert "unknown video source 'side'" in resp.json()["detail"]
+    resp = _post(client, {"stages": ["va"], "video_sources": {
+        "board": "rtsp://127.0.0.1:8554/a", "content": "rtsp://127.0.0.1:8554/b"}})
+    assert resp.status_code == 400
+    assert "two video sources for the content pipeline" in resp.json()["detail"]

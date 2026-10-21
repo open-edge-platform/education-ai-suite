@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 from utils.config_loader import config
-from utils.processing_stats import stage_scope
+from utils.stage_tracker import stage_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -337,8 +337,12 @@ class BoardOCRWorker:
 
     def _run_attributed(self):
         # A new thread starts without the caller's stage: attribute its OCR
-        # calls to this session's board OCR, apart from document OCR.
-        with stage_scope(self.session_id, "board_ocr"):
+        # calls to this session's board OCR, apart from document OCR, and record
+        # the worker's own lifetime as the board_ocr stage. Without a stage
+        # record the report could only infer it from the first to the last OCR
+        # call, which misses the polling before the first new board frame and
+        # after the last one.
+        with stage_tracker(self.session_id, "board_ocr"):
             self._run()
 
     def _run(self):
