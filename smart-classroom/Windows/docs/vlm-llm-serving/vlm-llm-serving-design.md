@@ -208,14 +208,21 @@ Tool definitions and selection are per-request API fields (`tools`, `tool_choice
 
 ## 5. Model Preparation
 
-The model owner prepares its artifacts when it loads the warm model, before it reports ready (`components/vlm/text_gen_prepare.py`, called from the VLM load). Every startup path therefore prepares the same way and needs no launcher step or switch: [start-smart-classroom.ps1](../../start-smart-classroom.ps1), the desktop app ([start-desktop-app.ps1](../../start-desktop-app.ps1)) and `python main.py`. The first start downloads or converts what is missing; later starts only validate. Dependent services already wait for the owner's `/health` before using the model. Request handlers never download or convert files.
+The model owner prepares artifacts during model initialization, before reporting readiness. The shared preparation logic in `components/vlm/text_gen_prepare.py` is called from the VLM load path. As a result, [start-smart-classroom.ps1](../../start-smart-classroom.ps1), the desktop application [start-desktop-app.ps1](../../start-desktop-app.ps1), and `python main.py` use the same preparation process; none requires a separate launcher step or switch.
 
-1. **Select:** Resolve the target and speculative policy, method and source. Validate explicit settings, then select the compatible catalog profile. A recognized method without runtime/profile support means plain generation in `auto` or an actionable failure in `"on"`.
-2. **Prepare:** Download the target's catalog IR and, for Hub drafters, the pinned drafter files over HTTPS. For `local`, validate the specified IR directory without downloading a replacement drafter. For MTP, acquire the target's bundled head and metadata without downloading an unrelated external model. Use runtime-ready IR directly; convert downloaded sources only through the profile's qualified recipe. Network failures do not trigger unrelated export attempts.
-3. **Validate:** Check required files, integrity, tokenizer/processor compatibility, runtime versions and target/drafter graph interfaces. Preserve the ordinary target if accelerated export needs separate IR. Record a manifest without overwriting active files or changing legacy model paths.
-4. **Activate:** Load the resolved artifacts and run warm-up. Report readiness only after success; a completed download alone is not a ready model.
+On first start, the helper downloads or converts missing artifacts. On later starts, it reuses and validates existing artifacts, rebuilding derived artifacts when source hashes change. Dependent services wait for the model owner’s `/health` endpoint before using the model. Request handlers do not download or convert files.
 
-Create storage on demand, use resumable staging and per-artifact locks, and publish only complete validated artifacts. Bound retries and check disk space for weights and conversion intermediates. Keep prior valid artifacts for rollback. Legacy files can be validated and reused without claiming provenance that is not known.
+The following steps describe the model-preparation requirements. MTP preparation is planned; the design does not currently list a qualified MTP profile.
+
+1. **Select:** The helper resolves the target, speculative policy, method, and source. It validates explicit settings, then selects a compatible catalog profile. Before downloading, it validates the resolved target, method, source, and revision against artifact metadata and the selected profile. If a recognized method lacks runtime or profile support, the helper uses plain generation in `auto` mode or returns an actionable error in `"on"` mode.
+
+2. **Prepare:** The preparation helper downloads the target’s catalog IR and, for Hub drafters, the pinned drafter files over HTTPS. For `local`, it validates the specified IR directory without downloading a replacement drafter. For a qualified MTP profile, the helper acquires the target’s bundled head and metadata without downloading an unrelated external model. It uses runtime-ready IR directly and converts downloaded sources only through the profile’s qualified recipe. Network failures do not trigger unrelated export attempts.
+
+3. **Validate:** The helper checks required files, integrity, tokenizer and processor compatibility, runtime versions, and target and drafter graph interfaces. It preserves the ordinary target if accelerated export needs separate IR. It records a manifest without overwriting active files or changing legacy model paths.
+
+4. **Activate:** After preparation succeeds, the model owner loads the resolved artifacts and runs warm-up. The service reports readiness only after warm-up succeeds; a completed download alone does not mean the model is ready.
+
+Preparation creates storage on demand, uses resumable staging and per-artifact locks, and publishes only complete, validated artifacts. It bounds retries and checks disk space for weights and conversion intermediates. It keeps prior valid artifacts for rollback. When preparation reuses legacy files, it validates them without claiming unknown provenance.
 
 **Implemented:**
 
