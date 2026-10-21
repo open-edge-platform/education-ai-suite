@@ -52,18 +52,25 @@ class TextGenHandler:
         tools: Optional[list] = None,
         force_tool_call: Optional[str] = None,
         finish_info: Optional[dict] = None,
+        sampling: Optional[dict] = None,
     ) -> Union[Iterator[str], str]:
         """Generate from ``messages`` (a chat history) or ``prompt`` (one user
         turn). Templating happens inside the VLM, so callers pass raw text.
+
+        ``sampling`` holds the request's own decoding parameters (``top_p``,
+        ``top_k``, ``repetition_penalty``, ``presence_penalty``,
+        ``frequency_penalty``); omitted keys keep the runtime defaults.
 
         Every call is timed as one model-call record (queue wait separate from
         latency) attributed to the stage open in the caller's context."""
         runner = self._get_runner()
         call = self._model_call(stream)
-        # Tool-calling arguments only when used, as classroom callers pass none.
+        # Tool-calling and sampling arguments only when used, as classroom
+        # callers pass none.
         extra = {key: value for key, value in (("tools", tools),
                                                ("force_tool_call", force_tool_call),
-                                               ("finish_info", finish_info))
+                                               ("finish_info", finish_info),
+                                               ("sampling", sampling or None))
                  if value is not None}
         try:
             return runner.submit(

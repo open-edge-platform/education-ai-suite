@@ -144,6 +144,17 @@ def _include_usage(chat_req) -> bool:
     return bool((chat_req.stream_options or {}).get("include_usage"))
 
 
+_SAMPLING_FIELDS = ("top_p", "top_k", "repetition_penalty", "presence_penalty",
+                    "frequency_penalty")
+
+
+def _sampling(chat_req) -> Optional[dict]:
+    """Decoding parameters the client set; None when it set none."""
+    values = {key: getattr(chat_req, key) for key in _SAMPLING_FIELDS
+              if getattr(chat_req, key) is not None}
+    return values or None
+
+
 def _finish_reason(info: dict) -> str:
     """``length`` when generation stopped at max_new_tokens, else ``stop``."""
     return "length" if info.get("truncated") else "stop"
@@ -245,6 +256,7 @@ async def _chat_completions(request: Request):
                 temperature=chat_req.temperature,
                 enable_thinking=chat_req.enable_thinking,
                 finish_info=info,
+                sampling=_sampling(chat_req),
             )
             return StreamingResponse(
                 _sse_stream(token_iter, model_name, info, _include_usage(chat_req)),
@@ -260,6 +272,7 @@ async def _chat_completions(request: Request):
             temperature=chat_req.temperature,
             enable_thinking=chat_req.enable_thinking,
             finish_info=info,
+            sampling=_sampling(chat_req),
         )
     except UnsupportedRequestError as exc:
         # Rejected before generation rather than silently changed.
@@ -331,6 +344,7 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
         enable_thinking=chat_req.enable_thinking,
         tools=[t.for_template() for t in offered] or None,
         finish_info=info,
+        sampling=_sampling(chat_req),
     )
     if choice.requires_call:
         # "required" and named choices are enforced by starting the answer

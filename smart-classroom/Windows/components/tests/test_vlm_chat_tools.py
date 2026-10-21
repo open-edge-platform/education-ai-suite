@@ -130,6 +130,32 @@ def test_stream_include_usage_ends_with_a_usage_chunk(client_for, tools):
     assert events[-3]["choices"][0]["finish_reason"] == "stop"
 
 
+@pytest.mark.parametrize("tools", [None, TOOLS])
+def test_request_sampling_is_forwarded_only_when_set(client_for, tools):
+    handler = FakeHandler("ok")
+    client = client_for(handler)
+    payload = {"messages": [{"role": "user", "content": "x"}],
+               "presence_penalty": 1.5, "repetition_penalty": 1.05, "top_p": 0.8, "top_k": 20}
+    if tools:
+        payload["tools"] = tools
+    client.post("/v1/chat/completions", json=payload)
+    client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "x"}]})
+    assert handler.calls[0][1]["sampling"] == {
+        "presence_penalty": 1.5, "repetition_penalty": 1.05, "top_p": 0.8, "top_k": 20}
+    assert handler.calls[1][1]["sampling"] is None
+
+
+@pytest.mark.parametrize("field, value", [
+    ("presence_penalty", 2.5), ("frequency_penalty", -3), ("repetition_penalty", 0),
+    ("top_p", 0), ("top_p", 1.5), ("top_k", 0),
+])
+def test_out_of_range_sampling_is_a_400_before_generation(client_for, field, value):
+    handler = FakeHandler("ok")
+    r = client_for(handler).post("/v1/chat/completions", json={
+        field: value, "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 400 and handler.calls == []
+
+
 @pytest.mark.parametrize("url", ["C:/Users/x/photo.png", "https://example.com/x.png"])
 def test_plain_chat_accepts_only_inline_images(client_for, url):
     handler = FakeHandler("ok")

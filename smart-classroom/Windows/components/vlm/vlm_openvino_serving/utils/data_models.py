@@ -82,12 +82,16 @@ class ChatRequest(BaseModel):
 
     messages: List[Message] = Field(...)
     model: Optional[str] = Field(None, json_schema_extra={"example": "llama-2-13b"})
+    # Sampling ranges mirror GenerationConfig.validate(), so an out-of-range
+    # value is a 400 here instead of a runtime error during generation.
     repetition_penalty: Optional[float] = Field(
-        None, json_schema_extra={"example": 1.15}
+        None, gt=0, json_schema_extra={"example": 1.15}
     )
-    presence_penalty: Optional[float] = Field(None, json_schema_extra={"example": 1.15})
+    presence_penalty: Optional[float] = Field(
+        None, ge=-2.0, le=2.0, json_schema_extra={"example": 1.5}
+    )
     frequency_penalty: Optional[float] = Field(
-        None, json_schema_extra={"example": 1.15}
+        None, ge=-2.0, le=2.0, json_schema_extra={"example": 0.5}
     )
     # gt=0: a non-positive limit is a malformed request (HTTP 400), never
     # forwarded to the native GenerationConfig.
@@ -100,13 +104,13 @@ class ChatRequest(BaseModel):
         json_schema_extra={"description": "Older OpenAI name, used when max_completion_tokens is not set"},
     )
     temperature: Optional[float] = Field(None, json_schema_extra={"example": 0.3})
-    top_p: Optional[float] = Field(None, json_schema_extra={"example": 0.5})
+    top_p: Optional[float] = Field(None, gt=0, le=1.0, json_schema_extra={"example": 0.5})
     stream: Optional[bool] = Field(False, json_schema_extra={"example": True})
     stream_options: Optional[Dict[str, Any]] = Field(
         None,
         json_schema_extra={"example": {"include_usage": True}},
     )
-    top_k: Optional[int] = Field(None, json_schema_extra={"example": 40})
+    top_k: Optional[int] = Field(None, ge=1, json_schema_extra={"example": 40})
     do_sample: Optional[bool] = Field(None, json_schema_extra={"example": True})
     seed: Optional[int] = Field(
         None,

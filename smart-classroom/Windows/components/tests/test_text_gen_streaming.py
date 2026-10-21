@@ -211,6 +211,38 @@ def test_plain_generation_config_is_unchanged():
     config = _vlm(_Pipe())._generation_config(8, 0.5)
     assert config.max_new_tokens == 8 and config.do_sample is True
     assert not config.num_assistant_tokens  # 0 before 2026.4, None after
+    assert config.presence_penalty == 0.0 and config.repetition_penalty == 1.0
+
+
+def test_request_sampling_reaches_the_generation_config():
+    captured = {}
+
+    class _CapturingPipe(_Pipe):
+        def generate(self, prompt, generation_config=None, streamer=None, images=None):
+            captured["config"] = generation_config
+            return super().generate(prompt, generation_config, streamer, images)
+
+    _vlm(_CapturingPipe()).generate("hi", stream=False, max_new_tokens=2, temperature=0.0,
+                                    sampling={"presence_penalty": 1.5, "repetition_penalty": 1.05,
+                                              "frequency_penalty": 0.25, "top_p": 0.8, "top_k": 20})
+    config = captured["config"]
+    assert config.do_sample is False  # penalties alone keep greedy decoding
+    assert config.presence_penalty == 1.5 and config.frequency_penalty == 0.25
+    assert config.repetition_penalty == pytest.approx(1.05)
+    assert config.top_p == pytest.approx(0.8) and config.top_k == 20
+
+
+def test_unknown_sampling_keys_are_rejected():
+    with pytest.raises(ValueError, match="length_penalty"):
+        _vlm(_Pipe()).generate("hi", stream=False, sampling={"length_penalty": 2.0})
+
+
+def test_speculative_pipeline_rejects_penalties():
+    pipe = _Pipe()
+    vlm = _vlm(pipe, speculative=SimpleNamespace(method="dflash", num_assistant_tokens=3))
+    with pytest.raises(UnsupportedRequestError, match="presence_penalty"):
+        vlm.generate("hi", stream=False, sampling={"presence_penalty": 1.5})
+    assert pipe.prompts == []
 
 
 @pytest.mark.parametrize("text, expected", [
