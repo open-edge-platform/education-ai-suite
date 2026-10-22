@@ -494,20 +494,18 @@ const UploadSection: React.FC<UploadSectionProps> = ({ disabled, active }) => {
     const removedEntry = entries.find((e) => e.id === id);
 
     // Remove from UI
-    setEntries((prev) => {
-      const next = prev.filter((e) => e.id !== id);
-      if (next.length === 0) {
-        if (csServerFilesExist) {
-          // Backend files still exist — keep search available.
-          dispatch(setCsHasUploads(true));
-          dispatch(setCsUploadsComplete(true));
-        } else {
-          dispatch(setCsHasUploads(false));
-          dispatch(setCsUploadsComplete(false));
-        }
+    const remainingCount = entries.filter((e) => e.id !== id).length;
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    if (remainingCount === 0) {
+      if (csServerFilesExist) {
+        // Backend files still exist — keep search available.
+        dispatch(setCsHasUploads(true));
+        dispatch(setCsUploadsComplete(true));
+      } else {
+        dispatch(setCsHasUploads(false));
+        dispatch(setCsUploadsComplete(false));
       }
-      return next;
-    });
+    }
     setConfirmRemoveId(null);
 
     // Call backend cleanup if the file was uploaded (has a taskId)
