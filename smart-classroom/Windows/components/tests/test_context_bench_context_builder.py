@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from components.context_bench import context_builder, settings, trial_runner
+from components.context_bench import context_builder, report, settings, trial_runner
 from components.context_bench.context_builder import (
     MAX_CORRECTION_PASSES,
     PromptSizeError,
@@ -231,6 +231,24 @@ class TestClassroomSummaryFraming(unittest.TestCase):
         self.assertEqual((task["language"], task["summary_mode"]), ("en", "teacher"))
         self.assertEqual(task["suffix"], "")
         self.assertEqual(len(task["template_sha256"]), 64)
+
+    def test_the_resolved_language_is_part_of_the_task_identity_and_its_label(self):
+        # config.yaml can change between runs; a zh and an en summary must never read as one
+        # workload, in the comparison key or in a report.
+        with tempfile.TemporaryDirectory() as root:
+            en = settings.throughput_task_prompt("classroom_summary", "Qwen3.6-35B-A3B",
+                                                 self._app_config(root, language="en", mode="dialog"))
+            zh = settings.throughput_task_prompt("classroom_summary", "Qwen3.6-35B-A3B",
+                                                 self._app_config(root, language="zh", mode="dialog"))
+        self.assertNotEqual(settings.task_sha256(en), settings.task_sha256(zh))
+        self.assertEqual((settings.task_variant(en), settings.task_variant(zh)),
+                         ("en, dialog", "zh, dialog"))
+        self.assertIsNone(settings.task_variant(settings.throughput_task_prompt("chat", "q")))
+        self.assertIsNone(settings.task_variant(None))
+        self.assertEqual(report.task_label({"throughput_task": "classroom_summary",
+                                            "task_variant": "zh, dialog"}),
+                         "classroom_summary (zh, dialog)")
+        self.assertEqual(report.task_label({"throughput_task": "chat"}), "chat")
 
     def test_unknown_mode_falls_back_to_dialog_like_the_component(self):
         with tempfile.TemporaryDirectory() as root:

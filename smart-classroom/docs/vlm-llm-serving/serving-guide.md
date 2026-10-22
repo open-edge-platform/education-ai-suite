@@ -3,7 +3,7 @@
 How to select a text-generation model, enable speculative decoding, prepare
 models ahead of time, call tools through port 8000 and read processing-time
 statistics. The requirements behind these features are in
-[vlm-llm-serving-design.md](vlm-llm-serving-design.md); the offline benchmark is
+[vlm-llm-serving-design.md](../user-guide/vlm-llm-serving-design.md); the offline benchmark is
 described in [context-bench-design.md](../context-bench/context-bench-design.md).
 
 > **Qualification status.** The model profiles below are implemented, but
@@ -14,7 +14,7 @@ described in [context-bench-design.md](../context-bench/context-bench-design.md)
 ## Model Choice
 
 The target is selected as before, under `models.text_gen` in
-[config.yaml](../../config.yaml). Existing selections keep working unchanged.
+[config.yaml](../../Windows/config.yaml). Existing selections keep working unchanged.
 
 | `vlm_name` | `weight_format` | Optional accelerator |
 | --- | --- | --- |
@@ -26,7 +26,7 @@ The target is selected as before, under `models.text_gen` in
 Pre-converted OpenVINO IR is downloaded on first start into
 `models/openvino/<model>/<weight_format>`. Other models keep the existing
 export path. The catalog lives in
-[components/vlm/text_gen_profiles.py](../../components/vlm/text_gen_profiles.py).
+[components/vlm/text_gen_profiles.py](../../Windows/components/vlm/text_gen_profiles.py).
 
 ## Speculative Decoding
 
@@ -59,7 +59,7 @@ but quoting avoids surprises).
 | `method` | `dflash` is the only method with a profile, for Qwen3.6 INT4; `auto` selects it there. `dflash2` and `mtp` are valid settings without a profile yet: plain generation under `auto`, a startup failure under `"on"`. |
 | `draft_source: local` | `draft_model` names an existing OpenVINO IR directory (relative paths resolve from `smart-classroom/Windows/`). It is validated, never downloaded or replaced. |
 | `draft_revision` | A full 40-character commit. `null` uses the catalog pin (`f181eece646a…` for the Qwen3.6 drafter). |
-| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 3. Range 1–15. |
+| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 5 (best for classroom summaries and chat; 7 suits code/math). Range 1–15. |
 
 Invalid settings (unknown method or key, contradictory source, cross-model
 drafter, out-of-range `k`) fail validation at startup under `auto` and `"on"`;
@@ -70,7 +70,7 @@ While a speculative pipeline is active:
 * Requests are greedy. A request with `temperature > 0` is rejected with HTTP 400
   instead of being changed. Classroom stages already generate greedily; grading
   does not (`vlm.temperature: 0.2` in
-  [components/grading/config.yaml](../../components/grading/config.yaml)), so set
+  [components/grading/config.yaml](../../Windows/components/grading/config.yaml)), so set
   that to 0 before using grading with DFlash.
 * Image requests run on the same pipeline; image-encoding speedups are not
   claimed.
@@ -86,10 +86,10 @@ deleted. Preparation of the drafter is described in
 
 No model files need to exist beforehand. The backend prepares the configured
 model when it loads the warm VLM at startup, so
-[start-smart-classroom.ps1](../../start-smart-classroom.ps1), the desktop app
+[start-smart-classroom.ps1](../../Windows/start-smart-classroom.ps1), the desktop app
 and `python main.py` all prepare the same way, with no extra switch. Code:
-[text_gen_prepare.py](../../components/vlm/text_gen_prepare.py) (preparation)
-and [text_gen_vlm.py](../../components/vlm/text_gen_vlm.py) (load and warm-up).
+[text_gen_prepare.py](../../Windows/components/vlm/text_gen_prepare.py) (preparation)
+and [text_gen_vlm.py](../../Windows/components/vlm/text_gen_vlm.py) (load and warm-up).
 
 ### First start
 
@@ -265,7 +265,7 @@ model is loaded:
   "tool_calls": true,
   "speculative": {"requested_mode": "auto", "requested_method": "auto",
                   "effective_method": "dflash", "draft": "z-lab/Qwen3.6-35B-A3B-DFlash@0123456789ab",
-                  "num_assistant_tokens": 3, "fallback_reason": null},
+                  "num_assistant_tokens": 5, "fallback_reason": null},
   "warmup": {"status": "ok", "seconds": 1.8},
   "startup": {"prepare_s": 0.4, "load_s": 61.2, "warmup_s": 1.8},
   "diagnostics": {"openvino_genai": "2026.4.1.0", "draft_revision": "...", "scheduler": {}}

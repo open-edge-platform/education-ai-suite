@@ -28,7 +28,7 @@ baseline (identical artifact, prompt and scheduler) and the speedup is an isolat
 Exit codes: 0 every invocation exited 0; 1 at least one failed, partial or missing case, or a
 run that wrote no evidence; 2 invalid arguments; 130 Ctrl-C (the report covers what finished).
 
-See docs/dev-guide/context-bench/context-bench-guide.md.
+See smart-classroom/docs/context-bench/context-bench-guide.md.
 """
 
 from __future__ import annotations
@@ -362,7 +362,10 @@ def _workload_section(loaded: list) -> list:
             repeat = f"{settings.get('warmup')} warm-up + {probes} probes"
             ceiling = "per suite"
         else:
-            tasks = ", ".join(settings.get("throughput_tasks") or [])
+            variants = {p.get("throughput_task"): p.get("task_variant")
+                        for p in snapshot.get("plan") or []}
+            tasks = ", ".join(f"{t} ({variants[t]})" if variants.get(t) else t
+                              for t in settings.get("throughput_tasks") or [])
             repeat = f"{settings.get('warmup')} warm-up + {settings.get('iterations')} measured"
             ceiling = settings.get("output_tokens")
         rows.append([suite, contexts, tasks, ceiling, repeat])
@@ -396,7 +399,7 @@ def _performance_section(loaded: list, suite: str, title: str) -> list:
     if not pairs:
         return []
     rows = [[run["model"], case.get("profile"), context_label(case.get("context_tokens")),
-             case.get("throughput_task"), case.get("status"), report._output_tokens_cell(case),
+             report.task_label(case), case.get("status"), report._output_tokens_cell(case),
              _seconds(case.get("first_token_latency")), _fmt(case.get("other_tokens_avg_latency")),
              _fmt(case.get("decode_throughput"), "{:.2f}"), _fmt(case.get("prefill_throughput")),
              _fmt(case.get("generation_time"), "{:.2f}"), _fmt(case.get("peak_gpu_gb")),
@@ -456,7 +459,7 @@ def _dflash_section(loaded: list) -> list:
                     acceptance = metrics.finite_number(case.get("mtp_acceptance_rate"))
                     same = case.get("output_sha256") and case.get("output_sha256") == plain.get("output_sha256")
                     rows.append([
-                        model, suite, context_label(context), entry["task"],
+                        model, suite, context_label(context), report.task_label(case),
                         case.get("num_assistant_tokens"),
                         _fmt(plain.get("other_tokens_avg_latency")),
                         _fmt(case.get("other_tokens_avg_latency")),
