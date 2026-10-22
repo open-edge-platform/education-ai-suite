@@ -54,7 +54,7 @@ A source checkpoint is not runtime-ready IR. Each accelerated profile must provi
 
 In the design requirements, serving has two phases: startup preparation and request handling.
 
-![Startup and request flow for existing and new models](assets/vlm-llm-serving-overview.svg)
+![Startup and request flow for existing and new models](_assets/vlm-llm-serving-overview.svg)
 
 Startup:
 - A shared helper prepares model files once. The model owner, which can be the application, a supervised worker, or an independently operated server, loads and warms the model before serving classroom requests.
