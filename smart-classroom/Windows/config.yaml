@@ -1,7 +1,7 @@
 ﻿app:
   name: Smart Classroom
   cleanup_on_exit: true
-  language: zh # en or zh
+  language: en # en or zh
 
 features:
   asr:                { enabled: true }
@@ -24,8 +24,8 @@ monitoring:
 
 models:
   asr:
-    provider: funasr # openvino, funasr and openai supported
-    name: paraformer-zh  # can be (whisper-base, whisper-small etc) or paraformer-zh
+    provider: openai # openvino, funasr and openai supported
+    name: whisper-small  # can be (whisper-base, whisper-small etc) or paraformer-zh
     device: CPU # CPU Recommended
     temperature: 0.0
     diarization: False # requires manual HF token setup, see docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional
