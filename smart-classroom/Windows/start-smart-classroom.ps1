@@ -1144,6 +1144,12 @@ function Wait-ForService {
                         }
                     }
                 }
+
+                # The launched wrapper stays alive through first-run model prep before main.py
+                # opens the port.
+                if (-not $serviceRunning -and $Process -and -not $Process.HasExited) {
+                    $serviceRunning = $true
+                }
                 
                 if (-not $serviceRunning) {
                     # No matching process running and port not listening = crashed or user closed terminal
