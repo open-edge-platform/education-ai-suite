@@ -28,7 +28,7 @@ models:
     name: whisper-small  # can be (whisper-base, whisper-small etc) or paraformer-zh
     device: CPU # CPU Recommended
     temperature: 0.0
-    diarization: False # requires manual HF token setup, see docs/user-guide/advance-setup-guide.md#f-speaker-diarization-setup-optional
+    diarization: False # requires manual HF token setup, see docs/user-guide/advanced-setup-guide.md#f-speaker-diarization-setup-optional
     hf_token: None   # needed only if diarization=true
     models_base_path: "models"
     threads_limit: Null # applied only if > 0 (else defaults are used); value can be tuned based on CPU specifications
@@ -39,7 +39,7 @@ models:
     max_chars_per_segment: 0  # cap characters per merged transcript segment; set to 0 or Null to disable merging entirely
     concurrency: 1    # CapabilityRunner max_concurrency (single warm pipe)
     queue_max: 8      # CapabilityRunner queue depth before 503 backpressure
-  
+
   diarization: #Only applicable when diarization is set to True for ASR
     backend: pyannote  # pyannote, or campplus for funasr/paraformer-zh
     provider: "huggingface"
@@ -57,7 +57,7 @@ models:
     front_pose_model: yolov8m-pose # yolov8m-pose/yolo11m-pose/yolo26m-pose
     back_pose_model: yolov8s-pose # yolov8s-pose/yolo11s-pose/yolo26s-pose
     threshold: 0.5 # confidence threshold for YOLO detections
-  
+
   embedding:
     name: "BAAI/bge-large-en-v1.5"
     min_score: 0.65
@@ -217,7 +217,7 @@ content_search:
     max_context: 5          # number of top chunks retrieved from ChromaDB to use as RAG context
     max_tokens: 1024        # maximum tokens the VLM can generate for an answer (prevents mid-sentence cutoff)
     max_history_turns: 3    # number of prior conversation turns (user+assistant pairs) sent to the VLM
-    context_window: 16384   # token budget for dynamic context selection; 
+    context_window: 16384   # token budget for dynamic context selection;
     retrieval_score_threshold: 60  # minimum relevance score (0-100) a chunk must have to be used as context
 
 # ── Telegram integration (OpenClaw bridge) ────────────────────────────────────
