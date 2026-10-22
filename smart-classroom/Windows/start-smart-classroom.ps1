@@ -72,7 +72,7 @@ Note: without -Electron the script starts every service itself and requests
       Administrator privileges. -Electron never elevates.
 
 Services Launched (in order):
-    1. Backend (port 8000)     - Main Python pipeline service, runs in THIS terminal (with paddleocr if OCR enabled)
+    1. Backend (port 8000)     - Main Python pipeline service; runs in this terminal, or a detached logged process with -NoWindowsTerminal (with paddleocr if OCR enabled)
     2. Content Search (9011)   - RAG, video summarization, semantic search
     3. Grading (9902 + 9012)   - Layout detection + VLM grading service (if grading.enabled)
     4. Frontend (port 5173)    - React UI in a browser tab, launched in a NEW terminal
@@ -991,7 +991,11 @@ Write-Host "[4/4] LAUNCHING SERVICES" -ForegroundColor Green
 Write-Host "------------------------" -ForegroundColor Green
 Write-Host ""
 Write-Host "Services will start with health checks:" -ForegroundColor Yellow
-Write-Host "  1. Backend (port 8000) - runs in THIS terminal, wait until healthy" -ForegroundColor White
+if ($NoWindowsTerminal) {
+    Write-Host "  1. Backend (port 8000) - detached hidden process (output logged to file), wait until healthy" -ForegroundColor White
+} else {
+    Write-Host "  1. Backend (port 8000) - runs in THIS terminal, wait until healthy" -ForegroundColor White
+}
 Write-Host "  2. Content Search (port 9011) - wait until healthy, including the" -ForegroundColor White
 Write-Host "     services its launcher spawns: video preprocess (8001), file ingest (9990), ChromaDB (9090)" -ForegroundColor White
 Write-Host "  3. Frontend (port 5173) - launches in a NEW terminal" -ForegroundColor White
@@ -1029,6 +1033,22 @@ function Get-HealthDetail {
     return " - pending: $($pending -join ', ')"
 }
 
+# Prints the tail of a service's log files on failure, so a detached (windowless)
+# backend's output is still diagnosable.
+function Show-ServiceLogTail {
+    param([string[]]$LogPaths = @(), [int]$Lines = 40)
+    foreach ($p in $LogPaths) {
+        if ($p -and (Test-Path $p)) {
+            $tail = Get-Content -Path $p -Tail $Lines -ErrorAction SilentlyContinue
+            if ($tail) {
+                Write-Host "  --- last $Lines lines of $p ---" -ForegroundColor DarkYellow
+                $tail | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+                Write-Host ""
+            }
+        }
+    }
+}
+
 # Health check function (no timeout - relies on crash detection)
 function Wait-ForService {
     param(
@@ -1038,6 +1058,7 @@ function Wait-ForService {
         [int[]]$DependentPorts = @(),
         [string]$CommandLinePattern = "",  # Pattern to match in process command line (e.g., "main.py", "start_services.py")
         [System.Diagnostics.Process]$Process = $null,  # Launched process to watch for early exit
+        [string[]]$LogPaths = @(),  # Log files to tail when the service fails to start
         [int]$IntervalSeconds = 5,
         # Ceiling for aggregate endpoints, where the port stays open (so the
         # crash detection below never fires) while a service behind it is dead.
@@ -1062,8 +1083,14 @@ function Wait-ForService {
                 Write-Host "  ERROR: $ServiceName EXITED" -ForegroundColor Red
                 Write-Host "========================================" -ForegroundColor Red
                 Write-Host ""
-                Write-Host "  The $ServiceName process exited (code $($Process.ExitCode)) before becoming healthy." -ForegroundColor Red
-                Write-Host "  Check the output above for error messages." -ForegroundColor Yellow
+                $codeText = if ($null -ne $Process.ExitCode) { $Process.ExitCode } else { "unknown" }
+                Write-Host "  The $ServiceName process exited (code $codeText) before becoming healthy." -ForegroundColor Red
+                if ($LogPaths | Where-Object { $_ -and (Test-Path $_) }) {
+                    Write-Host "  See the $ServiceName log below:" -ForegroundColor Yellow
+                    Show-ServiceLogTail -LogPaths $LogPaths
+                } else {
+                    Write-Host "  Check the output above for error messages." -ForegroundColor Yellow
+                }
                 Write-Host ""
                 return $false
             }
@@ -1159,7 +1186,12 @@ function Wait-ForService {
                     Write-Host "========================================" -ForegroundColor Red
                     Write-Host ""
                     Write-Host "  No process is listening on port $Port." -ForegroundColor Red
-                    Write-Host "  Check the $ServiceName terminal for error messages." -ForegroundColor Yellow
+                    if ($LogPaths | Where-Object { $_ -and (Test-Path $_) }) {
+                        Write-Host "  See the $ServiceName log below:" -ForegroundColor Yellow
+                        Show-ServiceLogTail -LogPaths $LogPaths
+                    } else {
+                        Write-Host "  Check the $ServiceName terminal for error messages." -ForegroundColor Yellow
+                    }
                     Write-Host ""
                     return $false
                 }
@@ -1195,6 +1227,7 @@ function Wait-ForService {
             Write-Host ""
             Write-Host "  $ServiceName did not become healthy within ${TimeoutSeconds}s.$lastDetail" -ForegroundColor Red
             Write-Host "  Check the output above and content_search/logs/ for error messages." -ForegroundColor Yellow
+            Show-ServiceLogTail -LogPaths $LogPaths
             Write-Host ""
             return $false
         }
@@ -1366,27 +1399,43 @@ python main.py
 "@
     $backendEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($backendScript))
 
+    # Detached mode has no console, so capture the backend's output to files we
+    # can tail on failure; windowed mode shares this console instead.
+    $script:backendLogPath = $null
+    $script:backendErrPath = $null
+
     if ($NoWindowsTerminal) {
-        $backendLaunch = Invoke-WmiMethod -Path win32_process -Name create -ArgumentList "powershell.exe -ExecutionPolicy Bypass -EncodedCommand $backendEncoded"
-        if ($backendLaunch.ReturnValue -ne 0) {
-            Write-Host "Failed to start Backend through WMI (code $($backendLaunch.ReturnValue))." -ForegroundColor Red
+        $backendLogDir = Join-Path $ScriptDir "logs"
+        if (-not (Test-Path $backendLogDir)) { New-Item -ItemType Directory -Path $backendLogDir -Force | Out-Null }
+        $backendTs = Get-Date -Format "yyyyMMdd_HHmmss"
+        $script:backendLogPath = Join-Path $backendLogDir "backend_$backendTs.log"
+        $script:backendErrPath = Join-Path $backendLogDir "backend_$backendTs.err"
+
+        # Start-Process yields a real Process object with a valid HasExited/ExitCode,
+        # unlike the WMI + Get-Process wrapper whose ExitCode is unavailable (so the
+        # early-exit check fired at 0s reporting "code ").
+        $script:backendProcess = Start-Process powershell -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $script:backendLogPath `
+            -RedirectStandardError $script:backendErrPath `
+            -ArgumentList "-ExecutionPolicy Bypass -EncodedCommand $backendEncoded"
+        if (-not $script:backendProcess) {
+            Write-Host "Failed to start Backend (Start-Process returned no process)." -ForegroundColor Red
             exit 1
         }
-
-        $script:backendProcess = Get-Process -Id $backendLaunch.ProcessId -ErrorAction SilentlyContinue
     } else {
         $script:backendProcess = Start-Process powershell -NoNewWindow -PassThru -ArgumentList "-ExecutionPolicy Bypass -EncodedCommand $backendEncoded"
     }
 
     if ($NoWindowsTerminal) {
-        Write-Host "  Backend started in a detached PowerShell process" -ForegroundColor Green
+        Write-Host "  Backend started as a detached hidden process (PID $($script:backendProcess.Id))" -ForegroundColor Green
+        Write-Host "  Backend output -> $script:backendLogPath" -ForegroundColor DarkGray
     } else {
         Write-Host "  Backend started in this terminal" -ForegroundColor Green
     }
     Write-Host ""
     } 
     
-    $backendHealthy = Wait-ForService -ServiceName "Backend" -Url "http://localhost:8000/health" -Port 8000 -CommandLinePattern "main.py" -Process $script:backendProcess
+    $backendHealthy = Wait-ForService -ServiceName "Backend" -Url "http://localhost:8000/health" -Port 8000 -CommandLinePattern "main.py" -Process $script:backendProcess -LogPaths @($script:backendLogPath, $script:backendErrPath)
     if (-not $backendHealthy) {
         Write-Host "Exiting script due to Backend startup failure." -ForegroundColor Red
         exit 1
