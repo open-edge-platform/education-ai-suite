@@ -9,6 +9,7 @@ from utils import session_store, orchestrator
 from utils.pipeline_catalog import ALL_STAGES, FEATURE_STAGE, TERMINAL_SESSION_STATES
 from utils.session_manager import is_generated_session_id
 from utils.session_paths import SessionPaths
+from utils.va_completion import va_pipeline_sources
 from api.v1.schemas.session import RegisterRequest, WorkflowRequest
 
 logger = logging.getLogger(__name__)
@@ -315,6 +316,10 @@ def _validate_sources(req: WorkflowRequest) -> None:
         if not req.audio_path:
             raise SessionValidationError(f"stage {transcribe} requires audio_path")
         _check_file(req.audio_path, "audio_path")
+    try:
+        va_pipeline_sources(req.video_sources)  # unknown names fail here, not at launch
+    except ValueError as e:
+        raise SessionValidationError(str(e)) from e
     for name, source in (req.video_sources or {}).items():
         if source and not source.startswith("rtsp://"):
             _check_file(source, f"video_sources[{name}]")

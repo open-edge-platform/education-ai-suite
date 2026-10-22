@@ -18,7 +18,6 @@ from components.context_bench.sizing import (
     auto_cache_size_gb,
     check_ir_layout,
     estimate_cache,
-    expected_kv_gb,
     fixed_state_cache_bytes,
     ir_weight_precision,
     theoretical_kv_bytes_per_token,
@@ -124,8 +123,24 @@ class TestReservations(unittest.TestCase):
         self.assertAlmostEqual(capped - plain, per_token * 4096 / GIB, places=6)
         self.assertIsNone(estimate_cache(DENSE, 0, {}, 32000, draft_config=None, dflash=True)["gib"])
 
+    def test_draft_sliding_layers_are_counted_and_only_they_are_window_capped(self):
+        # The shipped Qwen3.6 DFlash draft: five sliding-window layers and one full layer.
+        draft = {"num_hidden_layers": 6, "num_key_value_heads": 8, "head_dim": 128,
+                 "sliding_window": 4096,
+                 "layer_types": ["sliding_attention"] * 5 + ["full_attention"]}
+        per_layer = 2 * 8 * 128 * 2
+        detail = estimate_cache(DENSE, 0, {}, 8516, draft_config=draft, dflash=True)
+        self.assertEqual(detail["speculative_bytes"], per_layer * (8516 + 5 * 4096))
+        # Below the window every layer holds every token.
+        self.assertEqual(sizing.draft_kv_bytes(draft, 1000), per_layer * 6 * 1000)
+        for bad in ({**draft, "layer_types": ["sliding_attention"] * 5},
+                    {**draft, "layer_types": ["linear_attention"] * 5 + ["full_attention"]}):
+            with self.subTest(layer_types=bad["layer_types"]):
+                self.assertIsNone(estimate_cache(DENSE, 0, {}, 8516, draft_config=bad,
+                                                 dflash=True)["gib"])
+
     def test_expected_kv_keeps_the_reference_shape(self):
-        kv = expected_kv_gb(HYBRID, FIXED, {"KV_CACHE_PRECISION": "f16"}, 160000)
+        kv = estimate_cache(HYBRID, FIXED, {"KV_CACHE_PRECISION": "f16"}, 160000)["gib"]
         self.assertAlmostEqual(kv, (2 * 8 * 4 * 256 * 2 * 160000 + FIXED) / GIB)
 
 
@@ -213,9 +228,8 @@ class TestCasePreflight(unittest.TestCase):
     def test_infeasible_auto_is_an_error_not_a_clamp_or_backend_change(self):
         raw = self._scheduler(cache_size="auto")
         raw["benchmark"]["gpu_memory_budget_gb"] = 9
-        resolved, planned, _ = None, None, None
         with self.assertRaises(benchmark._Rejected) as caught:
-            resolved, planned, _ = self._preflight(raw)
+            self._preflight(raw)
         self.assertEqual(caught.exception.category, "cache_infeasible")
         # The requested profile is still paged with `auto`: nothing was removed.
         profile = _resolve(dict(raw, model={**raw["model"], "model_dirs": {"M": str(self.model_dir)}}))["profiles"][0]
@@ -324,13 +338,29 @@ class TestIrReads(unittest.TestCase):
 
 class TestShippedConfigs(unittest.TestCase):
     # One config per model; the weight formats each documents are selected with --weight-format.
-    WEIGHTS = {"config_qwen3.6_35b.yaml": ("int4",), "config_qwen3.8_27b.yaml": ("int8", "int4"),
-               "config_qwen3.5_9b.yaml": ("int4", "int8")}
+    # The first label is the config's default.
+    WEIGHTS = {"config_qwen3.6_35b.yaml": ("int4",), "config_qwen3.8_27b.yaml": ("int4", "int8"),
+               "config_qwen3.5_9b.yaml": ("int4", "int8"),
+               "config_qwen3_8b.yaml": ("int4", "int8")}
     CONFIGS = tuple(WEIGHTS)
 
     def _load(self, name, *argv):
         path = settings.TOOL_DIR / name
         return settings._load_settings(settings._parse_args(["--config", str(path), *argv]))
+
+    def test_every_config_shares_the_qwen36_core_settings(self):
+        """Same workload, repetition, budgets and default weights; only the model, its output
+        directory and its profiles differ (DFlash profiles exist only for Qwen3.6)."""
+        core = ("weight_format", "device", "context_tokens", "output_tokens", "warmup",
+                "iterations", "iteration_gap_sec", "throughput_tasks", "timeout_sec",
+                "max_system_memory_pct", "gpu_memory_budget_gb", "cache_dir")
+        expected = {k: self._load("config_qwen3.6_35b.yaml")[k] for k in core}
+        self.assertEqual(expected["throughput_tasks"], ("code", "math", "chat", "summary_2s"))
+        for name, labels in self.WEIGHTS.items():
+            with self.subTest(config=name):
+                resolved = self._load(name)
+                self.assertEqual({k: resolved[k] for k in core}, expected)
+                self.assertEqual(resolved["weight_format"], labels[0])
 
     def test_only_the_documented_configs_ship(self):
         shipped = sorted(p.name for p in settings.TOOL_DIR.glob("config_*.yaml"))
@@ -385,7 +415,7 @@ class TestShippedConfigs(unittest.TestCase):
                                         for line in documented), kind)
 
     def test_the_guide_shows_each_default_plan(self):
-        guide = (settings.SC_ROOT / "docs" / "context-bench" /
+        guide = (settings.SC_ROOT / "docs" / "dev-guide" / "context-bench" /
                  "context-bench-guide.md").read_text(encoding="utf-8").splitlines()
         for name in self.CONFIGS:
             with self.subTest(config=name):
@@ -427,9 +457,6 @@ class TestShippedConfigs(unittest.TestCase):
             with self.subTest(weights=label):
                 resolved = self._load("config_qwen3.8_27b.yaml", "--weight-format", label)
                 self.assertEqual(resolved["weight_format"], label)
-                self.assertEqual((resolved["context_tokens"], resolved["output_tokens"],
-                                  resolved["iteration_gap_sec"]), ((8000,), 64, 0.0))
-                self.assertEqual(resolved["throughput_tasks"], ("summary_2s",))
                 self.assertEqual([(p["name"], p["pipeline_mode"], p["mtp"]["enabled"])
                                   for p in resolved["profiles"]],
                                  [("paged_min", settings.PIPELINE_PAGED, False)])
@@ -439,6 +466,17 @@ class TestShippedConfigs(unittest.TestCase):
         self.assertTrue(all(not p["mtp"]["enabled"] for p in resolved["profiles"]))
         self.assertEqual([p["pipeline_mode"] for p in resolved["profiles"]],
                          [settings.PIPELINE_PAGED, settings.PIPELINE_STATEFUL])
+
+    def test_qwen3_vl_8b_config_is_plain_and_reads_the_vlm_export(self):
+        resolved = self._load("config_qwen3_8b.yaml")
+        self.assertEqual(resolved["models"], ("Qwen3-VL-8B-Instruct",))
+        self.assertTrue(all(not p["mtp"]["enabled"] for p in resolved["profiles"]))
+        self.assertEqual([p["pipeline_mode"] for p in resolved["profiles"]],
+                         [settings.PIPELINE_PAGED, settings.PIPELINE_STATEFUL])
+        # A dense model with its text architecture nested under text_config, as in the export.
+        config = {"text_config": {"num_hidden_layers": 36, "num_key_value_heads": 8,
+                                  "head_dim": 128}}
+        self.assertEqual(sizing.theoretical_kv_bytes_per_token(config), 36 * 2 * 8 * 128 * 2)
 
     def test_profiles_that_resolve_identically_are_refused(self):
         with self.assertRaisesRegex(settings.ConfigError, "resolve to the same configuration"):

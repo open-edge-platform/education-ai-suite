@@ -16,7 +16,8 @@ Estimated demand, in bytes:
    estimate is unavailable rather than zero;
 3. plus fixed linear-attention state (unique IR state variables) times the reserved
    sequence / linear-attention rows;
-4. plus the DFlash draft's KV (window-capped when the draft declares a sliding window).
+4. plus the DFlash draft's KV: every draft layer, its sliding-window layers capped at the
+   declared window (`draft_kv_bytes`).
 
 Any unknown contribution makes the whole estimate unavailable.
 """
@@ -233,6 +234,40 @@ def theoretical_kv_bytes_per_token(config: dict, kv_cache_dtype_bytes: float = 2
     return 2 * growing_layers * num_kv_heads * bytes_per_row
 
 
+def draft_kv_bytes(draft_config: dict | None, tokens: int, kv_cache_dtype_bytes: float = 2,
+                   quantization_param_bytes: int = 0) -> float | None:
+    """KV bytes of a DFlash draft holding `tokens`; None when its architecture is unknown.
+
+    A draft's non-full layers are sliding-window attention, which also hold KV, so unlike
+    the target's linear-attention layers they are counted: each `full_attention` layer grows
+    with every token, each `sliding_attention` layer up to the declared window. Without
+    `layer_types` every layer is capped at a declared window.
+    """
+    if not draft_config:
+        return None
+    cfg = text_config(draft_config)
+    window = cfg.get("sliding_window")
+    if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
+        window = None
+    windowed_tokens = min(tokens, window) if window else tokens
+    layer_types = cfg.get("layer_types")
+    if layer_types is None:
+        per_token = theoretical_kv_bytes_per_token(cfg, kv_cache_dtype_bytes,
+                                                   quantization_param_bytes)
+        return None if per_token is None else per_token * windowed_tokens
+    num_layers = cfg.get("num_hidden_layers")
+    if (not isinstance(layer_types, (list, tuple)) or len(layer_types) != num_layers
+            or any(t not in ("full_attention", "sliding_attention") for t in layer_types)):
+        return None
+    all_layers = theoretical_kv_bytes_per_token({**cfg, "layer_types": None},
+                                                kv_cache_dtype_bytes, quantization_param_bytes)
+    if all_layers is None:
+        return None
+    per_layer = all_layers / num_layers
+    full = sum(1 for t in layer_types if t == "full_attention")
+    return per_layer * (full * tokens + (num_layers - full) * windowed_tokens)
+
+
 def estimate_cache(model_config: dict | None, fixed_state_bytes: int | None, ov_config,
                    tokens: int | None, state_rows: int = 1,
                    draft_config: dict | None = None, dflash: bool = False) -> dict:
@@ -262,24 +297,14 @@ def estimate_cache(model_config: dict | None, fixed_state_bytes: int | None, ov_
 
     speculative = 0.0
     if dflash:
-        draft_per_token = (theoretical_kv_bytes_per_token(draft_config, dtype, quant)
-                           if draft_config else None)
-        if draft_per_token is None:
+        draft_bytes = draft_kv_bytes(draft_config, tokens, dtype, quant)
+        if draft_bytes is None:
             detail["reason"] = "the DFlash draft architecture is unknown"
             return detail
-        window = text_config(draft_config).get("sliding_window")
-        draft_tokens = min(tokens, window) if isinstance(window, int) and window > 0 else tokens
-        speculative += draft_per_token * draft_tokens
+        speculative += draft_bytes
     detail["speculative_bytes"] = speculative
     detail["gib"] = (total + speculative) / _GIB
     return detail
-
-
-def expected_kv_gb(model_config: dict | None, fixed_bytes: int | None, ov_config: dict,
-                   context_tokens: int, sequences: int = 1) -> float | None:
-    """Estimated persistent cache for `context_tokens` (GiB), or None when unknown."""
-    return estimate_cache(model_config, fixed_bytes, ov_config, context_tokens,
-                          state_rows=sequences)["gib"]
 
 
 def state_rows(scheduler: dict | None) -> int:

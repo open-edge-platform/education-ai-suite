@@ -76,6 +76,10 @@
 #   Arc B390 iGPU (Panther Lake), OpenVINO 2026.5 dev, 2026-10-08:
 #     baseline 22.1 ms/token; k=7 pass 2.5x a decode step; code none k=7 2.32x, chat none 1.34x,
 #     summary_2s 8K k=3 1.31x
+#   Arc B390 iGPU (Panther Lake), OpenVINO 2026.4.1, 2026-10-20:
+#     baseline 21.7 ms/token; code none k=7 2.46x (113 tok/s), math none k=7 2.40x, chat none
+#     k=5 1.43x, classroom_summary 8K k=5 1.34x (k=3 1.29x). Back to back (gap 0) the clocks
+#     sag and DFlash loses more than the baseline: code none k=3 1.82x -> 1.72x
 #   Arc 140T iGPU (Arrow Lake H), OpenVINO 2026.4.1, 2026-10-18:
 #     baseline 35.2 ms/token; k=7 pass 3.2x a decode step; code none k=7 1.96x, chat none
 #     1.00x, summary_2s 8K k=3 0.80x (DFlash slows short and open-ended answers here)

@@ -118,7 +118,6 @@ class PathRedactor:
     def __init__(self, root: str):
         self.root = os.path.normcase(os.path.abspath(root))
         self._root_display = os.path.abspath(root)
-        self._home = os.path.normcase(os.path.expanduser("~"))
 
     def redact(self, path) -> str | None:
         if path is None:

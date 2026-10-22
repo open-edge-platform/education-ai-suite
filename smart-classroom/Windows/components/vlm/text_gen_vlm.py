@@ -25,7 +25,6 @@ from components.vlm.text_gen_profiles import (
 )
 from utils.chat_prompt import render_chat_prompt, template_supports_tools
 from utils.markdown_cleaner import StreamThinkFilter, strip_think_tokens
-from utils.model_paths import openvino_model_dir
 from utils.ov_genai_util import YieldingTextStreamer
 
 logger = logging.getLogger(__name__)
@@ -107,10 +106,6 @@ class VLMTextGen:
         # Invalid speculative settings fail here, before any model work.
         self._plan = resolve_plan(text_gen)
 
-    def _model_dir(self) -> Path:
-        """Return the shared IR directory ``models/openvino/<name>/<weight>``."""
-        return openvino_model_dir(self._model_name, self._weight_format)
-
     def _ov_config(self) -> dict:
         """Runtime config for the pipeline; large allocations help on GPU."""
         if self._device.startswith("GPU"):
@@ -136,13 +131,14 @@ class VLMTextGen:
     def _load(self) -> None:
         global _PLAIN_DECISION
         plan = self._plan
+        if _PLAIN_DECISION is not None and plan.wants_speculative:
+            # Prepare only the target: the drafter already failed this process.
+            plan = plan.without_speculative(_PLAIN_DECISION)
         started = time.monotonic()
         prepared = text_gen_prepare.prepare(plan)
         timings = {"prepare_s": round(time.monotonic() - started, 3)}
         fallback = prepared.speculative_error
         spec = prepared.speculative
-        if spec is not None and _PLAIN_DECISION is not None:
-            fallback, spec = _PLAIN_DECISION, None
 
         if spec is not None:
             try:

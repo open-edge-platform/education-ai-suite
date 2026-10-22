@@ -386,6 +386,17 @@ def start_video_analytics_pipeline(
                 time.sleep(delay)
                 return _launch_single(req, record)
 
+            # VA is the one stage stage_tracker cannot wrap: it spans two
+            # endpoints rather than one call. Open it before the launches - each
+            # blocks until its pipeline is PLAYING, staggered a second apart, so
+            # opening it afterwards left seconds of VA work outside the stage -
+            # and close it from on_all_pipelines_done above, the single point
+            # every exit route converges on, whether the pipelines hit EOS or
+            # were stopped. While any pipeline runs, the stage is already open.
+            opened_stage = not any(service.is_pipeline_running(n) for n in valid_pipelines)
+            if opened_stage:
+                _set_va_stage(x_session_id, "running")
+
             with ThreadPoolExecutor(max_workers=len(requests)) as executor:
                 futures = [
                     executor.submit(
@@ -395,13 +406,7 @@ def start_video_analytics_pipeline(
                 ]
                 results = [f.result() for f in futures]
 
-            # VA is the one stage stage_tracker cannot wrap: it spans two
-            # endpoints rather than one call. Mark it here, and mark it finished
-            # from on_all_pipelines_done above - the single point every exit
-            # route converges on, whether the pipelines hit EOS or were stopped.
-            if any(r.get("status") == "success" for r in results):
-                _set_va_stage(x_session_id, "running")
-            else:
+            if opened_stage and not any(r.get("status") == "success" for r in results):
                 _set_va_stage(
                     x_session_id, "failed", "no video-analytics pipeline could be launched"
                 )

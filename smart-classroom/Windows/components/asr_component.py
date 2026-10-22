@@ -170,9 +170,22 @@ class ASRComponent(PipelineComponent):
                 default_torch_threads = torch.get_num_threads()
                 torch.set_num_threads(self.threads_limit)
 
+            chunk_count, failed_chunks, first_error = 0, 0, None
             for chunk_data in input_generator:
                 chunk_path = chunk_data["chunk_path"]
-                transcription = self.asr_handler.transcribe(chunk_path, temperature=self.temperature)
+                chunk_count += 1
+                try:
+                    transcription = self.asr_handler.transcribe(chunk_path, temperature=self.temperature)
+                except Exception as exc:  # noqa: BLE001 - one bad chunk must not drop the rest
+                    # The model call is already recorded as failed. Skip this
+                    # chunk; the stage fails below only if every chunk did.
+                    failed_chunks += 1
+                    first_error = first_error or exc
+                    logger.error(f"ASR failed on chunk {chunk_data.get('chunk_index')} "
+                                 f"of {self.session_id}: {exc}")
+                    if os.path.exists(chunk_path) and DELETE_CHUNK_AFTER_USE:
+                        os.remove(chunk_path)
+                    continue
 
                 ui_segments = []
                 transcribed_lines = []
@@ -283,6 +296,15 @@ class ASRComponent(PipelineComponent):
                 }
                 AsrEventWriter.write(self.session_id, chunk_result)
                 yield chunk_result
+
+            if chunk_count and failed_chunks == chunk_count:
+                # Nothing was transcribed: a failed stage, not an empty transcript.
+                raise RuntimeError(
+                    f"ASR failed on all {chunk_count} audio chunk(s); first error: {first_error}"
+                ) from first_error
+            if failed_chunks:
+                logger.warning(f"ASR skipped {failed_chunks} of {chunk_count} chunk(s) "
+                               f"of {self.session_id} after errors")
 
             # ===== FINAL FLUSH =====
             if self.pending_segments and self.last_known_speaker:

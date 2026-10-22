@@ -101,3 +101,13 @@ def test_response_shape(client, tmp_path):
     assert data["output_dir"] and __import__("os").path.isabs(data["output_dir"])
     assert data["started_at"]
     wait_for_state(client, data["session_id"], timeout=5.0)
+
+# The UI names the content camera "board"; /process launches it as the content
+# pipeline (and so starts board OCR) rather than failing that launch silently.
+def test_board_video_source_runs_the_content_pipeline(client, _mock_orchestrator):
+    data, client = _create(client, ["va"], video_sources={
+        "front": "rtsp://127.0.0.1:8554/front", "board": "rtsp://127.0.0.1:8554/board"})
+    state, status = _await_status(client, data["session_id"])
+    assert state == "completed" and status["stages"]["va"] == "done"
+    launched = [c.args[0] for c in _mock_orchestrator["va_service"].launch_pipeline.call_args_list]
+    assert sorted(launched) == ["content", "front"]

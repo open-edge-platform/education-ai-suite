@@ -66,7 +66,7 @@ def test_auto_method_selects_catalog_dflash_for_qwen36():
     assert spec.method == "dflash"
     assert spec.source == "huggingface"
     assert spec.draft_model == "z-lab/Qwen3.6-35B-A3B-DFlash"
-    assert spec.num_assistant_tokens == 3
+    assert spec.num_assistant_tokens == 5
     assert spec.draft_dir() == OPENVINO_MODELS_DIR / "Qwen3.6-35B-A3B-DFlash" / "int4"
     assert spec.profile.scheduler["enable_prefix_caching"] is False
 
@@ -97,6 +97,11 @@ def test_explicit_revision_and_tuning_are_kept():
     assert plan.speculative.draft_revision == COMMIT
     assert plan.speculative.num_assistant_tokens == 7
     assert plan.speculative.describe() == f"z-lab/Qwen3.6-35B-A3B-DFlash@{COMMIT[:12]}"
+
+
+def test_uppercase_revision_is_normalized_for_preparation():
+    plan = resolve_plan(_text_gen(speculative={"mode": "auto", "draft_revision": COMMIT.upper()}))
+    assert plan.speculative.draft_revision == COMMIT
 
 
 def test_local_relative_dir_resolves_from_smart_classroom_root():

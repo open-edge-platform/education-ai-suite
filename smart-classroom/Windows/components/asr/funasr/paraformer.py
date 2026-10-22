@@ -79,6 +79,8 @@ class Paraformer(BaseASR):
         except Exception as e:
             if _is_empty_input_error(str(e)):
                 logger.info(f"[ASR] empty/silent audio chunk skipped: {audio_path}")
-            else:
-                logger.error(f"[ASR] Paraformer transcription error: {e}")
-            return {"text": "", "segments": []}
+                return {"text": "", "segments": []}
+            # Raise like the other ASR backends: an empty result here would be
+            # recorded as a successful model call and a finished transcription.
+            logger.error(f"[ASR] Paraformer transcription error: {e}")
+            raise

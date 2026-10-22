@@ -2,7 +2,6 @@ import os
 import subprocess
 from uuid import uuid4
 import atexit
-import shutil
 import platform,time
 import logging
 from utils.config_loader import config
@@ -23,11 +22,37 @@ os.makedirs(CHUNKS_DIR, exist_ok=True)
 
 FFMPEG_PROCESSES = {}
 
+# Files this process wrote into CHUNKS_DIR. The directory is shared by every
+# process started from the app root (the backend, a second instance, a test
+# run), so on exit each one removes only its own files.
+_OWN_CHUNK_FILES: set = set()
+
+
+def _own_chunk_file(path: str) -> str:
+    _OWN_CHUNK_FILES.add(os.path.abspath(path))
+    return path
+
+
 @atexit.register
 def cleanup_chunks_folder():
-    if os.path.exists(CHUNKS_DIR) and CLEAN_UP_ON_EXIT:
-        shutil.rmtree(CHUNKS_DIR)
+    """Remove this process's chunk files, then the directory if nothing else is in it.
+
+    Removing the whole directory, as this once did, deleted it under a running
+    backend whenever another process importing this module exited; every later
+    chunk then failed to write and the transcription came out empty.
+    """
+    if not CLEAN_UP_ON_EXIT or not os.path.isdir(CHUNKS_DIR):
+        return
+    for path in _OWN_CHUNK_FILES:
+        try:
+            os.remove(path)
+        except OSError:
+            pass  # already consumed (delete_chunks_after_use) or still open
+    try:
+        os.rmdir(CHUNKS_DIR)  # only succeeds when empty
         logger.info(f"Cleaned up {CHUNKS_DIR} directory on exit.")
+    except OSError:
+        pass
 
 def get_audio_duration(audio_path):
     result = subprocess.run([
@@ -78,8 +103,10 @@ def get_closest_silence(silences, target_time, window=SEARCH_WINDOW):
 
 def process_audio_segment(audio_path, start_time, end_time, chunk_index):
     chunk_name = f"chunk_{chunk_index}_{uuid4().hex[:6]}.wav"
-    chunk_path = os.path.join(CHUNKS_DIR, chunk_name)
-    subprocess.run(
+    # Re-created on demand: something may have removed it since import.
+    os.makedirs(CHUNKS_DIR, exist_ok=True)
+    chunk_path = _own_chunk_file(os.path.join(CHUNKS_DIR, chunk_name))
+    result = subprocess.run(
         [
             "ffmpeg", "-y", "-i", audio_path,
             "-ss", str(start_time), "-to", str(end_time),
@@ -88,10 +115,18 @@ def process_audio_segment(audio_path, start_time, end_time, chunk_index):
             chunk_path
         ],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         encoding="utf-8",
         errors="replace"
     )
+    if result.returncode != 0 or not os.path.isfile(chunk_path):
+        # A missing chunk reaches the ASR model as a bare path string, which it
+        # misreads as text input; fail here with ffmpeg's own reason instead.
+        reason = (result.stderr or "").strip().splitlines()[-1:] or ["no output file"]
+        raise RuntimeError(
+            f"ffmpeg could not cut audio chunk {chunk_index} "
+            f"({start_time:.1f}-{end_time:.1f}s): {reason[0]}"
+        )
     logger.debug(f"Chunk {chunk_index} saved: {chunk_path}")
     return {
         "chunk_path": chunk_path,
@@ -124,7 +159,8 @@ def chunk_audiostream_by_silence(session_id: str):
         raise ValueError(
             "Microphone device not set in runtime_config.yaml under Project.microphone"
         )
-    record_file = os.path.join(CHUNKS_DIR, f"live_input_{session_id}.wav")
+    os.makedirs(CHUNKS_DIR, exist_ok=True)
+    record_file = _own_chunk_file(os.path.join(CHUNKS_DIR, f"live_input_{session_id}.wav"))
     process = subprocess.Popen(
         [
             "ffmpeg", "-y",
@@ -157,7 +193,7 @@ def chunk_audiostream_by_silence(session_id: str):
             if duration - current_time < CHUNK_DURATION:
                 time.sleep(0.02)
                 continue
-            segment_file = os.path.join(CHUNKS_DIR, f"temp_segment_{uuid4().hex[:6]}.wav")
+            segment_file = _own_chunk_file(os.path.join(CHUNKS_DIR, f"temp_segment_{uuid4().hex[:6]}.wav"))
             subprocess.run(
                 [
                     "ffmpeg", "-y", "-i", record_file,

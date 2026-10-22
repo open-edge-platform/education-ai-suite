@@ -7,6 +7,7 @@
 #   ... --list-profiles                       # the plan below; loads nothing
 #   ... --weight-format int8                  # the INT8 artifact, same profiles and steps
 #   ... --contexts 8000 32000                 # long-context; accuracy probes cost ~one prefill each
+#   ... --throughput-task classroom_summary --output-tokens 1024       # the app's own request
 #
 # TEST STEPS. Every case below is one child process: load the model, run the warm-up(s), then
 # the measured generations, while RAM/GPU memory are sampled. IDs follow execution order, row
@@ -14,17 +15,24 @@
 # CLI filters (--profiles, --contexts, --throughput-task) renumber the steps; --list-profiles
 # prints the exact plan, with its IDs, before anything loads.
 #
-# Throughput run (default): 4 cases, each 1 warm-up + 3 measured generations of up to 1024
-# tokens (EOS respected), back to back.
+# Throughput run (default): 14 cases, each 1 warm-up + 3 measured generations of up to 512
+# tokens (EOS respected), 30 s idle before each measured one.
 #
-#   Context       Task              | paged_min  stateful
-#   8,000 tokens  summary_2s        | c01        c02
-#   8,000 tokens  classroom_summary | c03        c04
+#   Context           Task       | paged_min  stateful
+#   none (task only)  code       | c01        c02
+#   none (task only)  math       | c03        c04
+#   none (task only)  chat       | c05        c06
+#   8,000 tokens      code       | c07        c08
+#   8,000 tokens      math       | c09        c10
+#   8,000 tokens      chat       | c11        c12
+#   8,000 tokens      summary_2s | c13        c14
 #
-#   Context   a synthetic classroom transcript, then the task, 8,000 rendered tokens in total
-#   Task      summary_2s         two-sentence summary of the transcript (~45 tokens)
-#             classroom_summary  the application's summarizer request (prompts/summarizer;
-#                                language and mode from config.yaml), a long Markdown summary
+#   Context   none: the task prompt alone; 8,000 tokens: a synthetic classroom transcript,
+#             then the task, 8,000 rendered tokens in total.
+#   Task      code       a Python module with tests (HumanEval-like)
+#             math       six worked physics/arithmetic/algebra problems (GSM8K-like)
+#             chat       eight open-ended assistant requests (MT-Bench-like)
+#             summary_2s two-sentence summary of the transcript (~45 tokens; transcript only)
 #   Profile   paged_min  continuous-batching (paged attention) pipeline, runtime-managed pool
 #             stateful   stateful pipeline: one SDPA prefill, KV cache as model state
 #
@@ -57,20 +65,29 @@ model:
 
 benchmark:
   models: [Qwen3.5-9B]
-  context_tokens: [8000]
-  # A ceiling, EOS respected: summary_2s stops at ~45 tokens, and 1024 lets
-  # classroom_summary's long Markdown answer finish instead of being cut off at 512.
-  output_tokens: 1024
+  # 0 = no transcript: code/math/chat run as standalone prompts; the summaries and the
+  # accuracy suites skip it. Positive values are the total rendered input-token target.
+  context_tokens: [0, 8000]
+  # Decode ceiling for every throughput task and the warm-up; EOS is respected. 512 lets
+  # math/code answers run past the first decode pass's one-time cost.
+  output_tokens: 512
   warmup: 1
   iterations: 3
-  throughput_task: [summary_2s, classroom_summary]
+  # Untimed idle before each measured generation: the iGPU boosts after idle, so 30 s
+  # reports what an occasional classroom request sees (burst). --iteration-gap 0 measures
+  # sustained load.
+  iteration_gap_sec: 30
+  # The reference's four domains, as in config_qwen3.6_35b.yaml. classroom_summary (the
+  # application's summarizer request) is left out: at 512 tokens its long Markdown answer is
+  # cut off, so run it on its own with --output-tokens 1024 (see the usage lines above).
+  throughput_task: [code, math, chat, summary_2s]
   timeout_sec: 5400
   max_system_memory_pct: 100
   gpu_memory_budget_gb: 59
   cache_dir: null
   output_dir: monitoring/executionlogs/context_bench/qwen3.5_9b
 
-# Read only with --accuracy; the same suites as the Qwen3.6/3.8 reference configurations.
+# Read only with --accuracy; identical to the reference configuration.
 accuracy:
   suites: [retrieval, generation]
   baseline_profile: paged_min

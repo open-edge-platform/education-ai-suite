@@ -154,10 +154,10 @@ class ProbeSpec:
     def coordinate(self) -> tuple:
         """The key that pairs an answer back to this spec, and pairs a probe with the
         baseline profile's probe for the same work. Stable across processes and runs."""
-        return (self.task, _depth_key(self.depth), self.sample)
+        return (self.task, depth_key(self.depth), self.sample)
 
 
-def _depth_key(depth) -> str:
+def depth_key(depth) -> str:
     return "-" if depth is None else f"{float(depth):.2f}"
 
 
@@ -222,7 +222,7 @@ def validate_task_options(task: str, options) -> dict:
 # ---------------------------------------------------------------------------
 def probe_seed(seed: int, context_tokens: int, task: str, depth, sample: int) -> str:
     """The probe's coordinate as the string `probe_rng` seeds from (the reference's key)."""
-    return f"{seed}|{context_tokens}|{task}|{_depth_key(depth)}|{sample}"
+    return f"{seed}|{context_tokens}|{task}|{depth_key(depth)}|{sample}"
 
 
 def probe_rng(seed: int, context_tokens: int, task: str, depth, sample: int) -> random.Random:
@@ -578,7 +578,7 @@ def build_spec(task: str, sample: int, depth, haystack: str, seed: int,
         "suite": suite,
         "task": task,
         "sample": sample,
-        "depth": _depth_key(effective_depth),
+        "depth": depth_key(effective_depth),
         "seed": seed,
         "context_tokens": context_tokens,
         "question": built["question"],
