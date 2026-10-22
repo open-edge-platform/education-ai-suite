@@ -109,7 +109,7 @@ def test_cleanup_task_selects_status_and_refuses_a_processing_task(services):
             "id": "task-1",
             "payload": "{}",
             "result": None,
-            "status": "processing",
+            "status": "PROCESSING",
         }
     )
 

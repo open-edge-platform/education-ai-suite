@@ -17,6 +17,7 @@ from utils.task_service import task_service
 from utils.storage_service import storage_service
 from utils.asset_service import asset_service
 from utils.search_service import search_service
+from utils.schemas_task import TaskStatus
 from utils.core_responses import resp_200, fail_task_not_found, fail_process_failed, fail_processing
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
@@ -293,7 +294,7 @@ async def delete_specific_task(
         return resp_200(**fail_task_not_found())
     record = dict(task_row._mapping)
     current_status = record.get("status")
-    if current_status == "processing":
+    if current_status == TaskStatus.PROCESSING.value:
         return resp_200(**fail_processing())
     try:
         raw_payload = record.get('payload')
