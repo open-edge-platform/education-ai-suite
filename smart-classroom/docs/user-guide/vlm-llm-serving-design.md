@@ -54,7 +54,7 @@ A source checkpoint is not runtime-ready IR. Each accelerated profile must provi
 
 In the design requirements, serving has two phases: startup preparation and request handling.
 
-![Startup and request flow for existing and new models](assets/vlm-llm-serving-overview.svg)
+![Startup and request flow for existing and new models](_assets/vlm-llm-serving-overview.svg)
 
 Startup:
 - A shared helper prepares model files once. The model owner, which can be the application, a supervised worker, or an independently operated server, loads and warms the model before serving classroom requests.
@@ -85,7 +85,7 @@ Tool-call sequence from the design requirements:
 
 1. Request with tools: The client sends a request that includes tool definitions.
 2. Assistant tool call: The assistant returns a tool call: a request to use one of those tools, with its name and arguments.
-3. Client-authorized execution: Execution is client-authorized. The controller independently validates the arguments, authorizes execution, and bounds tool-loop iterations. The serving process does not execute a function, open a shell, or performs an action merely because the model requested it.
+3. Client-authorized execution: Execution is client-authorized. The controller independently validates the arguments, authorizes execution, and bounds tool-loop iterations. The serving process does not execute a function, open a shell, or perform an action merely because the model requested it.
 4. Tool result message: The client appends the assistant's tool-call message and a `role: "tool"` message containing the result and matching `tool_call_id`, then resubmits the conversation.
 5. Assistant answer or next tool call: The assistant uses the result to answer, or returns another tool call and the sequence continues.
 
@@ -226,145 +226,175 @@ Preparation creates storage on demand, uses resumable staging and per-artifact l
 
 **Implemented:**
 
-| Artifact | How it is prepared and reused |
+| Artifact | How It Is Prepared and Reused |
 | --- | --- |
-| Target IR, `models/openvino/<model>/<weight_format>` | Catalog models download the pre-converted `OpenVINO/<model>-<weight_format>-ov` IR (resumable, 3 attempts); other models use the existing local export. Reused when the IR, tokenizer and detokenizer are present. The manifest records no revision for it, since the download is not pinned. The tokenizer IR is refused if a newer openvino-tokenizers release exported it. |
+| Target IR, `models/openvino/<model>/<weight_format>` | Catalog models download the pre-converted `OpenVINO/<model>-<weight_format>-ov` IR (resumable, 3 attempts); other models use the existing local export. Reused when the IR, tokenizer, and detokenizer are present. The manifest records no revision for it because the download is not pinned. The tokenizer IR is refused if a newer openvino-tokenizers release exported it. |
 | DFlash drafter source, `models/hf/<org>__<repo>/<commit>` | Configuration and weight files only, at the pinned commit, after a free-space check (2.2x the checkpoint). |
 | DFlash drafter IR, `models/openvino/<drafter>/int4` | Exported offline in a separate process; `.prepared.json` records the commit, and the IR is reused while it matches the pin. |
 | Drafter with its own INT4 lm_head, `<drafter>/int4-lmhead` (the one loaded) | The target's INT8 head requantized to INT4 and attached to the drafter, so the runtime no longer reads the full INT8 head on every draft pass. Rebuilt when the SHA-256 of the target or drafter XML changes; if it cannot be built, the stock drafter is used. Not applied to `draft_source: local`. |
 | Derived target, `<model>/<weight_format>-dflash` | Only when the stock target lacks `hidden_states_decoder_layers`: weights hard-linked, XML annotated, the ordinary target untouched; rebuilt when the target XML hash changes. |
-| Manifest, `models/openvino/.manifests/<model>-<weight_format>.json` | Resolved settings, drafter commit, decision, reason and timings. |
+| Manifest, `models/openvino/.manifests/<model>-<weight_format>.json` | Resolved settings, drafter commit, decision, reason, and timings. |
 
-Drafter and derived artifacts are staged in `.partial` directories and published whole. Each artifact has a `.lock` file that records its owner's process ID and start time, so a lock left by a dead process is recovered even when Windows reuses the ID. A superseded or stale artifact is moved aside with a timestamp suffix, never deleted. Under `auto`, a drafter download, export or file-system failure falls back to plain generation; a drafter incompatible with the target always fails.
+VLM artifact preparation, recovery, and fallback:
 
-To run offline, start once with network access (or copy prepared `models/` directories): validated artifacts are reused without network access. Install trusted exporter dependencies during software setup. Validate paths and downloaded metadata, never execute repository code, and preserve TLS verification. Pass arguments as data and credentials/proxy settings through the environment without logging secrets.
+- The model owner calls the preparation process while loading the VLM.
+- The preparer stages drafter downloads and derived artifacts in `.partial` directories, then publishes completed artifacts. Each artifact has a `.lock` file that records its owner's process ID and start time, so a lock left by a dead process is recovered even when Windows reuses the ID. When replacing an active drafter or derived artifact, it moves the old artifact aside with a timestamp suffix, never deleted.
+- In the `auto` mode, a drafter download, export, or file-system failure falls back to plain generation; a drafter incompatible with the target always fails.
+
+Operator instructions:
+
+1. Install trusted exporter dependencies during software setup.
+2. For offline use, prepare missing artifacts while online, or copy prepared artifacts into the expected `models/` locations. Later runs can reuse artifacts that validate successfully without network access.
+3. Set proxy environment variables if the network requires a proxy.
+
+Security requirements:
+
+- The preparation flow validates artifact paths and downloaded metadata.
+- The preparation module does not execute repository code during artifact preparation.
+- Preserve TLS certificate verification.
+- The preparation module passes command-line arguments as data, obtains credentials and proxy settings from environment variables, and does not log credentials or other secrets.
 
 ## 6. Generation and Failure Policy
 
-DFlash/DFlash2 uses an external drafter; MTP uses the target's bundled prediction head. The target verifies proposed tokens. The qualified OpenVINO runtime owns drafting and acceptance; the application selects one method and enforces readiness and request policy.
+During generation, the qualified OpenVINO GenAI runtime uses an external drafter for DFlash/DFlash2 or the target’s bundled prediction head for MTP to propose tokens. The target model verifies the proposals, and the runtime manages acceptance; the application selects one method and enforces readiness and request policy.
 
-Validate DFlash/DFlash2 hidden-state outputs and vocabulary alignment; for MTP, validate the bundled head and its target/runtime contract instead. Check the complete runtime/exporter dependency set for each method. Keep method-specific scheduler and draft-block memory settings isolated from plain generation. Budget target, speculative artifacts, image processing and other classroom memory together.
+At startup, the model-preparation flow validates DFlash/DFlash2 hidden-state outputs and vocabulary alignment, or the MTP head against its target/runtime contract, and checks each method’s runtime and exporter dependencies. The serving application keeps method-specific scheduler and draft-block memory settings separate from plain generation and budgets memory across the target, speculative artifacts, image processing, and other classroom workloads.
 
-Initially accelerate text-only greedy generation. Preserve image support through tested plain VLM decoding; do not claim image-encoding speedups. Reject unsupported sampling on an active speculative pipeline before streaming rather than silently changing the request. Plain generation retains each model's supported behavior. `"on"` requires speculative readiness at startup, not acceleration of every request.
+The serving application uses speculative decoding only for text-only greedy generation and preserves image support through tested plain VLM decoding; it does not claim image-encoding speedups. Before streaming, the request handler rejects sampling requests unsupported by an active speculative pipeline rather than silently changing them. With plain generation, the application retains each model’s supported behavior. When mode: `"on"` is configured, the model loader requires speculative readiness at startup; this does not require every request to use acceleration.
 
-Tool calling is independent of speculative decoding: it must work with speculation off, and every advertised tool-capable DFlash/DFlash2/MTP profile must pass the same call/result and streaming tests. Speculation must not drop tool definitions, change call IDs, expose unverified draft tokens or bypass argument validation. Reject an unsupported model/method/tool combination before generation; do not silently remove tools or switch speculative methods.
+The serving application supports tool calling with speculative decoding disabled and advertises DFlash/DFlash2/MTP tool support only for profiles that pass the same call/result and streaming tests. For each request, it preserves tool definitions and call IDs, exposes only target-verified tokens, and validates arguments. Before generation, it rejects unsupported model/method/tool combinations rather than silently removing tools or switching methods.
+
 
 | Condition | `"off"` | `auto` | `"on"` |
 | --- | --- | --- | --- |
 | No qualified profile for the selected method, including an older model | Use plain model | Use plain model; report reason | Fail with guidance to use plain mode |
 | Missing selected files, with a qualified profile available | Acquire target only | Prepare target and method-specific artifacts | Prepare target and method-specific artifacts |
 | Target unavailable after permitted preparation | Fail | Fail | Fail |
-| Speculative artifact acquisition, conversion or activation fails | Not applicable | Warm a plain pipeline once, after safe cleanup | Fail |
-| Invalid active method/source/tuning, mismatched target/drafter or integrity failure | Fail for active target | Fail | Fail |
+| Speculative artifact acquisition, conversion, or activation fails | Not applicable | Warm a plain pipeline once, after safe cleanup | Fail |
+| Invalid active method, source, or tuning; mismatched target and drafter; or integrity failure | Fail for active target | Fail | Fail |
 
-`local` draft sources prohibit replacement downloads. A normal `auto` fallback is not successful accelerator qualification; qualify with `"on"`.
+The model-preparation flow does not download a replacement for a missing or invalid `local` draft. The operator must qualify the accelerator with mode: `"on"`; an auto fallback to plain generation does not count as successful qualification.
 
-If native cleanup cannot be confirmed, stop the model process before recovery. Retain the plain-mode decision for that launch so recovery does not repeatedly activate a failing drafter. Never replay a partially streamed request. Roll back by restoring the previous model/artifacts or disabling speculation and restarting, not by deleting caches.
+If the serving process cannot confirm native cleanup, the operator stops it before recovery. The model loader retains the plain-mode decision for that launch to prevent repeated activation attempts. The request handler does not replay a partially streamed request. To roll back, the operator restores the previous model or artifacts, or disables speculation and restarts; the operator does not delete caches.
 
-Health reports the target, tool-call capability, requested/effective method, drafter identity or target-bundled head, warm-up result and sanitized fallback reason. Detailed revisions, tuning and runtime versions remain available for diagnostics without exposing private local paths. Do not log sensitive tool arguments or results by default.
+The serving application's `/health` endpoint reports the target, tool-call capability, requested and effective methods, drafter identity or target-bundled head, warm-up result, and sanitized fallback reason. Its diagnostics provide detailed revisions, tuning, and runtime versions without exposing private local paths. The application does not log sensitive tool arguments or results by default.
+
 
 **Implemented** ([text_gen_vlm.py](../../components/vlm/text_gen_vlm.py)):
 
-- **Warm-up and fallback.** Readiness follows one 2-token greedy generation. Under `auto`, a failed load or warm-up with the drafter discards that in-process pipeline (released and garbage-collected) before the plain pipeline is warmed. The plain decision is kept for the process lifetime.
+- **Warm-up and fallback.** Readiness follows one two-token greedy generation. Under `auto`, a failed load or warm-up with the drafter discards that in-process pipeline (released and garbage-collected) before the plain pipeline is warmed. The plain decision is kept for the process lifetime.
 - **Request policy.** While DFlash is active, requests are greedy with the profile's fixed draft window. A request with `temperature > 0` is rejected with HTTP 400 before generation, and image requests run on the same pipeline.
 - **Health.** `GET /health` adds `hub.text_gen.serving` with these fields:
-  - `model`, `weight_format`, `device`, `tool_calls`;
-  - `speculative` (`requested_mode`, `requested_method`, `effective_method`, `draft`, `num_assistant_tokens`, `fallback_reason`);
-  - `warmup`;
-  - `startup` (`prepare_s`, `load_s`, `warmup_s`);
-  - `diagnostics` (GenAI version, drafter revision, scheduler).
+  - `model`, `weight_format`, `device`, `tool_calls`
+  - `speculative` (`requested_mode`, `requested_method`, `effective_method`, `draft`, `num_assistant_tokens`, `fallback_reason`)
+  - `warmup`
+  - `startup` (`prepare_s`, `load_s`, `warmup_s`)
+  - `diagnostics` (GenAI version, drafter revision, scheduler)
 
-  Local paths are stripped from reasons, and a local drafter is shown only by its directory name.
+  The `/health` response replaces absolute local paths in fallback reasons with <path> and identifies a local drafter by its directory name only.
 
 ## 7. Processing-Time Statistics
 
-Collect statistics at two levels: **workflow-stage elapsed time** for the classroom experience and **individual model-call time** for inference cost. These are nested measurements, not interchangeable values. Existing timing sources are identified under Collection and Reporting; the remaining coverage requires implementation.
+The serving application must record elapsed time at two nested levels: **workflow-stage elapsed time** to measure the classroom experience, and **individual model-call time** to measure inference cost. It must treat these as distinct measurements, retain the existing timing sources described under Collection and Reporting, and implement the remaining coverage.
 
 ### Workflow Stages
 
-Measure each enabled stage from execution start through completion of its output, including preprocessing, model calls and postprocessing. Record admission/queue wait separately and include it in request end-to-end latency. Use seconds for stage durations and milliseconds for per-frame or per-call latency.
+The application’s timing instrumentation measures each enabled stage from execution start until its output is complete, including preprocessing, model calls, and postprocessing. It records admission and queue wait separately and includes both in request end-to-end latency. It reports stage durations in seconds and per-frame or per-call latency in milliseconds.
 
-| Stage | Processing-time boundary and breakdown | Workload and additional statistics |
+| Stage | Processing-Time Boundary and Breakdown | Workload and Additional Statistics |
 | --- | --- | --- |
-| Media preparation | Input decoding, audio extraction and chunk preparation | Media duration, chunk count and preparation seconds; identify work already included in ASR |
-| ASR | Consume audio chunks through final transcript persistence; separate input wait, transcription and optional diarization | Audio seconds, chunk count, ASR and diarization model-call times; real-time factor = processing seconds / audio seconds for a fixed recorded input |
-| VA (video analytics) | First accepted frame through final analytics output for a fixed clip; separate decode, model inference, tracking and aggregation | Per-stream processed/dropped frames, achieved FPS, frame-latency p50/p95 and each detector, pose, classifier or re-identification model's time; report live observation duration separately |
-| OCR | Frame/page selection through persisted recognized text; separate extraction, detection, recognition and merge | Frames/pages processed and per-image latency; report board OCR and document OCR separately |
-| Summary | Summary execution through final saved summary, including map/fold/reduce calls when chunking is active | Strategy, chunk count, map/fold and reduce times, total seconds, time to first token (TTFT), input/output tokens and decode tokens/s |
-| Mindmap | Summary input preparation through generated, validated and saved mindmap | Model-call time, validation/persistence time and any repair attempts; distinguish insufficient-input fallback from model generation |
-| Topic segmentation | Transcript preparation through validated and saved topics | Window count, per-window model times and topic count; measure subsequent embedding/indexing separately |
-| Report | Session-data collection through completed report generation and persistence | Collection, model generation and rendering/export times; identify cached re-selection or reports requiring no model call |
-| Content search ingestion | Accepted ingestion task through searchable content | Queue wait, extraction/video captioning, embedding and indexing times; document/page/frame/chunk counts |
-| RAG Q&A | Accepted question through final answer | Retrieval, reranking, prompt preparation and generation times; TTFT and input/output tokens |
-| Grading | Accepted grading task through completed result | Layout/detection, OCR/VLM calls and result assembly; page/question counts and retry times |
+| Media preparation | Input decoding, audio extraction, and chunk preparation | Media duration, chunk count, and preparation seconds; identify work already included in ASR |
+| ASR | Consume audio chunks through final transcript persistence; separate input wait, transcription, and optional diarization | Audio seconds, chunk count, ASR, and diarization model-call times; real-time factor = processing seconds / audio seconds for a fixed recorded input |
+| VA (video analytics) | First accepted frame through final analytics output for a fixed clip; separate decode, model inference, tracking, and aggregation | Per-stream processed and dropped frames, achieved FPS, p50 and p95 frame latency, and the execution time of each detector, pose, classifier, and re-identification model; report live observation duration separately |
+| OCR | Frame or page selection through persisted recognized text; separate extraction, detection, recognition and merge | Frames or pages processed and per-image latency; report board OCR and document OCR separately |
+| Summary | Summary execution through final saved summary, including map, fold, and reduce calls when chunking is active | Strategy and chunk count; map-phase duration, including any fold calls; total execution time in seconds, overall time to first token (TTFT), and reduce TTFT; input and output token counts; and decode throughput in tokens per second |
+| Mindmap | Summary input preparation through generated, validated, and saved mindmap | Model-call time, validation and persistence time, and any repair attempts; distinguish insufficient-input fallback from model generation |
+| Topic segmentation | Transcript preparation through validated and saved topics | Window count, per-window model times, and topic count; measure subsequent embedding and indexing separately |
+| Report | Session-data collection through completed report generation and persistence | Collection, model generation, rendering, and export times; identify cached re-selection or reports requiring no model call |
+| Content search ingestion | Accepted ingestion task through searchable content | Queue wait time, extraction and video captioning times, embedding and indexing times; document, page, frame, and chunk counts |
+| RAG Q&A | Accepted question through final answer | Retrieval, reranking, prompt preparation and generation times; TTFT and input and output tokens |
+| Grading | Accepted grading task through completed result | Layout detection, OCR and VLM calls, and result assembly; page and question counts and retry times |
 
-ASR, VA and board OCR can overlap, and several stages may share the text-generation queue. Measure workflow wall time directly from workflow start to completion of all requested outputs; **do not sum stage durations to infer end-to-end latency**. Record the enabled stages and whether the run is live, recorded-media replay or an isolated stage benchmark. For live workflows, also report time from input completion to final output so recording duration is not mistaken for inference cost.
+The timing instrumentation records workflow wall time from workflow start until all requested outputs are complete; it **does not sum stage durations to infer end-to-end latency**, because ASR, VA, and board OCR may overlap and stages may share the text-generation queue. It also records which stages were enabled and whether the run was live, recorded-media replay, or an isolated stage benchmark. For live workflows, it separately records the time from input completion to final output, so recording duration is not counted as inference cost.
 
 ### Individual Models
 
-Time each invocation at the model owner, retaining its parent stage and an opaque run/request identifier. Group by actual model/artifact revision, precision, device, hardware platform, runtime version and effective decoding method. A shared Qwen model must remain attributable to Summary, Mindmap, segmentation, reports, captioning, Q&A or grading rather than becoming one unattributed total.
+The timing instrumentation records each invocation at the model owner, along with its parent stage and an opaque run or request identifier. It groups measurements by actual model or artifact revision, precision, device, hardware platform, runtime version, and effective decoding method. It preserves each call’s attribution to its workflow—Summary, Mindmap, segmentation, reports, captioning, Q&A, or grading—even when those workflows share a Qwen model.
 
-| Model-call statistic | Definition |
+| Model-Call Statistic | Definition |
 | --- | --- |
-| Call latency | Monotonic elapsed time from model invocation to final output, excluding admission wait; include preprocessing/postprocessing performed inside that boundary and label it accordingly. Report runtime inference-only time separately when available. |
-| Generative breakdown | Input/image preparation, prefill and decode time when exposed by the runtime; model TTFT, prompt/output token counts and decode tokens/s. Do not estimate unavailable subphase timings by subtraction. |
-| Non-generative breakdown | Inference time per audio chunk, image, frame or batch, with input dimensions/duration and batch size; keep detection, recognition, embedding and reranker models separate. |
-| Speculative decoding | Requested/effective method and fallback status; target verification time, drafter or bundled-head time and accepted/proposed tokens when exposed by the runtime. These are subphases of the call, not extra workflow stages. |
-| Startup | Download, conversion, model load/compile and warm-up times recorded separately from warm-request latency. |
+| Call latency | Monotonic elapsed time from model invocation to final output, excluding admission wait; include preprocessing and postprocessing performed inside that boundary and label it accordingly. Report runtime inference-only time separately when available. |
+| Generative breakdown | Input and image preparation, prefill and decode times when exposed by the runtime; model TTFT, prompt and output token counts and decode tokens per second. Do not estimate unavailable subphase timings by subtraction. |
+| Non-generative breakdown | Inference time per audio chunk, image, frame, or batch, with input dimensions or duration when applicable, and batch size; keep detection, recognition, embedding, and reranker models separate. |
+| Speculative decoding | Requested method, effective method, and fallback status; target verification time, drafter or bundled-head time, and accepted and proposed tokens when exposed by the runtime. These are subphases of the call, not extra workflow stages. |
+| Startup | Record download, conversion, model loading and compilation, and warm-up times separately from warm-request latency. |
 
-Use the generation metric definitions and source/boundary rules in the [benchmark metrics section](../context-bench/context-bench-design.md#7-iteration-metrics-and-comparison-rules). Keep model TTFT distinct from client-visible TTFT, which also includes request preparation, queueing, transport and earlier map calls. Record durations locally within each process; do not subtract monotonic timestamps from different processes or hosts.
+The timing instrumentation follows the generation metric definitions and source/boundary rules in the [benchmark metrics section](../context-bench/context-bench-design.md#7-iteration-metrics-and-comparison-rules). It reports model TTFT separately from client-visible TTFT, which also includes request preparation, queueing, transport, and earlier map calls. Each process records its own durations; the instrumentation does not subtract monotonic timestamps across processes or hosts.
 
-For every model/precision in Section 2, report call-latency mean/p50/p95, TTFT and decode throughput across the platform/method matrix in Section 8. Include the installed model as the compatibility baseline. ASR, VA, OCR, embedding and reranker models use the applicable per-call statistics with their actual configured identities.
+The performance-reporting workflow reports call-latency mean, p50, and p95; TTFT; and decode throughput for every model/precision in Section 2 across the platform/method matrix in Section 8. It includes the installed model as the compatibility baseline and reports applicable per-call statistics for ASR, VA, OCR, embedding, and reranker models under their configured identities.
 
 ### Collection and Reporting
 
-Reuse existing timing sources while preserving their meanings: [ASR](../../components/asr_component.py) writes `performance.transcription_time`; [Summary](../../components/summarizer_component.py) writes `performance.summarizer_time`, `performance.summary_map_time`, `performance.ttft`, `performance.reduce_ttft` and `performance.tps`; [Report](../../components/report_generator/report_generator.py) writes collection, generation and total times. These are component timers, not isolated model benchmarks. ASR includes upstream input waiting and optional diarization; the report generation timer also includes rendering/persistence. [Hardware monitoring](../../monitoring/monitor.py) provides utilization, memory and power samples, not model-call latency. Keep these existing fields compatible and add the missing stage/call measurements at their owning boundaries.
+The timing instrumentation reuses existing measurements without changing their meanings: [ASR](../../components/asr_component.py) writes `performance.transcription_time`; [Summary](../../components/summarizer_component.py) writes `performance.summarizer_time`, `performance.summary_map_time`, `performance.ttft`, `performance.reduce_ttft`, and `performance.tps`; [Report](../../components/report_generator/report_generator.py) writes collection, generation, and total times. These are component timers, not isolated model benchmarks. ASR includes upstream input waiting and optional diarization; the report generation timer also includes rendering and persistence. [Hardware monitoring](../../monitoring/monitor.py) provides utilization, memory, and power samples - not model-call latency. The instrumentation keeps these existing fields compatible and adds the missing stage- and call-level measurements at their owning boundaries.
 
-Retain one record per stage attempt and model invocation so repeated calls, retries and failures are not overwritten by a last-value metric. Use monotonic clocks and finalize timers on success, failure or cancellation; for streaming, measure through generator completion, not generator creation. Separate client cancellation time from the end of any continuing native inference. Record status, counts and timing metadata only, with bounded retention; exclude prompts, transcripts, images, tool arguments/results, student identifiers, credentials and private paths.
+The timing instrumentation retains a separate record for each stage attempt and model invocation, so repeated calls, retries, and failures are not overwritten by a last-value metric. It uses monotonic clocks and finalizes timers on success, failure, or cancellation; for streaming, it measures through generator completion rather than creation. The timing instrumentation must record client-cancellation time separately from any continuing native inference and retain only status, counts, and timing metadata, with bounded retention. Records must exclude prompts, transcripts, images, tool arguments and results, student identifiers, credentials, and private paths. **Current limitation**: Failed-stage events persist raw exception messages in `error_detail` without sanitization. The current stage-event write path therefore does not enforce these content exclusions.
 
-For each stage and model group, publish successful sample count, total processing time, mean, min/max, p50 and p95, plus failed/cancelled attempt counts and their elapsed time separately. Mark skipped stages as not applicable and missing or unsupported measurements as unavailable, never zero. Treat existing negative sentinel values as unavailable. Preserve raw samples, units, measurement boundaries and the percentile calculation method; a single run is an observation, not a latency distribution.
+The statistics reporter publishes, for each stage and model group, the successful sample count, total processing time, mean, minimum, maximum, p50, and p95. It reports failed and cancelled attempt counts and elapsed times separately. It marks skipped stages as not applicable and missing, unsupported, or negative-sentinel measurements as unavailable—not zero. It preserves raw samples, units, measurement boundaries, and the percentile calculation method, and labels a single run as an observation rather than a latency distribution.
 
-Compare repeated warm runs using the same fixed inputs, prompt templates, token limits, chunking, concurrency, media settings and enabled stages. Publish hardware/driver/runtime/artifact versions, input durations or dimensions, token counts, warm-up/repetition counts, quality outcomes and an evidence link with every result. Separate isolated model benchmarks from concurrent classroom runs and cold-start measurements. Compute speedup only between matched plain/accelerated cases using the same latency statistic; report actual fallback as plain generation, not accelerated success.
+The benchmark and reporting process compares repeated warm runs with the same fixed inputs, prompt templates, token limits, chunking, concurrency, media settings, and enabled stages. For each result, it publishes hardware, driver, runtime, and artifact versions; input durations or dimensions; token counts; warm-up and repetition counts; quality outcomes; and an evidence link. It reports isolated model benchmarks separately from concurrent classroom runs and cold-start measurements. It calculates speedup only for matched plain and accelerated cases using the same latency statistic, and reports fallback runs as plain generation—not accelerated success.
 
 ### Implemented Coverage
 
 See [processing-time-statistics.md](processing-time-statistics.md) for fields and usage.
 
-| Level | Recorded now | Not yet recorded |
+| Level | Recorded Now | Not Recorded Yet |
 | --- | --- | --- |
-| Workflow stages ([stage_tracker.py](../../utils/stage_tracker.py)) | `transcribe`, `va`, `summarize`, `mindmap`, `segmentation` and `report`: one record per attempt with status, UTC start/end and duration | Media preparation, content-search ingestion, and the retrieval/reranking breakdown of RAG Q&A |
-| Stages seen through model calls | `board_ocr`, `document_ocr`, and `/v1/chat/completions` callers named by the `X-SC-Stage` header (`qa`, `video_captioning`, `grading`, otherwise `chat_api`) | — |
-| Model calls ([processing_stats.py](../../utils/processing_stats.py)) | `text_gen`, `asr` and `ocr`: queue wait, latency, status, client cancellation, and for text generation TTFT, TPOT, token counts and DFlash accepted/drafted tokens | VA, embedding, reranking and grading layout/detection models; target-versus-drafter time inside a DFlash call |
-| Startup | Preparation, load and warm-up seconds in `/health` | A per-run history |
+| Workflow stages ([stage_tracker.py](../../utils/stage_tracker.py)) | `transcribe`, `va`, `summarize`, `mindmap`, `segmentation`, and `report`: one record per attempt with status, UTC start and end times, and duration | Media preparation, content-search ingestion, and the retrieval and reranking breakdown for RAG Q&A |
+| Stages seen through model calls | `board_ocr`, `document_ocr`, and `/v1/chat/completions` callers named by the `X-SC-Stage` header (`qa`, `video_captioning`, or `grading`; other callers are identified as `chat_api`) | — |
+| Model calls ([processing_stats.py](../../utils/processing_stats.py)) | `text_gen`, `asr`, and `ocr`: queue wait, latency, status, client cancellation, and for text generation, TTFT, TPOT, token counts, and DFlash accepted and drafted tokens | VA, embedding, reranking, and grading layout and detection models; target-versus-drafter time inside a DFlash call |
+| Startup | Preparation, load, and warm-up seconds in the `/health` endpoint | A history for each run |
 
-Records are held in memory (the latest 4,000 of each kind) for `GET /processing-stats` and appended to `<session>/logs/stage_events.jsonl` and `model_calls.jsonl`. They contain timing metadata only. [processing_stats_report.py](../../Scripts/processing_stats_report.py) turns either source into a Markdown report with a per-session timeline. That report:
-- counts each stage attempt's own model calls, failed and cancelled included;
-- computes DFlash acceptance only from calls that report both counters.
+The processing-statistics collector retains the latest 4,000 records of each kind in memory for `GET /processing-stats` and appends them to `<session>/logs/stage_events.jsonl` and `<session>/logs/model_calls.jsonl`. It records timing metadata only. The [processing_stats_report.py](../../Scripts/processing_stats_report.py) script builds a per-session timeline from either source, counts each stage attempt's associated model calls, including failed and cancelled calls, and computes DFlash acceptance only from calls that report both counters.
 
 ## 8. Release Decisions
 
-| Area | Required checks |
+| Area | Required Checks |
 | --- | --- |
-| Backward compatibility | Load unchanged older configurations; retain existing key names, token/queue limits, chunking, segmentation and service endpoints. Test supported providers/model IDs, precisions and local paths; no drafter download when off; plain fallback in `auto`; no regressions from runtime dependency upgrades. |
-| Model/precision support | For every Section 2 profile, test empty-cache preparation, warm-up and later reuse of the validated artifacts. Plain mode downloads only the target; an accelerated case requires all artifacts for its selected method. |
+| Backward compatibility | Load unchanged older configurations; retain existing key names, token and queue limits, chunking, segmentation, and service endpoints. Test supported providers and model IDs, precisions, and local paths; do not download a drafter when off; use plain fallback in `auto`; check for regressions after runtime dependency upgrades. |
+| Model/precision support | For every profile in Section 2, test empty-cache preparation, warm-up and later reuse of the validated artifacts. Plain mode downloads only the target; an accelerated case requires all artifacts for its selected method. |
 | Port-8000 tool calling | End-to-end function definition -> tool call -> tool result -> answer through `/v1/chat/completions`, with streaming and non-streaming clients. Test `none`/`auto`/`required`/named choices, multiple-call IDs, `parallel_tool_calls: false`, full history, malformed arguments, missing results, truncation, unsupported models and no server-side tool execution. |
-| Speculative configuration | Missing/mode-only blocks, all supported methods, explicit/default Hub revisions, local path handling and tuning bounds. Reject cross-model drafters and MTP with an external draft source/model; bundled MTP must never trigger a z-lab download. |
-| Classroom quality | Streaming/non-streaming text, images, supported thinking/structured output, cancellation and queue limits; summaries, mind maps, segmentation, reports, RAG Q&A, video summaries and grading. |
-| Reliability | Invalid pairs and corrupt artifacts, network/disk failures, interrupted/concurrent downloads, safe startup fallback, and identical preparation from both launchers on Windows PowerShell 5.1/7. |
-| Performance | Repeated plain/accelerated comparisons: answer quality, time to first token, tokens/s, end-to-end p50/p95 latency and peak memory. Separate download/conversion/compile time from inference. |
-| Timing statistics | Publish stage and individual-model results defined in Section 7 for each qualification case. Verify attribution for shared models, overlapping stages, streaming completion, retries, failures, cancellation and skipped stages; retain raw samples and do not present unavailable timings as zero or pending cases as measured. |
-| Context bench | Complete the [benchmark implementation and tests](../context-bench/context-bench-design.md#10-implementation-sequence-and-verification); verify exact-context and matched-profile measurements, separate accuracy verdicts, interruption-safe evidence, nonzero failure exits and unchanged source/serving artifacts. Publish model-call evidence without presenting it as full classroom-workflow timing. |
+| Speculative configuration | Test missing and mode-only blocks, all supported methods, explicit and default Hub revisions, local path handling, and tuning bounds. Reject cross-model drafters and MTP with an external draft source or model; bundled MTP must never trigger a z-lab download. |
+| Classroom quality | Test streaming and non-streaming text and images, supported thinking and structured output, cancellation, and queue limits; summaries, mind maps, segmentation, reports, RAG Q&A, video summaries, and grading. |
+| Reliability | Test invalid pairs and corrupt artifacts, network and disk failures, interrupted and concurrent downloads, safe startup fallback, and identical preparation from both launchers on Windows PowerShell versions 5.1 and 7. |
+| Performance | Compare plain and accelerated modes repeatedly for answer quality, time to first token, tokens per second, end-to-end p50 and p95 latency, and peak memory. Separate download, conversion, and compile time from inference. |
+| Timing statistics | Publish stage and individual-model results defined in Section 7 for each qualification case. Verify attribution for shared models, overlapping stages, streaming completion, retries, failures, cancellation, and skipped stages; retain raw samples and do not present unavailable timings as zero or pending cases as measured. |
+| Context bench | Complete the [benchmark implementation and tests](../context-bench/context-bench-design.md#10-implementation-sequence-and-verification); verify exact-context and matched-profile measurements, separate accuracy verdicts, interruption-safe evidence, nonzero failure exits, and unchanged source and serving artifacts. Publish model-call evidence without presenting it as full classroom-workflow timing. |
 
-The required GPU matrix covers Arrow Lake (ARL) and Panther Lake (PTL): Qwen3.5-9B INT4/INT8 plain on both platforms (four cases), plus Qwen3.6 INT4 and Qwen3.8 INT4/INT8 with plain and their respective DFlash/DFlash2 methods on both platforms (twelve cases). These sixteen cases are planned qualification, not reported passes; DFlash2 remains blocked until its adapter/runtime is qualified. Add older-model regressions and separate MTP cases for each advertised target/precision/platform; do not infer support across methods. Include tool-call round trips for tool-capable profiles. CPU qualification is separate; identify exact hardware, artifacts, runtime/driver versions and workload settings in every result.
+GPU qualification:
+- Platforms: Arrow Lake and Panther Lake.
+- Qwen3.5-9B: INT4 and INT8 in plain mode on both platforms (four cases).
+- Qwen3.6: INT4 in plain mode and with DFlash on both platforms.
+- Qwen3.8: INT4 and INT8 in plain mode and with DFlash2 on both platforms.
+- The Qwen3.6 and Qwen3.8 cases total 12; the GPU matrix totals 16.
+- These are planned qualification cases, not reported passes. DFlash2 remains blocked until its adapter and runtime are qualified.
+
+Additional coverage:
+- Add older-model regression cases.
+- Qualify MTP separately for each advertised target, precision, and platform. Do not infer support across methods.
+- Include tool-call round trips for tool-capable profiles.
+- Qualify CPU separately from GPU.
+
+Result details:
+Record the exact hardware, artifacts, runtime and driver versions, and workload settings for every result.
 
 **Verified so far (not qualification):**
 - **Unit tests** (`components/tests`, `tests/unit`, `model_manager/test`) cover:
-  - configuration resolution, preparation and locking;
-  - the tool-call contract, including truncation, forced choices, malformed history and stream failures;
+  - configuration resolution, preparation, and locking;
+  - the tool-call contract, including truncation, forced choices, malformed history, and stream failures
   - stream slot release and the timing records.
 - **Tool calls, end to end:** one Arc 140T (Arrow Lake) passed 10 tool-call scenarios through the `openai` client on four profiles:
-  - Qwen3-VL-8B, Qwen3.5-9B and Qwen3.8-27B INT4, plain;
+  - Qwen3-VL-8B, Qwen3.5-9B and Qwen3.8-27B INT4, plain
   - Qwen3.6-35B-A3B INT4 with DFlash.
 - **DFlash performance:** `context_bench` measured DFlash for Qwen3.6 INT4 on the same machine.
 
-The ARL/PTL matrix above remains planned.
+The Arrow Lake and Panther Lake matrix above remains planned.

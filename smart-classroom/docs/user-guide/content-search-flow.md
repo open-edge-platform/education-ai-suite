@@ -12,7 +12,7 @@ The Content Search view page is split into two panels:
 
 - **Upload** - Ingest files (videos, documents, and images) into the vector database
 - **Search and Q&A** - Query uploaded content using text or image search, or through natural
-language
+  language
 - **Results** - Display search results with type filtering, relevance scores, and content previews
 
 **Right Panel**
@@ -53,7 +53,7 @@ Before uploading files, you can add tags to organize your content:
 
 > [!NOTE]
 > Tags can be added or removed only while the file is in the **Staged** state (before
-> upload). Once uploaded, tags are locked.
+  upload). Once uploaded, tags are locked.
 
 ### Toggle Video Summarization
 
@@ -97,23 +97,22 @@ After at least one file upload is complete, the **Search** tab becomes available
 3. Select the content types to search across: **Documents**, **Images**, and **Videos**
    (any combination).
 4. (Optional) Filter results by tag using the **Filter by tags** drop-down menu.
-5. Set the number of **Top Results** to return (default: 10)
-6. Click **Search**
+5. Set the number of **Top Results** to return (default: 10).
+6. Click **Search**.
 
-The text query feature searches both the visual collection (CLIP embeddings) and the textual collection
-BAAI General Embedding (BGE) embeddings. Textual results are reranked by a cross-encoder, and results from both
+The text query feature searches both the visual collection, which holds CLIP embeddings, and the textual collection, which holds BAAI General Embedding (BGE) embeddings. Textual results are reranked by a cross-encoder, and results from both
 modalities are merged using Reciprocal Rank Fusion (RRF).
 
 ![Text Search with Results](./_assets/content-search_searchResult.png)
 
 ### Search for Images
 
-1. Select the **Image Search** tab
-2. Drag and drop an image or click to browse (accepts `.jpg`, `.jpeg`, `.png`)
+1. Select the **Image Search** tab.
+2. Drag and drop an image or click to browse (accepts `.jpg`, `.jpeg`, `.png`).
 3. Select the content types to search: **Images**, **Videos**
-   (document search is not available for image queries)
-4. Optionally filter by tag
-5. Click **Search**
+   (document search is not available for image queries).
+4. Optionally filter by tag.
+5. Click **Search**.
 
 The image query feature searches the visual collection by CLIP similarity, returning visually similar images
 and video frames:
