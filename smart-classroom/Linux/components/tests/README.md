@@ -6,7 +6,7 @@
 ## Running
 
 The suite is written as pytest functions, so `unittest discover` will collect
-nothing. From `education-ai-suite/smart-classroom/Windows`, with the project venv
+nothing. From `education-ai-suite/smart-classroom/Linux`, with the project venv
 active:
 
 ```sh
@@ -25,8 +25,8 @@ python -m pytest components/tests -q -m "not slow"
 A `FakeTokenizer` that splits on whitespace stands in for the real one, so token
 counts in the tests are readable numbers rather than model-specific ones.
 
-The chunking modules are documented in
-[`docs/dev-guide/transcript-chunking/prompt-budget.md`](../../docs/dev-guide/transcript-chunking/prompt-budget.md).
+The chunking modules are documented for the Windows variant in
+[`Windows/docs/dev-guide/transcript-chunking/prompt-budget.md`](../../../Windows/docs/dev-guide/transcript-chunking/prompt-budget.md).
 
 ## Adding a Test
 

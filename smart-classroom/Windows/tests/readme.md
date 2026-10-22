@@ -14,7 +14,7 @@ pip install pytest fastapi httpx
 
 ## How to run
 
-**Run from the `smart-classroom/` directory** (the tests import project-internal
+**Run from the `smart-classroom/Windows/` directory** (the tests import project-internal
 `utils/`, `services/`, `api/`).
 
 ### Run all tests

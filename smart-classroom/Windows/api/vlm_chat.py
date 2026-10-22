@@ -102,23 +102,62 @@ def _model_name(requested: Optional[str]) -> str:
 
 
 def _chunk_writer(model_name: str):
-    """SSE ``chat.completion.chunk`` formatter sharing one id and timestamp."""
+    """SSE ``chat.completion.chunk`` formatter sharing one id and timestamp.
+
+    ``chunk(delta, finish_reason)`` writes a choice delta; ``chunk(usage=...)``
+    writes the OpenAI usage chunk, which carries no choices.
+    """
     created = int(time.time())
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
 
-    def chunk(delta: dict, finish_reason: Optional[str] = None) -> str:
+    def chunk(delta: Optional[dict] = None, finish_reason: Optional[str] = None,
+              usage: Optional[dict] = None) -> str:
         payload = {
             "id": completion_id,
             "object": "chat.completion.chunk",
             "created": created,
             "model": model_name,
-            "choices": [
+            "choices": [] if usage is not None else [
                 {"index": 0, "delta": delta, "finish_reason": finish_reason}
             ],
         }
+        if usage is not None:
+            payload["usage"] = usage
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     return chunk
+
+
+def _usage(info: dict) -> Optional[dict]:
+    """OpenAI ``usage`` from runtime token counts; None when the runtime gave none.
+
+    ``prompt_tokens`` is what the model prefilled, image tokens included.
+    """
+    prompt_tokens, completion_tokens = info.get("input_tokens"), info.get("output_tokens")
+    if not (isinstance(prompt_tokens, int) and isinstance(completion_tokens, int)):
+        return None
+    return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens}
+
+
+def _include_usage(chat_req) -> bool:
+    return bool((chat_req.stream_options or {}).get("include_usage"))
+
+
+_SAMPLING_FIELDS = ("top_p", "top_k", "repetition_penalty", "presence_penalty",
+                    "frequency_penalty")
+
+
+def _sampling(chat_req) -> Optional[dict]:
+    """Decoding parameters the client set; None when it set none."""
+    values = {key: getattr(chat_req, key) for key in _SAMPLING_FIELDS
+              if getattr(chat_req, key) is not None}
+    return values or None
+
+
+def _finish_reason(info: dict) -> str:
+    """``length`` when generation stopped at max_new_tokens, else ``stop``."""
+    return "length" if info.get("truncated") else "stop"
 
 
 def _close(token_iter) -> None:
@@ -138,7 +177,8 @@ def _error_event(message: str, kind: str) -> str:
 _GENERATION_FAILED = _error_event("generation failed", "server_error")
 
 
-def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
+def _sse_stream(token_iter: Iterator[str], model_name: str, info: dict,
+                include_usage: bool = False) -> Iterator[str]:
     chunk = _chunk_writer(model_name)
     try:
         # First chunk announces the assistant role (OpenAI convention).
@@ -146,7 +186,11 @@ def _sse_stream(token_iter: Iterator[str], model_name: str) -> Iterator[str]:
         for token in token_iter:
             if token:
                 yield chunk({"content": token})
-        yield chunk({}, finish_reason="stop")
+        # The iterator is exhausted, so the runtime has filled ``info``.
+        yield chunk({}, finish_reason=_finish_reason(info))
+        usage = _usage(info) if include_usage else None
+        if usage is not None:
+            yield chunk(usage=usage)
     except Exception:  # noqa: BLE001 - the stream has started; end it with an error
         logger.exception("Streaming generation failed")
         yield _GENERATION_FAILED
@@ -197,6 +241,8 @@ async def _chat_completions(request: Request):
 
     model_name = _model_name(chat_req.model)
     handler = ModelManager.instance().text_gen()
+    # Filled by the runtime once generation ends: token counts and truncation.
+    info: dict = {}
 
     try:
         if chat_req.stream:
@@ -209,9 +255,11 @@ async def _chat_completions(request: Request):
                 max_new_tokens=chat_req.max_completion_tokens,
                 temperature=chat_req.temperature,
                 enable_thinking=chat_req.enable_thinking,
+                finish_info=info,
+                sampling=_sampling(chat_req),
             )
             return StreamingResponse(
-                _sse_stream(token_iter, model_name),
+                _sse_stream(token_iter, model_name, info, _include_usage(chat_req)),
                 media_type="text/event-stream",
             )
 
@@ -223,6 +271,8 @@ async def _chat_completions(request: Request):
             max_new_tokens=chat_req.max_completion_tokens,
             temperature=chat_req.temperature,
             enable_thinking=chat_req.enable_thinking,
+            finish_info=info,
+            sampling=_sampling(chat_req),
         )
     except UnsupportedRequestError as exc:
         # Rejected before generation rather than silently changed.
@@ -236,11 +286,13 @@ async def _chat_completions(request: Request):
             mods.ChatCompletionChoice(
                 index=0,
                 message=mods.ChatCompletionDelta(role="assistant", content=str(output)),
-                finish_reason="stop",
+                finish_reason=_finish_reason(info),
             )
         ],
     )
-    return JSONResponse(content=response.model_dump())
+    content = response.model_dump()
+    content["usage"] = _usage(info)
+    return JSONResponse(content=content)
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +344,7 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
         enable_thinking=chat_req.enable_thinking,
         tools=[t.for_template() for t in offered] or None,
         finish_info=info,
+        sampling=_sampling(chat_req),
     )
     if choice.requires_call:
         # "required" and named choices are enforced by starting the answer
@@ -305,7 +358,8 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
                                          reasoning_open=bool(info.get("reasoning_open")),
                                          prefill=info.get("prefill") or "")
             return StreamingResponse(
-                _tool_sse_stream(token_iter, parser, info, model_name),
+                _tool_sse_stream(token_iter, parser, info, model_name,
+                                 _include_usage(chat_req)),
                 media_type="text/event-stream",
             )
         output = await run_in_threadpool(handler.generate, stream=False, **kwargs)
@@ -329,11 +383,6 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
         message["reasoning_content"] = turn.reasoning
     if turn.tool_calls:
         message["tool_calls"] = turn.tool_calls
-    prompt_tokens, completion_tokens = info.get("input_tokens"), info.get("output_tokens")
-    usage = None
-    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
-        usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
-                 "total_tokens": prompt_tokens + completion_tokens}
     return JSONResponse(content={
         "id": str(uuid.uuid4()),
         "object": "chat.completion",
@@ -341,7 +390,7 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
         "model": model_name,
         "system_fingerprint": None,
         "choices": [{"index": 0, "message": message, "finish_reason": turn.finish_reason}],
-        "usage": usage,
+        "usage": _usage(info),
     })
 
 
@@ -350,7 +399,7 @@ _DELTA_FIELD = {"content": "content", "reasoning": "reasoning_content"}
 
 
 def _tool_sse_stream(token_iter, parser: "tc.ToolStreamParser", info: dict,
-                     model_name: str) -> Iterator[str]:
+                     model_name: str, include_usage: bool = False) -> Iterator[str]:
     """SSE with buffered tool calls: a call is published only once complete and valid."""
     chunk = _chunk_writer(model_name)
     calls = []
@@ -370,6 +419,9 @@ def _tool_sse_stream(token_iter, parser: "tc.ToolStreamParser", info: dict,
             for index, call in enumerate(calls):
                 yield chunk({"tool_calls": [{"index": index, **call}]})
         yield chunk({}, finish_reason=parser.finish_reason)
+        usage = _usage(info) if include_usage else None
+        if usage is not None:
+            yield chunk(usage=usage)
     except tc.ToolOutputError as exc:
         # Terminate with an error instead of claiming a tool-call finish.
         logger.warning("Rejected generated tool call mid-stream: %s", exc)

@@ -90,7 +90,7 @@ def write_transcript_files(
 
     if teacher_raw is not None:
         labels = _resolve_display_labels(speaker_text_len, teacher_raw)
-        teacher_lines, full_updated_lines, full_timestamped_lines = [], [], []
+        teacher_lines, full_updated_lines, full_labeled_ts_lines, full_timestamped_lines = [], [], [], []
         for seg in _merge_segments(all_segments):
             display = labels.get(seg["speaker"], seg["speaker"])
             text = seg["text"].strip()
@@ -98,9 +98,15 @@ def write_transcript_files(
             if display == LABEL_TEACHER:
                 teacher_lines.append(f"[{s}-{e}] {text}")
             full_updated_lines.append(f"{display}: {text}")
+            full_labeled_ts_lines.append(f"[{s}-{e}] {display}: {text}")
             full_timestamped_lines.append(f"[{s}-{e}] {text}")
 
         StorageManager.save(str(SessionPaths.transcript_path(session_id)), "\n".join(full_updated_lines) + "\n", append=False)
+        StorageManager.save(
+            str(SessionPaths.timestamped_transcript_path(session_id)),
+            "\n".join(full_labeled_ts_lines) + "\n",
+            append=False,
+        )
         StorageManager.save(
             str(SessionPaths.segmentation_transcript_path(session_id)),
             "\n".join(full_timestamped_lines) + "\n",

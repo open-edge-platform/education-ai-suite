@@ -8,9 +8,9 @@
 
 .DESCRIPTION
     The desktop app supervises the Python services itself, so this script only
-    bootstraps the Node toolchain and hands over. It never elevates: the one
-    action that needs Administrator (enabling Windows long paths) raises its own
-    UAC prompt from the app's Setup screen.
+    bootstraps the Node toolchain and hands over. It never elevates: steps that
+    need Administrator, such as enabling Windows long paths or installing DL
+    Streamer, raise their own UAC prompt from the app's Setup screen.
 
     Node is required for `npm install` and `npm run build` only. Once node_modules
     and dist exist, the app runs on Electron's own embedded Node.
@@ -54,7 +54,7 @@ The UI is rebuilt on every launch.
 The app manages the Python services itself. Use its screens for:
     Get Started     overview and initial guidance
     Services        start / stop / restart and live logs
-    Configuration   config.yaml, runtime_config.yaml, proxy settings
+    Configuration   config.yaml and proxy settings
     Setup           prerequisites, Python environment, models
 
 This script never requests Administrator privileges.

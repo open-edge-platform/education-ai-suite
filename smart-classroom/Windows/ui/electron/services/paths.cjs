@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// ui/electron/services -> ui/electron -> ui -> smart-classroom
+// ui/electron/services -> ui/electron -> ui -> smart-classroom/Windows
 const BUNDLED_HOME = path.resolve(__dirname, '..', '..', '..');
 
 function isSmartClassroomHome(dir) {
@@ -23,7 +23,7 @@ function home() {
 
 const isWindows = process.platform === 'win32';
 
-// The backend venv is a sibling of smart-classroom (education-ai-suite/smartclassroom)
+// The backend venv is a sibling of the app root (smart-classroom/smartclassroom)
 function venvDir() {
   return path.join(path.dirname(home()), 'smartclassroom');
 }

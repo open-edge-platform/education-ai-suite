@@ -1,14 +1,14 @@
-# Get Started with Smart Classroom
+# Get Started on Windows
 
 > [!IMPORTANT]
 > Use **Windows PowerShell** (not Command Prompt/CMD) for all steps in this guide.
 > PowerShell scripts (`.ps1` files) will not execute in CMD — they will only open as text files.
 
-There are two ways to run Smart Classroom. Both use the same services, models and
+There are two ways to run Smart Classroom. Both use the same services, models, and
 configurations.
 
 | | [Desktop app](#desktop-app) (recommended) | [PowerShell scripts](#alternative-powershell-scripts-and-the-browser-ui) |
-|---|---|---|
+| :--- | :--- | :--- |
 | Commands to run | `.\start-desktop-app.ps1` | `.\setup-smart-classroom.ps1`, then `.\start-smart-classroom.ps1` |
 | Prerequisites and installs | **Setup** screen, one item at a time | One scripted pass through everything |
 | Settings | **Configuration** screen | Console prompts, then editing `config.yaml` by hand |
@@ -21,20 +21,20 @@ Whichever you pick, start by cloning the repository.
 
 Go to the target directory of your choice and clone the suite.
 If you want to clone a specific release branch, replace `main` with the desired tag.
-To learn more on partial cloning, check the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
+To learn more about partial cloning, see the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
 
 ```bash
 git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/education-ai-suite.git
 cd education-ai-suite
-git sparse-checkout set smart-classroom
-cd smart-classroom
+git sparse-checkout set smart-classroom/Windows
+cd smart-classroom/Windows
 ```
 
 ---
 
 ## Desktop App
 
-The desktop app covers setup, configuration and running the services in one window.
+The desktop app covers setup, configuration, and running the services in one window.
 
 ### Step 1: Launch the App
 
@@ -43,7 +43,7 @@ The desktop app covers setup, configuration and running the services in one wind
 ```
 
 The script asks for your proxy settings, installs Node.js through winget if it is
-missing, builds the UI and hands over. The app then supervises the Python services
+missing, builds the UI, and hands over. The app then supervises the Python services
 itself.
 
 **Optional parameters:**
@@ -59,33 +59,33 @@ itself.
 **Setup** directly, and work down the list:
 
 | Section | Covers |
-|---------|--------|
+| :--- | :--- |
 | **System and drivers** | Operating system, processor, memory, free disk space, Intel GPU and NPU drivers, Windows long paths |
 | **Software and environment** | Python 3.12, Node.js, FFmpeg, DL Streamer, the Python environment, and the grading conversion environment and layout detection model |
 
 Each row shows what was found and what it blocks. Rows the app can fix have a button:
-**Install** for Python, FFmpeg and DL Streamer, **Create** for the Python environment,
+**Install** for Python, FFmpeg, and Deep Learning Streamer (DL Streamer), **Create** for the Python environment,
 **Prepare** for the layout detection model. **Fix _n_ items** at the top runs everything
 outstanding in order. Progress appears in the **Output** pane below, and **Copy
 diagnostics** puts the whole list on the clipboard for a bug report.
 
 > [!NOTE]
 > Creating the Python environment downloads several gigabytes, and preparing
-> the layout detection model downloads and converts it. Both take a while on a first run.
+  the layout detection model downloads and converts it. Both take a while on a first run.
 
 The backend cannot start until the Python environment exists.
 
 ### Step 3: Review the Settings
 
 **Get started** shows the settings most people change. The **Configuration** screen has
-the full list from `config.yaml`, `runtime_config.yaml` and `.proxy-config`, grouped and
-searchable. Saving a change while the services are running offers a restart.
+the full list from `config.yaml` and `.proxy-config`, grouped and searchable. Saving a
+change while the services are running offers a restart.
 
 > [!NOTE]
 > Speaker diarization (identifying who is speaking) is optional and requires a
-> one-time Hugging Face access token. The **Get started** screen flags this when
-> diarization is enabled without a token; set it under **Configuration**, or see
-> [Speaker Diarization Setup](advance-setup-guide.md#f-speaker-diarization-setup-optional).
+  one-time Hugging Face access token. The **Get started** screen flags this when
+  diarization is enabled without a token; set it under **Configuration**, or see
+  [Speaker Diarization Setup](../advanced-setup-guide.md#f-speaker-diarization-setup-optional).
 
 ### Step 4: Use the App
 
@@ -93,10 +93,10 @@ The backend starts automatically once setup is complete, unless you passed
 `-NoAutoStart`.
 
 | Screen | What it does |
-|--------|--------------|
+| :--- | :--- |
 | **Get started** | Overview of what is ready, what is missing, and the settings most people change |
 | **Setup** | Prerequisite checks plus the Python environment and model preparation |
-| **Configuration** | Edit `config.yaml`, `runtime_config.yaml` and `.proxy-config` |
+| **Configuration** | Edit `config.yaml` and `.proxy-config` |
 | **Services** | Start / stop / restart the backend and watch live logs for it and every child service |
 
 ---
@@ -114,7 +114,7 @@ windows.
 
 > [!NOTE]
 > If all prerequisites are already installed (FFmpeg, DL Streamer, Python
-> dependencies), you can skip setup and go straight to `.\start-smart-classroom.ps1`.
+  dependencies), you can skip setup and go straight to `.\start-smart-classroom.ps1`.
 
 The setup script will:
 
@@ -124,7 +124,7 @@ The setup script will:
 
 2. **[2] Application Dependency Check**
    - FFmpeg (auto-install if missing)
-   - DL Streamer (auto-download and run installer [`dlstreamer-2026.1.0-win64.exe`](advance-setup-guide.md#b-install-dl-streamer))
+   - DL Streamer: auto-download and run the installer [`dlstreamer-2026.1.0-win64.exe`](../advanced-setup-guide.md#b-install-dl-streamer)
 
 3. **[3] Configure Settings**
    - [3.1] Feature Configuration (enable/disable individual application features)
@@ -136,8 +136,8 @@ The setup script will:
 
 > [!NOTE]
 > Speaker diarization (identifying who is speaking) is optional and requires a one-time
-> Hugging Face access token setup if enabled — see
-> [Speaker Diarization Setup](advance-setup-guide.md#f-speaker-diarization-setup-optional).
+  Hugging Face access token setup if enabled — see
+  [Speaker Diarization Setup](../advanced-setup-guide.md#f-speaker-diarization-setup-optional).
 
 ### Step 2: Start the Services
 
@@ -149,9 +149,9 @@ Use the start script for subsequent runs, or after modifying `config.yaml`:
 
 **Optional parameters:**
 
-- `-Electron` - Shortcut for `.\start-desktop-app.ps1` (see [Desktop App](#desktop-app))
+- `-Electron` - Shortcut for `.\start-desktop-app.ps1`; see [Desktop App](#desktop-app)
 - `-Silent` - Unattended mode for CI/Ansible (skips all prompts, auto-restarts services)
-- `-NoElevate` - Skip admin privilege elevation (use when already running as administrator)
+- `-NoElevate` - Skip administrator privilege elevation (use when already running as administrator)
 - `-NoWindowsTerminal` - Use Invoke-WmiMethod instead of Windows Terminal (for remote sessions/Ansible)
 
 ```powershell
@@ -182,37 +182,37 @@ The UI is only reachable from this machine.
 If you encounter issues during automated setup, refer to the manual steps below:
 
 | Issue | Solution |
-|-------|----------|
+| :--- | :--- |
 | `PSSecurityException` when running `.ps1` scripts | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in PowerShell |
-| FFmpeg installation fails | See [Manual Step 1A](advance-setup-guide.md#a-install-ffmpeg-required-for-audio-processing) |
-| DL Streamer download fails | See [Manual Step 1B](advance-setup-guide.md#b-install-dl-streamer) |
-| Python dependencies fail | See [Manual Step 1D](advance-setup-guide.md#d-install-python-dependencies) |
-| Content Search fails | See [Manual Step 4](advance-setup-guide.md#step-4-set-up-content-search) |
-| Frontend fails to start | See [Manual Step 6](advance-setup-guide.md#step-6-bring-up-the-frontend) |
+| FFmpeg installation fails | See [Manual Step 1A](../advanced-setup-guide.md#a-install-ffmpeg-required-for-audio-processing) |
+| DL Streamer download fails | See [Manual Step 1B](../advanced-setup-guide.md#b-install-dl-streamer) |
+| Python dependencies fail | See [Manual Step 1D](../advanced-setup-guide.md#d-install-python-dependencies) |
+| Content Search fails | See [Manual Step 4](../advanced-setup-guide.md#step-4-set-up-content-search) |
+| Frontend fails to start | See [Manual Step 6](../advanced-setup-guide.md#step-6-bring-up-the-frontend) |
 
 ---
 
 ## Manual Setup
 
-**[Advanced Setup Guide](advance-setup-guide.md)**:  Follow step-by-step instructions to set up the application.
+**[Advanced Setup Guide](../advanced-setup-guide.md)**: Follow step-by-step instructions to set up the application.
 
-Advanced Setup guide covers:
+The Advanced Setup Guide covers:
 
 - **Step 1:** Install Dependencies (FFmpeg, DL Streamer, Python, Content Search)
-- **Step 2:** Configuration (config.yaml settings, including optional [Speaker Diarization Setup](advance-setup-guide.md#f-speaker-diarization-setup-optional))
-- **Step 3-6:** Run Services & Access UI
-- **[Troubleshooting](advance-setup-guide.md#troubleshooting)** — solutions for common setup and runtime issues
-- **[Known Issues](advance-setup-guide.md#known-issues)** — current limitations and workarounds
-- **[Uninstall the Application](advance-setup-guide.md#uninstall-the-application)** — steps to cleanly remove the environment and models
+- **Step 2:** Configuration of config.yaml settings, including the optional [Speaker Diarization Setup](../advanced-setup-guide.md#f-speaker-diarization-setup-optional)
+- **Steps 3-7:** Run Services and Access UI
+- **[Troubleshooting](../advanced-setup-guide.md#troubleshooting)** — solutions for common setup and runtime issues
+- **[Known Issues](../advanced-setup-guide.md#known-issues)** — current limitations and workarounds
+- **[Uninstall the Application](../advanced-setup-guide.md#uninstall-the-application)** — steps to cleanly remove the environment and models
 
 ---
 
 ## Service Ports Reference
 
 | Service | Port | Health Check |
-|---------|------|--------------|
+| :--- | :--- | :--- |
 | Backend | 8000 | <http://localhost:8000/health> |
-| Content Search | 9011 | <http://localhost:9011/api/v1/system/health> (200 only when ChromaDB, file ingest and video preprocess are ready too; 503 while any is starting) |
+| Content Search | 9011 | <http://localhost:9011/api/v1/system/health> (200 only when ChromaDB, file ingest, and video preprocess are ready too; 503 while any is starting) |
 | Layout Detection | 9902 | <http://localhost:9902/health> |
 | Grading | 9012 | <http://localhost:9012/api/v1/health> |
 | Frontend | 5173 | <http://localhost:5173> |
@@ -223,6 +223,6 @@ Advanced Setup guide covers:
 
 ## Learn More
 
-- [System Requirements](./get-started/system-requirements.md): Hardware, software, supported models, and weight formats.
-- [Application Flow](./application-flow.md): End-to-end application flow.
-- [Content Search Flow](./content-search-flow.md): The flow of the content search functionality.
+- [System Requirements](./system-requirements.md): Hardware, software, supported models, and weight formats.
+- [Application Flow](../application-flow.md): End-to-end application flow.
+- [Content Search Flow](../content-search-flow.md): The flow of the content search functionality.
