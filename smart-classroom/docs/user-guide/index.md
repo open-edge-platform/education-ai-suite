@@ -50,6 +50,7 @@ The main features are as follows:
 ./get-started
 ./advanced-setup-guide
 ./how-it-works
+VLM and LLM Serving Design <./../vlm-llm-serving/vlm-llm-serving-design>
 ./application-flow
 ./content-search-flow
 ./class-report-flow
