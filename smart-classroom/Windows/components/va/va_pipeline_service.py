@@ -123,12 +123,8 @@ class VideoAnalyticsPipelineService:
         # pipeline_name -> why the watchdog killed it; reported as the exit's error.
         self.pipeline_stall_reasons: Dict[str, str] = {}
 
-        # Skipping a bad segment of a file source. A restart that fails again
-        # before getting this far past the furthest point any earlier run of
-        # the pipeline reached counts as no progress: content that fails the
-        # same way every time (a corrupt stretch the decoder cannot get past)
-        # would otherwise send every resume back into it until the retries run
-        # out, losing the rest of the video.
+        # Skipping a bad segment of a file source. To avoid repeatedly failing on the same content.
+        # Minimum progress in seconds required to consider a resume successful.
         self.resume_progress_min_sec = 1.0
         # After no progress, the next resume jumps this far past that point --
         # one GOP of the classroom cameras' 1 s keyframe interval -- doubling on
