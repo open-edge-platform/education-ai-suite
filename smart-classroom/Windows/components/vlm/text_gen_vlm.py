@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_NEW_TOKENS = 5120
 
+# Per-request decoding parameters accepted through ``generate(sampling=...)``,
+# named as in GenerationConfig and the OpenAI request.
+SAMPLING_KEYS = ("top_p", "top_k", "repetition_penalty", "presence_penalty",
+                 "frequency_penalty")
+
 # Plain-mode decision retained for the process lifetime: once speculative
 # activation failed under ``mode: auto``, a reload (after shutdown/eviction)
 # does not try the failing drafter again.
@@ -296,6 +301,7 @@ class VLMTextGen:
         force_tool_call: Optional[str] = None,
         call=None,
         finish_info: Optional[dict] = None,
+        sampling: Optional[dict] = None,
     ) -> Union[Iterator[str], str]:
         """Generate from a chat history using the warm pipeline.
 
@@ -324,6 +330,9 @@ class VLMTextGen:
         ``call`` (a ``utils.processing_stats.ModelCall``) records timing, and
         ``finish_info`` receives token counts and truncation once generation
         ends.
+        ``sampling`` sets per-request decoding parameters on top of the
+        defaults: any of ``SAMPLING_KEYS``. Penalties also apply to greedy
+        decoding; ``top_p``/``top_k`` only take effect when sampling.
         """
         if self._pipe is None:
             raise RuntimeError("VLM pipeline is not loaded")
@@ -341,13 +350,23 @@ class VLMTextGen:
                 f"{self._speculative.method} pipeline supports greedy decoding only; "
                 "omit temperature or set it to 0"
             )
+        unknown = set(sampling or ()) - set(SAMPLING_KEYS)
+        if unknown:
+            raise ValueError(f"Unsupported sampling parameters: {sorted(unknown)}")
+        if self._speculative is not None and sampling:
+            # Draft verification compares raw greedy picks; penalised logits
+            # would make the target disagree with its own drafts.
+            raise UnsupportedRequestError(
+                f"{sorted(sampling)} are not supported by the active "
+                f"{self._speculative.method} pipeline (greedy decoding only)"
+            )
         if (tools or force_tool_call is not None) and not self._tool_calls:
             raise UnsupportedRequestError(f"{self._model_name} does not support tool calling")
 
         if call is not None:
             call.started()
         try:
-            config = self._generation_config(max_new_tokens, temperature, json_schema)
+            config = self._generation_config(max_new_tokens, temperature, json_schema, sampling)
             prompt = self._render(messages, config, enable_thinking, bool(images), tools)
             prefill = ""
             if force_tool_call is not None:
@@ -424,6 +443,7 @@ class VLMTextGen:
         max_new_tokens: Optional[int],
         temperature: Optional[float],
         json_schema: Optional[str] = None,
+        sampling: Optional[dict] = None,
     ) -> "ov_genai.GenerationConfig":
         max_tokens = (
             int(max_new_tokens) if max_new_tokens is not None else self._max_new_tokens
@@ -432,6 +452,8 @@ class VLMTextGen:
         if temperature is not None:
             kwargs["temperature"] = float(temperature)
             kwargs["do_sample"] = float(temperature) > 0.0
+        for key, value in (sampling or {}).items():
+            kwargs[key] = int(value) if key == "top_k" else float(value)
         config = ov_genai.GenerationConfig(**kwargs)
         if self._speculative is not None:
             # Greedy verification with a fixed draft window; the runtime owns
