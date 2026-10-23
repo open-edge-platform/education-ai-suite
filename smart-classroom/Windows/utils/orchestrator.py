@@ -249,6 +249,7 @@ def _run_va_if_needed(session_id: str, request: dict, stages: list) -> None:
         options = PipelineOptions(
             output_dir=va_out_dir,
             output_rtsp=config.va_pipeline.output_rtsp_url,
+            device=getattr(config.models.va, "device", "NPU"),
             threshold=config.models.va.threshold,
             record=False,
             output_stream=False,

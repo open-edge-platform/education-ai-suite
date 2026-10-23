@@ -556,6 +556,15 @@ const FIELDS = [
   // Video analytics
   // -------------------------------------------------------------------------
   {
+    path: 'models.va.device',
+    file: CONFIG,
+    group: 'videoAnalytics',
+    subgroup: 'poseModels',
+    label: 'Video analytics device',
+    type: 'enum',
+    options: ['NPU', 'GPU', 'CPU'],
+  },
+  {
     path: 'models.va.front_pose_model',
     file: CONFIG,
     group: 'videoAnalytics',
