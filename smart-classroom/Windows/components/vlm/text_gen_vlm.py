@@ -108,8 +108,12 @@ class VLMTextGen:
 
     def _ov_config(self) -> dict:
         """Runtime config for the pipeline; large allocations help on GPU."""
+        from utils.ov_runtime import gpu_plugin_config
+
         if self._device.startswith("GPU"):
-            return {"GPU_ENABLE_LARGE_ALLOCATIONS": "YES"}
+            return gpu_plugin_config(
+                self._device, {"GPU_ENABLE_LARGE_ALLOCATIONS": "YES"}
+            )
         return {}
 
     def _speculative_kwargs(self, settings: SpeculativeSettings, draft_dir: Path) -> dict:
@@ -119,6 +123,9 @@ class VLMTextGen:
             key: value for key, value in profile.ov_properties.items()
             if self._device.startswith("GPU") or not key.startswith("GPU_")
         }
+        from utils.ov_runtime import gpu_plugin_config
+
+        kwargs = gpu_plugin_config(self._device, kwargs)
         scheduler = ov_genai.SchedulerConfig()
         for key, value in profile.scheduler.items():
             if not hasattr(scheduler, key):
