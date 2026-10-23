@@ -17,6 +17,7 @@ from utils.task_service import task_service
 from utils.storage_service import storage_service
 from utils.asset_service import asset_service
 from utils.search_service import search_service
+from utils.schemas_task import TaskStatus
 from utils.core_responses import resp_200, fail_task_not_found, fail_process_failed, fail_processing
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
@@ -287,13 +288,13 @@ async def delete_specific_task(
     task_id: str,
     db: Session = Depends(get_db)
 ):
-    task_sql = text("SELECT id, payload, result FROM edu_ai_tasks WHERE id = :tid")
+    task_sql = text("SELECT id, payload, result, status FROM edu_ai_tasks WHERE id = :tid")
     task_row = db.execute(task_sql, {"tid": task_id}).fetchone()
     if not task_row:
         return resp_200(**fail_task_not_found())
     record = dict(task_row._mapping)
     current_status = record.get("status")
-    if current_status == "processing":
+    if current_status == TaskStatus.PROCESSING.value:
         return resp_200(**fail_processing())
     try:
         raw_payload = record.get('payload')
@@ -333,7 +334,7 @@ async def delete_specific_task(
         else:
             # Fallback: delete files individually if run_id cannot be determined
             logger.warning(f"No run_id found for task {task_id}, falling back to file-by-file deletion")
-            if storage_service.file_exists(f_path):
+            if f_path and storage_service.file_exists(f_path):
                 storage_service.delete_file(f_path)
 
             # Delete OCR text file if exists
@@ -342,7 +343,7 @@ async def delete_specific_task(
 
         # If OCR was done, the index is under the .ocr.txt path
         index_path = ocr_text_key or f_path
-        if await search_service.check_file_exists(index_path, bucket_name=f_bucket):
+        if index_path and await search_service.check_file_exists(index_path, bucket_name=f_bucket):
             await search_service.delete_file_index(index_path, bucket_name=f_bucket)
 
         if f_hash:
@@ -475,7 +476,7 @@ async def delete_file_by_hash(
                 deletion_results["storage_deleted"] = True
         else:
             # Fallback: delete files individually if run_id cannot be determined
-            if storage_service.file_exists(f_path):
+            if f_path and storage_service.file_exists(f_path):
                 storage_service.delete_file(f_path)
                 deletion_results["storage_deleted"] = True
                 logger.info(f"Deleted file from storage: {f_path}")
