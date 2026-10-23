@@ -13,6 +13,7 @@ import openvino_genai as ov_genai
 
 from providers.file_ingest_and_retrieve.utils import extract_bucket_name, file_key_to_path
 from providers.utils.model_utils import is_model_ready, resolve_model_max_length
+from utils.ov_runtime import gpu_plugin_config
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,9 @@ class PostProcessor:
         # query+document pair is truncated rather than overflowing the fixed
         # position-embedding table ("Eltwise shape infer ... mismatch").
         rerank_config.max_length = resolve_model_max_length(local_path)
-        self.reranker_pipe = ov_genai.TextRerankPipeline(str(local_path), device.upper(), rerank_config)
+        self.reranker_pipe = ov_genai.TextRerankPipeline(
+            str(local_path), device.upper(), rerank_config, **gpu_plugin_config(device)
+        )
         self._rerank_lock = threading.Lock()
         logger.info(f"Reranker model '{reranker_model}' loaded successfully on device '{device}'.")
 

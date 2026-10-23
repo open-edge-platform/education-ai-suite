@@ -6,6 +6,8 @@ import numpy as np
 import openvino as ov
 from PIL import Image, ImageDraw, ImageFont
 
+from utils.ov_runtime import gpu_plugin_config
+
 
 class LayoutDetector:
     """PP-DocLayoutV3 document layout detection using an OpenVINO IR
@@ -56,7 +58,9 @@ class LayoutDetector:
             model.reshape(static_shapes)
             print(f"NPU: reshaped inputs to static {static_shapes}")
 
-        self.compiled_model = self.core.compile_model(model, self.device)
+        self.compiled_model = self.core.compile_model(
+            model, self.device, gpu_plugin_config(self.device)
+        )
         self.load_time = time.time() - load_start
         print(f"Model loaded in {self.load_time:.2f}s")
 
