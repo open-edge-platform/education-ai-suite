@@ -9,6 +9,8 @@ from typing import List, Union
 import numpy as np
 from PIL import Image
 
+from utils.ov_runtime import gpu_plugin_config
+
 logger = logging.getLogger(__name__)
 
 OPENAI_CLIP_MEAN = np.array([0.48145466, 0.4578275, 0.40821073], dtype=np.float32)
@@ -46,9 +48,10 @@ class CLIPHandler:
             self._export_to_openvino(model_dir)
 
         core = ov.Core()
+        ov_config = gpu_plugin_config(self.device)
         try:
-            self._visual_model = core.compile_model(str(visual_path), self.device)
-            self._text_model = core.compile_model(str(text_path), self.device)
+            self._visual_model = core.compile_model(str(visual_path), self.device, ov_config)
+            self._text_model = core.compile_model(str(text_path), self.device, ov_config)
         except RuntimeError:
             # The text tower's GatherND has no GPU/NPU kernel, so CPU is the only
             # device that can run both towers.

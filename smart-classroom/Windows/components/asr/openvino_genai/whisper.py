@@ -4,6 +4,7 @@ import librosa, time
 import openvino_genai as ov_genai
 import logging
 from utils.ensure_model import get_asr_model_path
+from utils.ov_runtime import gpu_plugin_config
 
 logger = logging.getLogger(__name__)  
  
@@ -12,6 +13,7 @@ class Whisper(BaseASR):
         logger.info(f"Loading Model: model name={model_name}, device={device}")
         self.model_path = get_asr_model_path()
         config = {"INFERENCE_NUM_THREADS": str(threads_limit)} if threads_limit and threads_limit > 0 else {}
+        config = gpu_plugin_config(device, config)
         self.model = ov_genai.WhisperPipeline( self.model_path, device=device,config=config)
  
    def transcribe(self, audio_path: str, temperature: float) -> dict:
