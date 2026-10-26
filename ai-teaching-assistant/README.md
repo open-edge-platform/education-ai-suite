@@ -38,11 +38,11 @@ See [docs/user-guide/get-started.md](docs/user-guide/get-started.md) for the com
 At a high level:
 
 ```powershell
-git clone --filter=blob:none --sparse https://github.com/open-edge-platform/edge-ai-suites.git -b main
-cd edge-ai-suites
-git sparse-checkout set education-ai-suite/ai-teaching-assistant
-cd education-ai-suite/ai-teaching-assistant
-.\setup_windows.ps1
+git clone --filter=blob:none --sparse -b main https://github.com/open-edge-platform/education-ai-suite.git;
+cd education-ai-suite;
+git sparse-checkout set ai-teaching-assistant;
+cd ai-teaching-assistant;
+.\setup_windows.ps1;
 .\start_ata.ps1
 ```
 

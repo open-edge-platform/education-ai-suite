@@ -1,0 +1,1960 @@
+import subprocess
+import os
+import time
+import logging
+from pathlib import Path
+from typing import Optional, Dict, List, Generator
+import psutil
+from dataclasses import dataclass
+from enum import Enum
+import atexit
+import json
+import threading
+from utils.config_loader import config
+from utils.rtsp_recorder import (
+    start_rtsp_recording,
+    stop_rtsp_recording,
+)
+from utils.runtime_config_loader import RuntimeConfig
+from utils.system_checker import check_dlstreamer_installation
+from utils.gstreamer_env import (
+    GST_SUBPROCESS_TIMEOUT,
+    add_gst_plugin_path,
+    ensure_dlstreamer_env,
+    ensure_gst_registry,
+)
+from components.va.runner_client import PipelineRunnerClient
+
+MAX_INPUT_FRAMERATE = "15/1"
+CLASSIFY_FRAMERATE = "1/1"
+
+# Keyframe cadence of the RTSP output, in seconds. A WebRTC or HLS client cannot
+# render anything until an IDR arrives, so this bounds how long a viewer waits
+# after opening a stream.
+RTSP_KEYFRAME_INTERVAL_SEC = 0.5
+# Floor on the keyframe interval. Without it a low-framerate sink
+# degenerates to all-IDR (gop-size=1 at 1fps), and every picture becomes a full
+# keyframe pushed out as one burst of hundreds of RTP packets.
+RTSP_MIN_GOP_FRAMES = 15
+
+# Upper bound (width, height) on the RTSP output.
+RTSP_OUTPUT_MAX_RESOLUTION = (1920, 1080) # (1280, 720)
+
+# Name given to the element right after the decoder. A file pipeline resumed
+# after a restart is guarded there so no frame before the resume point reaches
+# the sinks.
+RESUME_PROBE_ELEMENT = "va_decoded"
+
+class PipelineName(Enum):
+    """Enumeration of pipeline names"""
+
+    FRONT = "front"  # Pipeline 1
+    BACK = "back"  # Pipeline 2
+    CONTENT = "content"  # Pipeline 3
+
+@dataclass
+class PipelineOptions:
+    """Minimal configuration options for pipelines"""
+
+    device: str = "NPU"  # CPU, GPU, or NPU
+    output_dir: str = "outputs"  # Directory for metadata output files
+    output_rtsp: str = "rtsp://127.0.0.1:8554"  # RTSP output URL
+    output_stream: bool = True  # Push video to RTSP; False = discard to fakesink
+    threshold: float = 0.5  # Detection threshold for YOLO
+    record: bool = False
+
+
+class VideoAnalyticsPipelineService:
+    """Service to manage video analytics pipelines"""
+
+    def __init__(self):
+        """
+        Initialize VideoAnalyticsPipelineService
+        """
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        # Set plugin path
+        self.plugin_path = Path(config.va_pipeline.plugin_path).resolve()
+
+        # Set model paths
+        self.model_base_dir = Path(config.models.va.models_base_path).resolve() / "va"
+        self.models = {
+            "front-pose": f"{config.models.va.front_pose_model}.xml",
+            "back-pose": f"{config.models.va.back_pose_model}.xml",
+            "resnet18": "resnet18.xml",
+            "mobilenetv2": "mobilenetv2.xml",
+            "reid": "person-reidentification-retail-0288.xml",
+        }
+
+        # Active pipelines
+        self.pipelines: Dict[str, subprocess.Popen] = {}
+
+        # Pipeline log files & handles
+        self.pipeline_logs: Dict[str, Path] = {}
+        self.pipeline_log_handles: Dict[str, object] = {}
+
+        # Pipeline output files
+        self.pipeline_output_files: Dict[str, List[Path]] = {}
+
+        # Pipeline monitoring threads
+        self.monitor_threads: Dict[str, threading.Thread] = {}
+        self.monitor_stop_flags: Dict[str, threading.Event] = {}
+
+        # Pipeline launch parameters for restart
+        self.pipeline_params: Dict[str, Dict] = {}
+
+        # Pipeline retry counts
+        self.pipeline_retry_counts: Dict[str, int] = {}
+        self.max_retries = 10
+
+        # How long to wait for a pipeline to report PLAYING on its bus before
+        # calling the launch failed.
+        self.pipeline_ready_timeout = 60.0
+
+        # Stall watchdog. A runner that is alive but has stopped growing any one
+        # of its metadata files for this long is killed, which hands it to the
+        # same restart / give-up path as an unexpected exit.
+        self.pipeline_stall_timeout = 60.0
+        # Allowance for the first metadata write after PLAYING (model compile,
+        # warm-up) before the stall timeout applies.
+        self.pipeline_startup_grace = 120.0
+        # pipeline_name -> {metadata file: (bytes, monotonic time they last changed, allowed idle seconds)}
+        self.pipeline_progress: Dict[str, Dict[Path, tuple]] = {}
+        # pipeline_name -> why the watchdog killed it; reported as the exit's error.
+        self.pipeline_stall_reasons: Dict[str, str] = {}
+
+        # Skipping a bad segment of a file source. To avoid repeatedly failing on the same content.
+        # Minimum progress in seconds required to consider a resume successful.
+        self.resume_progress_min_sec = 1.0
+        # After no progress, the next resume jumps this far past that point --
+        # one GOP of the classroom cameras' 1 s keyframe interval -- doubling on
+        # each further failure, up to the cap.
+        self.resume_skip_first_sec = 1.0
+        self.resume_skip_max_sec = 30.0
+        # pipeline_name -> {"reached": furthest ns any run got to, "stuck": runs
+        # in a row without progress, "floor": ns no resume may go back below}
+        self.pipeline_resume_state: Dict[str, Dict] = {}
+        # pipeline_name -> [(start_ns, end_ns)] of video skipped over
+        self.pipeline_skipped_segments: Dict[str, List[tuple]] = {}
+
+        # "eos" (normal), "failed" (gave up after max retries), or "stopped" (manual stop).
+        self.pipeline_final_status: Dict[str, str] = {}
+
+        # Pipeline error events for status reporting (consumed by monitor_pipeline_status)
+        self.pipeline_errors: Dict[str, List[str]] = {}
+
+        # Callback fired once when all pipelines have finished (EOS or stopped).
+        # Signature: on_all_pipelines_done(session_id: str) -> None
+        self.on_all_pipelines_done = None
+        self._reports_generated = False   # guard: fire at most once per service instance
+        self._any_pipeline_ran  = False   # guard: don't fire before any pipeline was launched
+
+        ps = getattr(config.va_pipeline, "pose_statistics", None)
+        self.min_frames_for_transition = getattr(ps, "min_frames_for_transition", 3) if ps else 3
+        self.min_frames_for_transition_unid = getattr(ps, "min_frames_for_transition_unid", 15) if ps else 15
+        self.absence_threshold = getattr(ps, "absence_threshold", 90) if ps else 90
+        self.min_stand_frames = getattr(ps, "min_stand_frames", 10) if ps else 10
+        self.center_dist_threshold = getattr(ps, "center_dist_threshold", 0.1) if ps else 0.1
+        self.unidentified_max = getattr(ps, "unidentified_max", 50) if ps else 50
+        self.stale_unidentified_threshold = getattr(ps, "stale_unidentified_threshold", 30) if ps else 30
+
+        # Upper bound on the framerate the pipeline runs inference at. Protects against high-framerate cameras.
+        self.max_input_framerate = MAX_INPUT_FRAMERATE
+        # Framerate the classification branches run at.
+        self.classify_framerate = CLASSIFY_FRAMERATE
+
+        # Settle the GStreamer environment before the first GStreamer process
+        # runs, so every process this service spawns shares one registry cache.
+        self._setup_environment()
+
+        # Verify DL Streamer installation
+        if not check_dlstreamer_installation():
+            raise RuntimeError("DL Streamer is not installed or does not meet the minimum version requirement")
+
+        # Register cleanup handler
+        atexit.register(self._cleanup)
+
+    def _get_gstreamer_version(self) -> Optional[str]:
+        """Read GStreamer version from Windows registry"""
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\GStreamer1.0\x86_64") as key:
+                version, _ = winreg.QueryValueEx(key, "Version")
+                return version
+        except Exception as e:
+            self.logger.warning(f"Failed to read GStreamer version from registry: {e}")
+            return None
+
+    def _setup_environment(self):
+        """Setup GStreamer environment variables. Idempotent.
+        Runner children inherit this environment, so DL Streamer only has to be
+        located here.
+        """
+        ensure_gst_registry()
+        ensure_dlstreamer_env()
+        add_gst_plugin_path(self.plugin_path)
+        os.environ["GST_DEBUG"] = (
+            "GVA_common:2,gvaposturedetect:4,gvareid:4,gvaroifilter:4"
+        )
+        # Debugging: prefixing "*:1," surfaces the GST_ERROR_OBJECT lines of
+        # elements that fail without posting a bus error (e.g. mfh264enc
+        # "Failed to process input" under GPU memory pressure).
+        # os.environ["GST_DEBUG"] = "*:1," + os.environ["GST_DEBUG"]
+        # Comment out to use d3d12 decoders as d3d11 decoder + gvawatermark + encoder causes crash
+        # os.environ["GST_PLUGIN_FEATURE_RANK"] = "d3d11h264dec:max,d3d11h265dec:max"
+
+    def _get_model_path(self, model_key: str) -> str:
+        """Get full path to model"""
+        return (self.model_base_dir / self.models[model_key]).as_posix()
+
+    def _validate_file_with_discoverer(self, file_path: str) -> Optional[str]:
+        """Validate a file source using gst-discoverer-1.0
+
+        Args:
+            file_path: Path to the file to validate
+
+        Returns:
+            None if the file is valid, error message string if invalid
+        """
+        try:
+            result = subprocess.run(
+                ["gst-discoverer-1.0.exe", file_path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=GST_SUBPROCESS_TIMEOUT,
+            )
+            combined_output = result.stdout + result.stderr
+            if "An error was encountered while discovering the file" in combined_output:
+                self.logger.error(
+                    f"File validation failed for '{file_path}': {combined_output}"
+                )
+                return combined_output.strip()
+            return None
+        except FileNotFoundError:
+            self.logger.error("gst-discoverer-1.0.exe not found")
+            return "gst-discoverer-1.0.exe not found"
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"File validation timed out for '{file_path}'")
+            return "File validation timed out"
+        except Exception as e:
+            self.logger.error(f"File validation error: {e}")
+            return f"File validation error: {e}"
+
+    @staticmethod
+    def _get_d3d12_to_d3d11_elements() -> List[str]:
+        """Get elements handing decoded D3D12 frames to the D3D11 pipeline.
+
+        The d3d12 decoders must output D3D12Memory: asked for D3D11Memory
+        they take a copy-out path that asserts and returns a flow error when a
+        damaged stream (e.g. RTSP packet loss) makes them output a frame twice.
+        d3d12download then does the D3D11 interop copy on the GPU instead.
+        """
+        return [
+            "video/x-raw(memory:D3D12Memory)",
+            "!",
+            "d3d12download",
+            f"name={RESUME_PROBE_ELEMENT}",
+            "!",
+        ]
+
+    def _get_source_elements(self, source: str, input_type: str) -> List[str]:
+        """Get source elements based on input type"""
+        if input_type == "rtsp" and config.va_pipeline.rtsp_codec == "h264":
+            return [
+                "rtspsrc",
+                f"location={source}",
+                "protocols=tcp",
+                "!",
+                "rtph264depay",
+                "wait-for-keyframe=true",
+                "!",
+                "h264parse",
+                "!",
+                "d3d12h264dec",
+                "!",
+                *self._get_d3d12_to_d3d11_elements(),
+            ]
+        elif input_type == "rtsp" and config.va_pipeline.rtsp_codec == "h265":
+            return [
+                "rtspsrc",
+                f"location={source}",
+                "protocols=tcp",
+                "!",
+                "rtph265depay",
+                "wait-for-keyframe=true",
+                "!",
+                "h265parse",
+                "!",
+                "d3d12h265dec",
+                "!",
+                *self._get_d3d12_to_d3d11_elements(),
+            ]
+        elif input_type == "file":
+            # decodebin3 since the file codec is not fixed; 
+            return [
+                "filesrc",
+                f"location={Path(source).as_posix()}",
+                "!",
+                "decodebin3",
+                "!",
+                *self._get_d3d12_to_d3d11_elements(),
+            ]
+        else:
+            raise ValueError(f"Unknown input type: {input_type}")
+
+    @staticmethod
+    def _framerate_to_fps(framerate: Optional[str]) -> float:
+        """Convert a GStreamer 'num/den' framerate to fps. Falls back to 30."""
+        if not framerate:
+            return 30.0
+        num, _, den = str(framerate).partition("/")
+        try:
+            fps = float(num) / float(den or 1)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return 30.0
+        return fps if fps > 0 else 30.0
+
+    def _gop_size(self, sink_framerate: Optional[str]) -> int:
+        """Keyframe interval in frames, for a pipeline running at sink_framerate.
+
+        mfh264enc's gop-size counts *pictures*, not seconds. Deriving it from the
+        framerate keeps the keyframe cadence constant in wall-clock time, down to
+        the RTSP_MIN_GOP_FRAMES floor.
+        """
+        fps = self._framerate_to_fps(sink_framerate)
+        return max(RTSP_MIN_GOP_FRAMES, round(fps * RTSP_KEYFRAME_INTERVAL_SEC))
+
+    def _get_rtsp_sink_elements(
+        self, rtsp_url: str, pipeline_name: str, sink_framerate: Optional[str] = None
+    ) -> List[str]:
+        """Get RTSP sink elements for pushing to RTSP server"""
+        max_width, max_height = RTSP_OUTPUT_MAX_RESOLUTION
+        return [
+            "d3d11convert",
+            "!",
+            f"video/x-raw(memory:D3D11Memory),width=[1,{max_width}],"
+            f"height=[1,{max_height}],pixel-aspect-ratio=1/1",
+            "!",
+            "mfh264enc",
+            "bitrate=3000",
+            f"gop-size={self._gop_size(sink_framerate)}",
+            "low-latency=true",
+            "bframes=0",
+            "rc-mode=cbr",
+            "quality-vs-speed=0",
+            "!",
+            "h264parse",
+            "!",
+            "queue",
+            "!",
+            "rtspclientsink",
+            f"location={rtsp_url}/{pipeline_name}",
+            "protocols=udp",
+        ]
+
+    def _get_video_sink_elements(
+        self,
+        options: PipelineOptions,
+        stream_name: str,
+        sink_framerate: Optional[str] = None,
+    ) -> List[str]:
+        """Get video sink elements: RTSP sink, or a discarding fakesink when
+        streaming is disabled (options.output_stream=False)
+
+        Args:
+            sink_framerate: the framerate actually reaching this sink, as
+                'num/den'. Sets the keyframe interval; see _gop_size.
+        """
+        if not options.output_stream:
+            return ["fakesink", "async=false", "sync=false"]
+        return self._get_rtsp_sink_elements(
+            options.output_rtsp, stream_name, sink_framerate
+        )
+
+    def _get_input_framerate_cap_elements(self) -> List[str]:
+        """Get elements capping the framerate at max_input_framerate.
+        Used ahead of gvadetect so a high-framerate camera cannot push the pose
+        model past the rate the NPU can serve, and ahead of the content video
+        output to bound encode load.
+        """
+        if not self.max_input_framerate:
+            return []
+        caps = "video/x-raw(memory:D3D11Memory)"
+        return [
+            "videorate",
+            "drop-only=true",
+            "!",
+            # videorate fixates within the first caps structure downstream
+            # offers. Behind a tee that is a classification branch's 1/1, which
+            # would drag the whole pipeline down to it, so the exact cap goes
+            # first. The range lets slower sources pass through unchanged.
+            f"{caps},framerate={self.max_input_framerate};"
+            f"{caps},framerate=[0/1,{self.max_input_framerate}]",
+            "!",
+        ]
+
+    def _get_classify_decimation_elements(self) -> List[str]:
+        """Get elements dropping a classification branch to classify_framerate."""
+        if not self.classify_framerate:
+            return []
+        return [
+            "videorate",
+            "drop-only=true",
+            "!",
+            f"video/x-raw(memory:D3D11Memory),framerate={self.classify_framerate}",
+            "!",
+        ]
+
+    @staticmethod
+    def _join_pipeline_description(elements: List[str]) -> str:
+        """Join argv-style pipeline tokens into a gst-parse description string.
+
+        Argv tokens are space-safe; a parse-launch description is not. Quote
+        the value half of any token carrying whitespace.
+        """
+        parts = []
+        for token in elements:
+            if not any(char.isspace() for char in token):
+                parts.append(token)
+            elif "=" in token:
+                key, value = token.split("=", 1)
+                parts.append(f'{key}="{value}"')
+            else:
+                parts.append(f'"{token}"')
+        return " ".join(parts)
+
+    def _monitor_pipeline(self, pipeline_name: str):
+        """
+        Monitor pipeline process and restart if it exits unexpectedly
+
+        Args:
+            pipeline_name: Name of the pipeline to monitor
+        """
+        stop_flag = self.monitor_stop_flags[pipeline_name]
+
+        while not stop_flag.is_set():
+            # Check if pipeline process is still running
+            if pipeline_name not in self.pipelines:
+                break
+
+            process = self.pipelines[pipeline_name]
+
+            # Check process status
+            if process.poll() is not None:
+                # Process has exited. The runner reports EOS as a typed event.
+                log_file = self.pipeline_logs.get(pipeline_name)
+                normal_exit = process.exited_normally()
+                self.logger.info(
+                    f"[VA][monitor] pipeline '{pipeline_name}' exited rc={process.returncode} "
+                    f"normal_exit={normal_exit} final_event={process.final_event} log={log_file}"
+                )
+
+                if normal_exit:
+                    # Normal exit with EOS
+                    self.logger.info(
+                        f"Pipeline '{pipeline_name}' exited normally (EOS received)"
+                    )
+                    self.logger.info(
+                        f"[VA][monitor] marking '{pipeline_name}' eos; firing done callback"
+                    )
+                    self._finalize_pipeline(pipeline_name, "eos")
+                    break
+                else:
+                    # Unexpected exit — record error for status reporting
+                    error_detail = (
+                        self.pipeline_stall_reasons.pop(pipeline_name, None)
+                        or process.error_text()
+                        or f"Pipeline exited with code {process.returncode}"
+                    )
+                    if pipeline_name not in self.pipeline_errors:
+                        self.pipeline_errors[pipeline_name] = []
+                    self.pipeline_errors[pipeline_name].append(error_detail)
+                    self.logger.warning(
+                        f"Pipeline '{pipeline_name}' exited unexpectedly: {error_detail}"
+                    )
+
+                    retry_count = self.pipeline_retry_counts.get(pipeline_name, 0)
+
+                    if retry_count < self.max_retries:
+                        self.logger.warning(
+                            f"Pipeline '{pipeline_name}' exited unexpectedly. "
+                            f"Restarting... (attempt {retry_count + 1}/{self.max_retries})"
+                        )
+
+                        # Increment retry count
+                        self.pipeline_retry_counts[pipeline_name] = retry_count + 1
+
+                        # Release the dead runner's IPC listener before the
+                        # relaunch replaces it.
+                        try:
+                            process.close()
+                        except Exception:
+                            pass
+
+                        # Close old log handle
+                        if pipeline_name in self.pipeline_log_handles:
+                            try:
+                                self.pipeline_log_handles[pipeline_name].close()
+                            except:
+                                pass
+
+                        if stop_flag.is_set():
+                            self.logger.info(
+                                f"[VA][monitor] '{pipeline_name}' is being stopped; skipping restart"
+                            )
+                            break
+
+                        # Restart pipeline using saved parameters
+                        params = self.pipeline_params.get(pipeline_name)
+                        if params:
+                            try:
+                                # A file replayed from the top would write every
+                                # frame twice; pick it up where it stopped.
+                                start_ns = (
+                                    self._prepare_resume(pipeline_name)
+                                    if params.get("input_type") == "file"
+                                    else None
+                                )
+                                self._launch_pipeline_internal(
+                                    pipeline_name, params["options"], params["description"],
+                                    start_position_ns=start_ns,
+                                )
+                            except Exception as e:
+                                self.logger.error(
+                                    f"[VA][monitor] restart of pipeline '{pipeline_name}' raised: {e}",
+                                    exc_info=True,
+                                )
+                                # The pipeline is dead and will not be retried:
+                                # a terminal state, not a reason to stop
+                                # reporting. Leaving this bare let the session's
+                                # "va" stage sit on "running" for good.
+                                self._finalize_pipeline(pipeline_name, "failed")
+                                break
+                        else:
+                            self.logger.error(
+                                f"Cannot restart pipeline '{pipeline_name}': parameters not found"
+                            )
+                            self._finalize_pipeline(pipeline_name, "failed")
+                            break
+                    else:
+                        self.logger.error(
+                            f"Pipeline '{pipeline_name}' reached maximum retry limit ({self.max_retries}). "
+                            f"Giving up."
+                        )
+                        self._finalize_pipeline(pipeline_name, "failed")
+                        break
+
+            elif not stop_flag.is_set():
+                stalled = self._find_stalled_output(pipeline_name)
+                if stalled is not None:
+                    path, idle = stalled
+                    reason = f"Pipeline stalled: {path.name} has not grown for {idle:.0f}s"
+                    self.logger.warning(
+                        f"[VA][monitor] '{pipeline_name}' {reason}; killing runner "
+                        f"(PID {process.pid}) to restart it"
+                    )
+                    self.pipeline_stall_reasons[pipeline_name] = reason
+                    # Killing the venv launcher takes the runner child with it.
+                    process.kill()
+                    try:
+                        process.wait(timeout=10)
+                    except Exception:
+                        pass
+
+            # Check every 2 seconds
+            time.sleep(2)
+
+        self.logger.info(f"Monitor thread for pipeline '{pipeline_name}' stopped")
+
+    @staticmethod
+    def _file_size(path: Path) -> int:
+        """Size of a metadata file; a missing file counts as 0."""
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+
+    def _reset_progress(self, pipeline_name: str) -> None:
+        """Restart the stall clocks for a fresh launch, with the startup grace."""
+        now = time.monotonic()
+        self.pipeline_progress[pipeline_name] = {
+            path: (self._file_size(path), now, self.pipeline_startup_grace)
+            for path in self.pipeline_output_files.get(pipeline_name, [])
+        }
+
+    def _find_stalled_output(self, pipeline_name: str) -> Optional[tuple]:
+        """Return (path, idle seconds) of the longest-idle metadata file past its
+        allowance, else None.
+
+        Each file is watched on its own: a branch can die while another keeps
+        writing. DL Streamer inference elements log a failed downstream push
+        and carry on, so a dead encoder behind a tee leaves the process alive
+        and the files ahead of the tee growing. Any size change counts as
+        progress, so a file truncated at relaunch does not read as a stall.
+        """
+        progress = self.pipeline_progress.get(pipeline_name)
+        if not progress:
+            return None
+        now = time.monotonic()
+        worst = None
+        for path, (last_size, changed_at, allowance) in progress.items():
+            size = self._file_size(path)
+            if size != last_size:
+                progress[path] = (size, now, self.pipeline_stall_timeout)
+                continue
+            idle = now - changed_at
+            if idle > allowance and (worst is None or idle > worst[1]):
+                worst = (path, idle)
+        return worst
+
+    @staticmethod
+    def _lines_from_end(path: Path):
+        """Yield (byte offset, line) for each line of a file, last line first.
+
+        Reads backwards in chunks, so finding the tail of a large metadata file
+        costs only the tail. A final line cut short by a killed writer is
+        yielded like any other.
+        """
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            pos = fh.tell()
+            head = b""  # start of the earliest line seen so far, not yet complete
+            while pos > 0:
+                step = min(1 << 20, pos)
+                pos -= step
+                fh.seek(pos)
+                data = fh.read(step) + head
+                parts = data.split(b"\n")
+                offset = pos + len(data)
+                for part in reversed(parts[1:]):
+                    offset -= len(part)
+                    yield offset, part
+                    offset -= 1  # the newline before it
+                head = parts[0]
+            yield 0, head
+
+    @staticmethod
+    def _metadata_timestamp(line: bytes) -> Optional[int]:
+        """Frame timestamp (ns) of one gvametapublish JSON line, or None if unparsable."""
+        try:
+            return int(json.loads(line)["timestamp"])
+        except (ValueError, KeyError, TypeError):
+            return None
+
+    def _last_metadata_timestamp(self, path: Path) -> Optional[int]:
+        for _offset, line in self._lines_from_end(path):
+            if line.strip():
+                ts = self._metadata_timestamp(line)
+                if ts is not None:
+                    return ts
+        return None
+
+    def _trim_metadata_from(self, path: Path, position_ns: int) -> int:
+        """Cut a metadata file back to the frames before position_ns, plus any
+        line cut short. Returns the number of lines removed."""
+        cut = None
+        removed = 0
+        for offset, line in self._lines_from_end(path):
+            if not line.strip():
+                cut = offset
+                continue
+            ts = self._metadata_timestamp(line)
+            if ts is not None and ts < position_ns:
+                break
+            cut = offset
+            removed += 1
+        if cut is not None:
+            with open(path, "r+b") as fh:
+                fh.truncate(cut)
+        return removed
+
+    def _prepare_resume(self, pipeline_name: str) -> Optional[int]:
+        """Pick a restarted file pipeline up where it stopped instead of replaying it.
+
+        The resume point is the earliest of the metadata files' last timestamps,
+        i.e. how far the slowest branch got. Every file is cut back to it, so the
+        relaunch writes each frame from there on exactly once. A file with no
+        frames yet puts the resume point at the top, and the files are emptied.
+
+        A restart that made no progress -- see ``resume_progress_min_sec`` --
+        skips instead: it resumes past the furthest point reached, by a jump
+        that doubles with each such restart in a row. What lies between is
+        never analysed; it is logged and reported as a pipeline error.
+
+        Returns:
+            Resume position in ns, or None to start from the top.
+        """
+        files = self.pipeline_output_files.get(pipeline_name, [])
+        if not files:
+            return None
+        try:
+            lasts = [
+                self._last_metadata_timestamp(p) if p.exists() else None
+                for p in files
+            ]
+            position = min(0 if ts is None else ts for ts in lasts)
+            reached = max(0 if ts is None else ts for ts in lasts)
+            skip = self._plan_skip(pipeline_name, reached)
+            state = self.pipeline_resume_state[pipeline_name]
+            if skip is not None:
+                position = max(position, skip)
+                state["floor"] = position
+            # Never back into a segment already skipped: a branch that wrote
+            # nothing since the skip still ends before it.
+            position = max(position, state.get("floor", 0))
+            removed = sum(self._trim_metadata_from(p, position) for p in files if p.exists())
+        except OSError as e:
+            # Better a replay with duplicated frames than no restart at all.
+            self.logger.error(f"[VA][monitor] cannot prepare resume for '{pipeline_name}': {e}")
+            return None
+        self.logger.info(
+            f"[VA][monitor] '{pipeline_name}' resumes at {position / 1e9:.1f}s; "
+            f"cut {removed} metadata lines at or past it"
+        )
+        return position or None
+
+    def _plan_skip(self, pipeline_name: str, reached: int) -> Optional[int]:
+        """Return where to resume to skip a segment, or None to resume normally.
+
+        ``reached`` is the furthest frame the run that just ended wrote. The
+        state kept per pipeline makes this a judgement across runs: one that
+        failed without getting ``resume_progress_min_sec`` past the best any
+        earlier run managed is stuck, and stuck runs in a row skip further.
+        """
+        state = self.pipeline_resume_state.setdefault(
+            pipeline_name, {"reached": None, "stuck": 0}
+        )
+        best = state["reached"]
+        progress_ns = int(self.resume_progress_min_sec * 1e9)
+        if best is not None and reached < best + progress_ns:
+            state["stuck"] += 1
+        else:
+            state["stuck"] = 0
+        state["reached"] = reached if best is None else max(best, reached)
+        if not state["stuck"]:
+            return None
+
+        jump = min(
+            self.resume_skip_first_sec * 2 ** (state["stuck"] - 1),
+            self.resume_skip_max_sec,
+        )
+        start, end = state["reached"], state["reached"] + int(jump * 1e9)
+        segments = self.pipeline_skipped_segments.setdefault(pipeline_name, [])
+        if state["stuck"] > 1 and segments and segments[-1][0] == start:
+            # The same stuck point again: the skip grows rather than adding one.
+            segments[-1] = (start, end)
+        else:
+            segments.append((start, end))
+        message = (
+            f"Skipped {start / 1e9:.1f}s-{end / 1e9:.1f}s of the video: "
+            f"{state['stuck']} restart(s) in a row failed without getting past "
+            f"{state['reached'] / 1e9:.1f}s"
+        )
+        self.logger.warning(f"[VA][monitor] '{pipeline_name}' {message}")
+        self.pipeline_errors.setdefault(pipeline_name, []).append(message)
+        return end
+
+    def _finalize_pipeline(self, pipeline_name: str, status: str) -> None:
+        """Record a pipeline's terminal status, then fire the all-done callback.
+
+        Every route out of a running pipeline must come through here. The
+        callback is the only thing that closes out the session's "va" stage, so
+        a path that ends a pipeline without calling it leaves the stage on
+        "running" for good - and a session whose stages never all settle is
+        never marked complete.
+
+        setdefault rather than assignment: the monitor thread and
+        stop_pipeline() can both reach the same dying pipeline, and the first
+        verdict is the informative one. "eos" must not become "stopped" just
+        because teardown ran after the process had already finished on its own.
+        """
+        self.pipeline_final_status.setdefault(pipeline_name, status)
+        self._fire_done_callback_if_all_finished()
+
+    def _fire_done_callback_if_all_finished(self):
+        """Fire on_all_pipelines_done once when no pipeline processes remain running."""
+        if self._reports_generated:
+            self.logger.info("[VA][done] skip: _reports_generated already set")
+            return
+        if not self._any_pipeline_ran:
+            self.logger.info("[VA][done] skip: _any_pipeline_ran is False")
+            return
+        still_running = [
+            name for name, proc in self.pipelines.items()
+            if proc.poll() is None
+        ]
+        if still_running:
+            self.logger.info(f"[VA][done] deferring, still running: {still_running}")
+            return
+        self._reports_generated = True
+        self.logger.info("[VA] All pipelines finished — triggering engagement report generation.")
+        if callable(self.on_all_pipelines_done):
+            try:
+                self.on_all_pipelines_done(getattr(self, "x_session_id", None))
+                self.logger.info("[VA][done] callback returned")
+            except Exception as exc:
+                self.logger.error(f"[VA] on_all_pipelines_done callback raised: {exc}", exc_info=True)
+        else:
+            self.logger.warning("[VA][done] no on_all_pipelines_done callback configured")
+
+    def _launch_pipeline_internal(
+        self,
+        pipeline_name: str,
+        options: PipelineOptions,
+        description: str,
+        start_position_ns: Optional[int] = None,
+    ) -> bool:
+        """
+        Internal method to launch pipeline (used for initial launch and restarts)
+
+        Args:
+            pipeline_name: Name of pipeline
+            options: Pipeline options
+            description: gst-parse pipeline description string
+            start_position_ns: resume a file source here instead of at the top
+
+        Returns:
+            True if pipeline launched successfully, False otherwise
+
+        Raises:
+            RuntimeError: the pipeline failed to reach PLAYING. The message
+                carries the element name and error text straight from the bus.
+        """
+        log_handle = None
+        try:
+            # The runner writes its own logging here.
+            log_dir = Path(options.output_dir) / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / f"{pipeline_name}_{int(time.time())}.log"
+            log_handle = open(log_file, "w", buffering=1)  # Line buffered
+
+            runner = PipelineRunnerClient(
+                pipeline_name, description, log_handle,
+                start_position_ns=start_position_ns,
+                resume_probe_element=RESUME_PROBE_ELEMENT,
+            )
+
+            # Store handle, log file, and log handle before starting so a
+            # failure mid-handshake still leaves the state cleanable.
+            self.pipelines[pipeline_name] = runner
+            self.pipeline_logs[pipeline_name] = log_file
+            self.pipeline_log_handles[pipeline_name] = log_handle
+
+            # Blocks until the pipeline reports PLAYING on its bus
+            runner.start(ready_timeout=self.pipeline_ready_timeout)
+            self._reset_progress(pipeline_name)
+
+            self.logger.info(
+                f"Pipeline '{pipeline_name}' started with PID: {runner.pid}"
+            )
+            self.logger.info(f"  Log file: {log_file}")
+
+            return True
+
+        except RuntimeError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to launch pipeline '{pipeline_name}': {e}")
+            if log_handle:
+                try:
+                    log_handle.close()
+                except Exception:
+                    pass
+            return False
+
+    def _build_pipeline_front(
+        self, source: str, options: PipelineOptions, input_type: str
+    ) -> List[str]:
+        """Build front camera pipeline (Pipeline 1)"""
+        output_dir = Path(options.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        pipeline = [
+            *self._get_source_elements(source, input_type),
+            "gvafpscounter",
+            "!",
+            *self._get_input_framerate_cap_elements(),
+            # YOLO detection
+            "gvadetect",
+            f"model={self._get_model_path('front-pose')}",
+            f"device={options.device}",
+            "pre-process-backend=d3d11",
+            "batch-size=1",
+            "model-instance-id=yolo-0",
+            f"threshold={options.threshold}",
+            "inference-region=0",
+            "!",
+            "gvaposturedetect",
+            "!",
+            "tee",
+            "name=t",
+            # Branch 1: ResNet18 classification
+            "t.",
+            "!",
+            "queue",
+            "!",
+            *self._get_classify_decimation_elements(),
+            "gvaroifilter",
+            "max-rois-num=10",
+            "!",
+            "gvaclassify",
+            f"model={self._get_model_path('resnet18')}",
+            f"device={options.device}",
+            "pre-process-backend=d3d11",
+            "batch-size=1",
+            "inference-region=1",
+            "model-instance-id=resnet18-0",
+            "!",
+            "gvametaconvert",
+            "!",
+            "gvametapublish",
+            f"file-path={output_dir.as_posix()}/front_resnet18.txt",
+            "file-format=json-lines",
+            "!",
+            "fakesink",
+            "async=false",
+            "sync=false",
+            # Branch 2: ReID and RTSP output
+            "t.",
+            "!",
+            "queue",
+            "!",
+            "gvaroifilter",
+            "max-rois-num=2",
+            "label=stand,stand_raise_up",
+            "!",
+            "gvaclassify",
+            f"model={self._get_model_path('reid')}",
+            f"device={options.device}",
+            "pre-process-backend=d3d11",
+            "batch-size=1",
+            "inference-region=1",
+            "model-instance-id=resnest50-0",
+            "!",
+            "queue",
+            "!",
+            "gvareid",
+            "similarity-threshold=0.6",
+            "!",
+            "gvaroifilter",
+            "!",
+            "gvametaconvert",
+            "!",
+            "gvametapublish",
+            f"file-path={output_dir.as_posix()}/front_posture.txt",
+            "file-format=json-lines",
+            "!",
+            "gvawatermark",
+            "!",
+            # Not on a decimated branch, so this sink runs at the capped source rate.
+            *self._get_video_sink_elements(
+                options, "front_stream", self.max_input_framerate
+            ),
+            # Branch 3: MobileNetv2 classification
+            "t.",
+            "!",
+            "queue",
+            "!",
+            *self._get_classify_decimation_elements(),
+            "gvaroifilter",
+            "max-rois-num=50",
+            "!",
+            "gvaclassify",
+            f"model={self._get_model_path('mobilenetv2')}",
+            f"device={options.device}",
+            "pre-process-backend=d3d11",
+            "batch-size=1",
+            "inference-region=1",
+            "model-instance-id=mobilenetv2-0",
+            "!",
+            "gvametaconvert",
+            "!",
+            "gvametapublish",
+            f"file-path={output_dir.as_posix()}/front_mobilenetv2.txt",
+            "file-format=json-lines",
+            "!",
+            "fakesink",
+            "async=false",
+            "sync=false",
+        ]
+        return pipeline
+
+    def _build_pipeline_back(
+        self, source: str, options: PipelineOptions, input_type: str
+    ) -> List[str]:
+        """Build back camera pipeline (Pipeline 2)"""
+        output_dir = Path(options.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        pipeline = [
+            *self._get_source_elements(source, input_type),
+            "gvafpscounter",
+            "!",
+            *self._get_input_framerate_cap_elements(),
+            # YOLO detection
+            "gvadetect",
+            f"model={self._get_model_path('back-pose')}",
+            f"device={options.device}",
+            "pre-process-backend=d3d11",
+            "batch-size=1",
+            "model-instance-id=yolo-0",
+            f"threshold={options.threshold}",
+            "inference-region=0",
+            "!",
+            "gvaposturedetect",
+            "!",
+            "gvawatermark",
+            "!",
+            "gvametaconvert",
+            "!",
+            "gvametapublish",
+            f"file-path={output_dir.as_posix()}/back_posture.txt",
+            "file-format=json-lines",
+            "!",
+            "tee",
+            "name=t",
+            # Branch 1: video output, kept at the source framerate. Split off ahead
+            # of the classification decimation so the stream is not thinned too;
+            # gvawatermark already ran, and it only draws the pose detections.
+            "t.",
+            "!",
+            "queue",
+            "!",
+            *self._get_video_sink_elements(
+                options, "back_stream", self.max_input_framerate
+            ),
+            # Branch 2: ResNet18 classification
+            "t.",
+            "!",
+            "queue",
+            "!",
+            *self._get_classify_decimation_elements(),
+            "gvaclassify",
+            f"model={self._get_model_path('resnet18')}",
+            f"device={options.device}",
+            "pre-process-backend=d3d11",
+            "batch-size=1",
+            "inference-region=1",
+            "model-instance-id=resnet18-0",
+            "!",
+            "gvametaconvert",
+            "!",
+            "gvametapublish",
+            f"file-path={output_dir.as_posix()}/back_resnet18.txt",
+            "file-format=json-lines",
+            "!",
+            "fakesink",
+            "async=false",
+            "sync=false",
+        ]
+        return pipeline
+
+    def _build_pipeline_content(
+        self, source: str, options: PipelineOptions, input_type: str
+    ) -> List[str]:
+        """Build content/file pipeline (Pipeline 3)"""
+        output_dir = Path(options.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        pipeline = [
+            *self._get_source_elements(source, input_type),
+            "tee",
+            "name=t",
+            # Branch 1: ResNet18 classification at classify_framerate
+            "t.",
+            "!",
+            "queue",
+            "!",
+            *self._get_classify_decimation_elements(),
+            "gvaclassify",
+            f"model={self._get_model_path('resnet18')}",
+            f"device={options.device}",
+            "pre-process-backend=d3d11",
+            "batch-size=1",
+            "inference-region=0",
+            "model-instance-id=resnet18-0",
+            "!",
+            "gvafpscounter",
+            "!",
+            "gvametaconvert",
+            "!",
+            "gvametapublish",
+            f"file-path={output_dir.as_posix()}/content_results.txt",
+            "file-format=json-lines",
+            "!",
+            "fakesink",
+            "async=false",
+            "sync=false",
+            # Branch 2: video output. Split off ahead of the classification
+            # decimation so the stream keeps the capped source rate instead of
+            # 1fps. It carries no inference metadata, hence no gvawatermark.
+            "t.",
+            "!",
+            "queue",
+            "!",
+            *self._get_input_framerate_cap_elements(),
+            *self._get_video_sink_elements(
+                options, "content_stream", self.max_input_framerate
+            ),
+        ]
+        return pipeline
+
+    def launch_pipeline(
+        self, pipeline_name: str, source: str, options: Optional[PipelineOptions] = None
+    ) -> bool:
+        """
+        Launch a pipeline by name
+
+        Args:
+            pipeline_name: Name of pipeline ('front', 'back', or 'content')
+            source: Input source (RTSP URL or file path)
+            options: Optional pipeline configuration options
+
+        Returns:
+            True if pipeline launched successfully, False otherwise
+
+        Note:
+            - Source can be RTSP URL (rtsp://...) or local file path
+            - Input type is auto-detected from source (starts with 'rtsp://' = RTSP, else file)
+            - Video output is pushed to RTSP server (configured via options.output_rtsp)
+              unless options.output_stream is False, in which case it is discarded
+            - Metadata is saved to files in options.output_dir
+        """
+        # Validate pipeline name
+        valid_names = [p.value for p in PipelineName]
+        if pipeline_name not in valid_names:
+            self.logger.error(
+                f"Invalid pipeline name: {pipeline_name}. Valid names: {valid_names}"
+            )
+            return False
+
+        # Check if pipeline is already running
+        if pipeline_name in self.pipelines and self.is_pipeline_running(pipeline_name):
+            self.logger.warning(f"Pipeline '{pipeline_name}' is already running")
+            return False
+
+        # Use default options if not provided
+        if options is None:
+            options = PipelineOptions()
+
+        # Setup environment before any GStreamer process runs, so gst-discoverer
+        # below and the pipeline itself see the same GST_PLUGIN_PATH and share
+        # one plugin registry cache.
+        self._setup_environment()
+
+        # Auto-detect input type from source
+        if source.startswith("rtsp://"):
+            input_type = "rtsp"
+        else:
+            input_type = "file"
+            # Verify file exists
+            if not Path(source).exists():
+                self.logger.error(f"Source file not found: {source}")
+                raise ValueError(f"Source file not found: {source}")
+            # Validate file with gst-discoverer
+            error_msg = self._validate_file_with_discoverer(source)
+            if error_msg:
+                raise ValueError(f"Invalid source file '{source}': {error_msg}")
+
+        try:
+            # Build pipeline based on name
+            if pipeline_name == PipelineName.FRONT.value:
+                pipeline_elements = self._build_pipeline_front(
+                    source, options, input_type
+                )
+            elif pipeline_name == PipelineName.BACK.value:
+                pipeline_elements = self._build_pipeline_back(
+                    source, options, input_type
+                )
+            elif pipeline_name == PipelineName.CONTENT.value:
+                pipeline_elements = self._build_pipeline_content(
+                    source, options, input_type
+                )
+            else:
+                raise ValueError(f"Unknown pipeline: {pipeline_name}")
+
+            # Join into a description for Gst.parse_launch in the runner.
+            description = self._join_pipeline_description(pipeline_elements)
+
+            self.logger.info(f"Launching pipeline '{pipeline_name}'")
+            self.logger.info(f"  Source: {source} (type: {input_type})")
+            self.logger.info(
+                f"  RTSP output: {options.output_rtsp}"
+                if options.output_stream
+                else "  RTSP output: disabled (fakesink)"
+            )
+            self.logger.info(f"  Metadata dir: {options.output_dir}")
+            self.logger.info(f"Pipeline: {description}")
+
+            # Store output files for monitoring
+            output_files = []
+            if pipeline_name == PipelineName.FRONT.value:
+                output_files = [
+                    Path(options.output_dir) / "front_resnet18.txt",
+                    Path(options.output_dir) / "front_posture.txt",
+                    Path(options.output_dir) / "front_mobilenetv2.txt",
+                ]
+            elif pipeline_name == PipelineName.BACK.value:
+                output_files = [
+                    Path(options.output_dir) / "back_posture.txt",
+                    Path(options.output_dir) / "back_resnet18.txt",
+                ]
+            elif pipeline_name == PipelineName.CONTENT.value:
+                output_files = [Path(options.output_dir) / "content_results.txt"]
+            self.pipeline_output_files[pipeline_name] = output_files
+
+            # Save pipeline parameters for restart capability
+            self.pipeline_params[pipeline_name] = {
+                "options": options,
+                "description": description,
+                "input_type": input_type,
+            }
+
+            # Initialize retry count
+            self.pipeline_retry_counts[pipeline_name] = 0
+            # A fresh launch starts with no history of where earlier runs got to.
+            self.pipeline_resume_state.pop(pipeline_name, None)
+            self.pipeline_skipped_segments.pop(pipeline_name, None)
+            # Clear any prior final status for a fresh launch
+            self.pipeline_final_status.pop(pipeline_name, None)
+
+            # Launch pipeline
+            success = self._launch_pipeline_internal(pipeline_name, options, description)
+
+            if not success:
+                return False
+
+            # ---- START RTSP RECORDING ----
+            if options.record:
+                recorder_name = f"{pipeline_name}_recorder"
+
+                project_config = RuntimeConfig.get_section("Project")
+                output_video_path = os.path.join(
+                    project_config.get("location"),
+                    project_config.get("name"),
+                    self.x_session_id,
+                    f"{pipeline_name}.mp4"
+                )
+
+                start_rtsp_recording(
+                    name=recorder_name,
+                    rtsp_url=source,
+                    output_file=output_video_path,
+                )
+
+            # Start monitoring thread
+            stop_flag = threading.Event()
+            self.monitor_stop_flags[pipeline_name] = stop_flag
+
+            monitor_thread = threading.Thread(
+                target=self._monitor_pipeline,
+                args=(pipeline_name,),
+                daemon=True,
+                name=f"monitor-{pipeline_name}",
+            )
+            monitor_thread.start()
+            self.monitor_threads[pipeline_name] = monitor_thread
+
+            self.logger.info(
+                f"Started monitoring thread for pipeline '{pipeline_name}'"
+            )
+            self._any_pipeline_ran = True
+
+            return True
+
+        except RuntimeError:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to launch pipeline '{pipeline_name}': {e}")
+            return False
+
+    def stop_pipeline(self, pipeline_name: str, timeout: float = 10.0) -> bool:
+        """
+        Stop a running pipeline
+
+        Args:
+            pipeline_name: Name of pipeline to stop
+            timeout: Maximum time to wait for graceful shutdown (seconds)
+
+        Returns:
+            True if pipeline stopped successfully, False otherwise
+        """
+        pipeline_name = pipeline_name.lower()
+
+        if pipeline_name not in self.pipelines:
+            self.logger.warning(f"Pipeline '{pipeline_name}' is not registered")
+            return False
+
+        # Retire the monitor before anything touches the process.
+        if pipeline_name in self.monitor_stop_flags:
+            self.monitor_stop_flags[pipeline_name].set()
+
+        stop_rtsp_recording(f"{pipeline_name}_recorder")
+        process = self.pipelines[pipeline_name]
+
+        if process.poll() is not None:
+            self.logger.info(f"Pipeline '{pipeline_name}' is not running")
+            del self.pipelines[pipeline_name]
+            # It ended on its own before the stop arrived. Ask the runner how it
+            # went rather than assuming the worst - the monitor polls only every
+            # two seconds, so a clean EOS often lands here first. setdefault
+            # inside _finalize_pipeline keeps the monitor's verdict if it won.
+            self._finalize_pipeline(
+                pipeline_name, "eos" if process.exited_normally() else "failed"
+            )
+            return True
+
+        try:
+            self.logger.info(
+                f"Stopping pipeline '{pipeline_name}' (PID: {process.pid})"
+            )
+
+            # Graceful shutdown: ask the runner to push EOS through the
+            # pipeline so sinks and muxers finalise their output.
+            if not process.request_stop():
+                self.logger.warning(
+                    f"Pipeline '{pipeline_name}' unreachable over IPC; terminating"
+                )
+                process.terminate()
+
+            try:
+                process.wait(timeout=timeout)
+                self.logger.info(f"Pipeline '{pipeline_name}' stopped gracefully")
+            except subprocess.TimeoutExpired:
+                self.logger.warning(
+                    f"Pipeline did not stop within {timeout}s, forcing kill..."
+                )
+                process.kill()
+                process.wait(timeout=5)
+                self.logger.info(f"Pipeline '{pipeline_name}' killed")
+            finally:
+                process.close()
+
+            del self.pipelines[pipeline_name]
+            self._finalize_pipeline(pipeline_name, "stopped")
+
+            if pipeline_name in self.monitor_threads:
+                monitor_thread = self.monitor_threads[pipeline_name]
+                monitor_thread.join(timeout=2.0)
+                del self.monitor_threads[pipeline_name]
+
+            # Clean up associated data
+            if pipeline_name in self.pipeline_logs:
+                del self.pipeline_logs[pipeline_name]
+            if pipeline_name in self.pipeline_log_handles:
+                # Close the log file handle
+                try:
+                    self.pipeline_log_handles[pipeline_name].close()
+                except:
+                    pass
+                del self.pipeline_log_handles[pipeline_name]
+            if pipeline_name in self.pipeline_output_files:
+                del self.pipeline_output_files[pipeline_name]
+            if pipeline_name in self.pipeline_params:
+                del self.pipeline_params[pipeline_name]
+            if pipeline_name in self.pipeline_retry_counts:
+                del self.pipeline_retry_counts[pipeline_name]
+            if pipeline_name in self.monitor_stop_flags:
+                del self.monitor_stop_flags[pipeline_name]
+            if pipeline_name in self.pipeline_errors:
+                del self.pipeline_errors[pipeline_name]
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error stopping pipeline '{pipeline_name}': {e}")
+            # Only call it over if the process really is gone. A stop that threw
+            # on the way in may well have left it running, and recording a
+            # terminal status here would - via setdefault - override whatever
+            # the monitor thread later decides. When it is still alive the
+            # monitor is still watching it, so say nothing.
+            if process.poll() is not None:
+                self._finalize_pipeline(pipeline_name, "failed")
+            return False
+
+    def is_pipeline_running(self, pipeline_name: str) -> bool:
+        """Check if a pipeline is currently running"""
+        pipeline_name = pipeline_name.lower()
+
+        if pipeline_name not in self.pipelines:
+            return False
+
+        process = self.pipelines[pipeline_name]
+        return process.poll() is None
+
+    async def monitor_pipeline_status(
+        self, check_interval: float = 2.0
+    ):
+        """
+        Monitor all pipeline processes status and yield status updates for streaming response
+
+        This async generator continuously monitors all pipeline process states and yields
+        combined status information. It does NOT restart the pipelines - that is handled by
+        the internal _monitor_pipeline thread.
+
+        Args:
+            check_interval: Seconds between status checks (default: 2.0)
+
+        Yields:
+            Dictionary with status information for all pipelines:
+            - pipelines: List of pipeline status dictionaries, each containing:
+                - pipeline_name: Name of the pipeline
+                - status: 'running', 'stopped_normal', 'stopped_error', or 'not_found'
+                - pid: Process ID (if running)
+                - message: Additional status message
+                - error: Error details (if stopped with error)
+
+        Note:
+            This is designed for streaming responses. The _monitor_pipeline thread
+            handles automatic restarts, so this function only reports status.
+        """
+        import asyncio
+
+        all_pipeline_names = ["front", "back", "content"]
+        self.logger.info(f"Starting status monitoring for all pipelines: {all_pipeline_names}")
+
+        try:
+            while True:
+                pipeline_statuses = []
+                any_live = False
+                any_awaiting_restart = False
+
+                for pipeline_name in all_pipeline_names:
+                    pipeline_name_lower = pipeline_name.lower()
+                    # Set by _finalize_pipeline, and the only authority on "this
+                    # one is never coming back": "eos", "failed" or "stopped".
+                    final_status = self.pipeline_final_status.get(pipeline_name_lower)
+
+                    # Check if pipeline is registered
+                    if pipeline_name_lower not in self.pipelines:
+                        pipeline_statuses.append({
+                            "pipeline_name": pipeline_name,
+                            "status": "not_found",
+                            "final_status": final_status,
+                            "message": f"Pipeline '{pipeline_name}' not found",
+                        })
+                        continue
+
+                    process = self.pipelines[pipeline_name_lower]
+                    return_code = process.poll()
+
+                    # Collect any error events recorded by the monitor thread
+                    errors = self.pipeline_errors.pop(pipeline_name_lower, [])
+
+                    # Pipeline is running
+                    if return_code is None:
+                        any_live = True
+                        status_entry = {
+                            "pipeline_name": pipeline_name,
+                            "status": "running",
+                            "final_status": final_status,
+                            "pid": process.pid,
+                        }
+                        if errors:
+                            status_entry["errors"] = errors
+                        pipeline_statuses.append(status_entry)
+
+                    # Pipeline has stopped
+                    else:
+                        # Dead but not finalised means the monitor thread is
+                        # between a crash and its relaunch. Reported as such so
+                        # the client shows "retrying" rather than "failed", and
+                        # counted so this stream stays open across the gap.
+                        if final_status is None:
+                            any_awaiting_restart = True
+
+                        # Normal-vs-error comes from the runner's bus events.
+                        if process.exited_normally():
+                            pipeline_statuses.append({
+                                "pipeline_name": pipeline_name,
+                                "status": "stopped_normal",
+                                "final_status": final_status,
+                                "return_code": return_code,
+                                "message": "Pipeline exited normally (EOS received)",
+                            })
+                        else:
+                            if not errors:
+                                reported = process.error_text()
+                                if reported:
+                                    errors = [reported]
+
+                            pipeline_statuses.append({
+                                "pipeline_name": pipeline_name,
+                                "status": "stopped_error",
+                                "final_status": final_status,
+                                "return_code": return_code,
+                                "message": "Pipeline exited unexpectedly.",
+                                "errors": errors,
+                            })
+
+                # Yield combined status
+                yield {"pipelines": pipeline_statuses}
+
+                # Close the stream once there is nothing left to report.
+                if self._any_pipeline_ran and not any_live and not any_awaiting_restart:
+                    self.logger.info(
+                        "[VA][status] all pipelines settled; ending status stream"
+                    )
+                    return
+
+                await asyncio.sleep(check_interval)
+
+        except Exception as e:
+            self.logger.error(f"Error monitoring pipeline status: {e}")
+            yield {
+                "pipeline_name": pipeline_name,
+                "status": "error",
+                "error": str(e),
+                "message": "Monitoring error occurred",
+            }
+
+    def monitor_pipeline_result(
+        self, pipeline_name: str, file_name: Optional[str] = None
+    ) -> Generator[Dict, None, None]:
+        """
+        Monitor pipeline output file and yield JSON objects as new lines are written
+
+        Args:
+            pipeline_name: Name of pipeline to monitor
+            file_name: Specific output file to monitor (e.g., "front_resnet18.txt")
+                      If None, monitors the first output file for the pipeline
+
+        Yields:
+            Dictionary parsed from each new JSON line in the output file
+
+        Note:
+            This is a blocking generator that continuously monitors the file.
+            Use Ctrl+C or call stop_pipeline() to stop monitoring.
+        """
+        pipeline_name = pipeline_name.lower()
+
+        if pipeline_name not in self.pipelines:
+            self.logger.error(f"Pipeline '{pipeline_name}' is not registered")
+            return
+
+        if pipeline_name not in self.pipeline_output_files:
+            self.logger.error(
+                f"No output files registered for pipeline '{pipeline_name}'"
+            )
+            return
+
+        # Determine which file to monitor
+        output_files = self.pipeline_output_files[pipeline_name]
+        if not output_files:
+            self.logger.error(f"No output files found for pipeline '{pipeline_name}'")
+            return
+
+        if file_name:
+            # Find the matching file
+            target_file = None
+            for f in output_files:
+                if f.name == file_name or str(f) == file_name:
+                    target_file = f
+                    break
+            if not target_file:
+                self.logger.error(
+                    f"File '{file_name}' not found in pipeline output files: {[str(f) for f in output_files]}"
+                )
+                return
+        else:
+            # Use the first file
+            target_file = output_files[0]
+
+        self.logger.info(f"Monitoring file: {target_file}")
+
+        # Wait for file to be created
+        timeout = 30
+        start_time = time.time()
+        while not target_file.exists():
+            if time.time() - start_time > timeout:
+                self.logger.error(f"Timeout waiting for file: {target_file}")
+                return
+            if not self.is_pipeline_running(pipeline_name):
+                self.logger.error(
+                    f"Pipeline stopped before file was created: {target_file}"
+                )
+                return
+            time.sleep(0.5)
+
+        # Monitor the file for new lines
+        try:
+            with open(target_file, "r") as f:
+                # Seek to the end of existing content
+                f.seek(0, 2)
+
+                while self.is_pipeline_running(pipeline_name):
+                    line = f.readline()
+                    if line:
+                        line = line.strip()
+                        if line:
+                            try:
+                                # Parse JSON and yield
+                                json_obj = json.loads(line)
+                                yield json_obj
+                            except json.JSONDecodeError as e:
+                                self.logger.warning(f"Failed to parse JSON line: {e}")
+                                self.logger.debug(f"Line content: {line}")
+                    else:
+                        # No new data, wait a bit
+                        time.sleep(0.1)
+
+                self.logger.info(
+                    f"Pipeline '{pipeline_name}' stopped, ending monitoring"
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error monitoring file: {e}")
+            return
+
+    def get_pipeline_status(self, pipeline_name: str) -> Optional[Dict]:
+        """
+        Get status information for a pipeline (non-blocking)
+
+        Args:
+            pipeline_name: Name of pipeline to check
+
+        Returns:
+            Dictionary with pipeline status information, or None if not found
+        """
+        pipeline_name = pipeline_name.lower()
+
+        if pipeline_name not in self.pipelines:
+            return None
+
+        process = self.pipelines[pipeline_name]
+
+        status = {
+            "name": pipeline_name,
+            "running": process.poll() is None,
+            "pid": process.pid,
+            "return_code": process.poll(),
+        }
+
+        # Add process details if running
+        if status["running"]:
+            try:
+                proc = psutil.Process(process.pid)
+                status["cpu_percent"] = proc.cpu_percent()
+                status["memory_mb"] = proc.memory_info().rss / 1024 / 1024
+                status["uptime_seconds"] = time.time() - proc.create_time()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        # Add log file info
+        if pipeline_name in self.pipeline_logs:
+            status["log_file"] = str(self.pipeline_logs[pipeline_name])
+
+        # Add output files info
+        if pipeline_name in self.pipeline_output_files:
+            status["output_files"] = [
+                str(f) for f in self.pipeline_output_files[pipeline_name]
+            ]
+
+        return status
+
+    def get_all_pipelines_status(self) -> Dict[str, Dict]:
+        """Get status of all registered pipelines (non-blocking)"""
+        return {name: self.get_pipeline_status(name) for name in self.pipelines.keys()}
+
+    def stop_all_pipelines(self, timeout: float = 10.0) -> bool:
+        """Stop all running pipelines"""
+        self.logger.info("Stopping all pipelines...")
+        success = True
+
+        for pipeline_name in list(self.pipelines.keys()):
+            if not self.stop_pipeline(pipeline_name, timeout):
+                success = False
+
+        return success
+
+    def _cleanup(self):
+        """Cleanup handler called on process exit"""
+        if self.pipelines:
+            self.logger.info("Cleaning up pipelines on exit...")
+
+            # Stop all monitoring threads first
+            for stop_flag in self.monitor_stop_flags.values():
+                stop_flag.set()
+
+            # Wait for monitoring threads to finish
+            for thread in self.monitor_threads.values():
+                thread.join(timeout=2.0)
+
+            self.stop_all_pipelines(timeout=5.0)
+
+            # Close any remaining log file handles
+            for handle in self.pipeline_log_handles.values():
+                try:
+                    handle.close()
+                except:
+                    pass
+            self.pipeline_log_handles.clear()
+
+    def get_pose_stats(
+        self, front_posture_file: str, previous_state: Optional[Dict] = None
+    ) -> tuple[Dict, Dict]:
+        """
+        Incrementally analyze front_posture.txt and generate pose statistics
+        Only processes new lines since last call, reusing previous results
+        
+        Args:
+            front_posture_file: Path to front_posture.txt file
+            previous_state: State from previous call (contains processed_lines, 
+            frames, counters, etc.)
+            
+        Returns:
+            Tuple of (statistics_dict, new_state_dict):
+            - statistics: Current statistics with all data up to now
+                - student_count: Average person count
+                - stand_count: Count of stand transitions
+                - raise_up_count: Count of raise up transitions
+                - stand_reid: List of student IDs with their stand transition counts
+            - state: State to pass to next call for incremental processing
+        """
+        posture_file = Path(front_posture_file)
+
+        # Initialize state if first call
+        if previous_state is None:
+            previous_state = {
+                "processed_lines": 0,
+                "total_frames": 0,
+                "person_count_samples": [],  # person counts sampled at target frame indices
+                "last_person_count": 0,       # person count from the most recent frame
+                "student_states": {},
+                "student_stand_counts": {},
+                "student_raise_counts": {},
+                "unidentified_objects": [],
+                "total_raise_count_no_id": 0,
+            }
+
+        if not posture_file.exists():
+            return {
+                "student_count": 0,
+                "stand_count": 0,
+                "raise_up_count": 0,
+                "stand_reid": [],
+            }, previous_state
+
+        try:
+            with open(posture_file, "r") as f:
+                all_lines = f.readlines()
+
+            processed_lines = previous_state["processed_lines"]
+            new_lines = all_lines[processed_lines:]
+
+            if not new_lines:
+                return self._calculate_stats(previous_state), previous_state
+
+            # Process frames directly — do not accumulate them in memory
+            TARGET_FRAMES = {900, 1800, 2700}
+            frame_base = previous_state["total_frames"]
+            new_frames = 0
+
+            for line in new_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    frame = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                frame_idx = frame_base + new_frames
+                new_frames += 1
+
+                objects = frame.get("objects", [])
+                valid_objects = [
+                    obj for obj in objects
+                    if obj.get("detection", {}).get("bounding_box", {}).get("x_max", 0) > 0
+                ]
+
+                # Sample person count only at target frame indices
+                if frame_idx in TARGET_FRAMES:
+                    previous_state["person_count_samples"].append(len(valid_objects))
+                previous_state["last_person_count"] = len(valid_objects)
+
+                self._process_frame(frame_idx, valid_objects, previous_state)
+
+            previous_state["processed_lines"] = len(all_lines)
+            previous_state["total_frames"] = frame_base + new_frames
+
+            return self._calculate_stats(previous_state), previous_state
+
+        except Exception as e:
+            self.logger.error(f"Error in incremental pose statistics: {e}")
+            return {
+                "student_count": 0,
+                "stand_count": 0,
+                "raise_up_count": 0,
+                "stand_reid": [],
+            }, previous_state
+
+    def _process_frame(self, frame_idx: int, valid_objects: List, state: Dict):
+        """Process a single frame, updating tracking state in-place.
+
+        Improvements vs original _process_frames_incremental:
+        - ABSENCE_THRESHOLD raised 15 → 90 frames (~3s) to suppress ReID tracking noise
+        - MIN_STAND_FRAMES=10: stand counted only after ID persists ≥10 consecutive frames
+          (filters 81.7% of noise: ghost 1-2f=66% + very-short 3-5f=15.7%)
+        - Re-entry while already raising immediately counts as a raise event (no missed raises)
+        - Unidentified objects matched by bbox center distance instead of IoU (faster, more robust)
+        - unidentified_objects list capped at 50 entries to bound O(N) scan cost
+        """
+        MIN_FRAMES_FOR_TRANSITION = self.min_frames_for_transition
+        MIN_FRAMES_FOR_TRANSITION_UNID = self.min_frames_for_transition_unid
+        ABSENCE_THRESHOLD = self.absence_threshold
+        MIN_STAND_FRAMES = self.min_stand_frames
+        CENTER_DIST_THRESHOLD = self.center_dist_threshold
+        UNIDENTIFIED_MAX = self.unidentified_max
+
+        student_states = state["student_states"]
+        student_stand_counts = state["student_stand_counts"]
+        student_raise_counts = state["student_raise_counts"]
+        unidentified_objects = state["unidentified_objects"]
+
+        seen_student_ids = set()
+        matched_unidentified = set()
+
+        for obj in valid_objects:
+            detection = obj.get("detection", {})
+            label = detection.get("label", "")
+            student_id = obj.get("id", 0)
+            bbox = detection.get("bounding_box", {})
+
+            is_raising = label in ["sit_raise_up", "stand_raise_up"]
+
+            if student_id > 0:
+                seen_student_ids.add(student_id)
+
+                if student_id not in student_states:
+                    # First appearance — start confirmation window, don't count stand yet
+                    if student_id not in student_raise_counts:
+                        student_raise_counts[student_id] = 0
+                    # If reappearing while already raising, count it immediately
+                    if is_raising:
+                        student_raise_counts[student_id] += 1
+                    student_states[student_id] = {
+                        "last_seen_frame": frame_idx,
+                        "is_raising": is_raising,
+                        "raise_buffer": 0,
+                        "continuous_frames": 1,
+                        "stand_confirmed": False,
+                    }
+                else:
+                    st = student_states[student_id]
+                    st["last_seen_frame"] = frame_idx
+                    st["continuous_frames"] += 1
+
+                    # Confirm stand once ID has persisted MIN_STAND_FRAMES consecutive frames
+                    if not st["stand_confirmed"] and st["continuous_frames"] >= MIN_STAND_FRAMES:
+                        student_stand_counts[student_id] = student_stand_counts.get(student_id, 0) + 1
+                        st["stand_confirmed"] = True
+
+                    if is_raising != st["is_raising"]:
+                        st["raise_buffer"] += 1
+                        if st["raise_buffer"] >= MIN_FRAMES_FOR_TRANSITION:
+                            if is_raising:
+                                student_raise_counts[student_id] += 1
+                            st["is_raising"] = is_raising
+                            st["raise_buffer"] = 0
+                    else:
+                        st["raise_buffer"] = 0
+
+            else:
+                # Unidentified object: match by bbox center distance
+                cx = (bbox.get("x_min", 0) + bbox.get("x_max", 0)) / 2
+                cy = (bbox.get("y_min", 0) + bbox.get("y_max", 0)) / 2
+
+                best_match_idx = -1
+                best_dist = CENTER_DIST_THRESHOLD
+
+                for idx, unid_obj in enumerate(unidentified_objects):
+                    if idx in matched_unidentified:
+                        continue
+                    ux, uy = unid_obj["center"]
+                    dist = ((cx - ux) ** 2 + (cy - uy) ** 2) ** 0.5
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_match_idx = idx
+
+                if best_match_idx >= 0:
+                    unid_obj = unidentified_objects[best_match_idx]
+                    matched_unidentified.add(best_match_idx)
+                    unid_obj["center"] = (cx, cy)
+
+                    if is_raising != unid_obj["is_raising"]:
+                        unid_obj["raise_buffer"] += 1
+                        if unid_obj["raise_buffer"] >= MIN_FRAMES_FOR_TRANSITION_UNID:
+                            if is_raising:
+                                unid_obj["raise_count"] += 1
+                                state["total_raise_count_no_id"] += 1
+                            unid_obj["is_raising"] = is_raising
+                            unid_obj["raise_buffer"] = 0
+                    else:
+                        unid_obj["raise_buffer"] = 0
+
+                    unid_obj["last_seen_frame"] = frame_idx
+                elif len(unidentified_objects) < UNIDENTIFIED_MAX:
+                    unidentified_objects.append({
+                        "center": (cx, cy),
+                        "is_raising": is_raising,
+                        "raise_buffer": 0,
+                        "raise_count": 0,
+                        "last_seen_frame": frame_idx,
+                    })
+
+        # Remove stale unidentified objects
+        state["unidentified_objects"] = [
+            obj for obj in unidentified_objects
+            if frame_idx - obj["last_seen_frame"] < self.stale_unidentified_threshold
+        ]
+
+        # Remove students absent too long — re-appearance will count as a new stand-up
+        for student_id in list(student_states.keys()):
+            if student_id not in seen_student_ids:
+                if frame_idx - student_states[student_id]["last_seen_frame"] >= ABSENCE_THRESHOLD:
+                    del student_states[student_id]
+
+    def _calculate_stats(self, state: Dict) -> Dict:
+        """Calculate current statistics from accumulated state."""
+        if state["total_frames"] == 0:
+            return {
+                "student_count": 0,
+                "stand_count": 0,
+                "raise_up_count": 0,
+                "stand_reid": [],
+                "raise_reid": [],
+            }
+
+        person_count_samples = state["person_count_samples"]
+        if person_count_samples:
+            student_count = int(sum(person_count_samples) / len(person_count_samples))
+        else:
+            student_count = state["last_person_count"]
+
+        stand_count = sum(state["student_stand_counts"].values())
+        raise_up_count = (
+            sum(state["student_raise_counts"].values()) + state["total_raise_count_no_id"]
+        )
+        stand_reid = [
+            {"student_id": sid, "count": cnt}
+            for sid, cnt in sorted(state["student_stand_counts"].items())
+            if cnt > 0
+        ]
+        raise_reid = [
+            {"student_id": sid, "count": cnt}
+            for sid, cnt in sorted(
+                state["student_raise_counts"].items(), key=lambda x: x[1], reverse=True
+            )
+            if cnt > 0
+        ]
+
+        return {
+            "student_count": student_count,
+            "stand_count": stand_count,
+            "raise_up_count": raise_up_count,
+            "stand_reid": stand_reid,
+            "raise_reid": raise_reid,
+        }

@@ -1,0 +1,214 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, Field, model_validator
+
+from .common import settings
+
+
+class MessageContentText(BaseModel):
+    """
+    Represents a text message content.
+
+    Attributes:
+        type (str): The type of the content (e.g., "text").
+        text (str): The text content.
+    """
+
+    type: str
+    text: str
+
+
+class MessageContentImageUrl(BaseModel):
+    """
+    Represents an image URL message content.
+
+    Attributes:
+        type (str): The type of the content (e.g., "image_url").
+        image_url (Dict[str, str]): A dictionary containing the image URL.
+    """
+
+    type: str
+    image_url: Dict[str, str]
+
+
+class Message(BaseModel):
+    """
+    Represents a message in a chat.
+
+    Attributes:
+        role (str): The role of the message sender (e.g., "user").
+        content: The content of the message (text string or list of text/image/video parts).
+            May be null on an assistant message that carries tool calls.
+        tool_calls (Optional[List[dict]]): Assistant tool calls (OpenAI format).
+        tool_call_id (Optional[str]): The call a ``role: "tool"`` result answers.
+        name (Optional[str]): Optional participant/function name.
+        reasoning_content (Optional[str]): Assistant reasoning returned by a
+            tool-calling response, passed back with the history.
+    """
+
+    role: str
+    content: Optional[
+        Union[str, List[Union[str, MessageContentText, MessageContentImageUrl]]]
+    ] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
+    reasoning_content: Optional[str] = None
+
+
+class ChatRequest(BaseModel):
+    """
+    Represents a chat request.
+
+    Attributes:
+        messages (List[Message]): A list of messages in the chat.
+        model (str): The model to be used for the chat.
+        repetition_penalty (Optional[float]): The penalty for repetition.
+        presence_penalty (Optional[float]): The penalty for presence.
+        frequency_penalty (Optional[float]): The penalty for frequency.
+        max_completion_tokens (Optional[int]): The maximum number of completion tokens.
+        temperature (Optional[float]): The temperature for randomness.
+        top_p (Optional[float]): The top-p sampling value.
+        stream (Optional[bool]): Whether to stream the response.
+        stream_options (Optional[dict]): ``{"include_usage": true}`` ends the
+            stream with a chunk carrying token usage (OpenAI convention).
+        top_k (Optional[int]): The top-k sampling value.
+        do_sample (Optional[bool]): Whether to sample.
+        seed (Optional[int]): The seed for reproducibility.
+    """
+
+    messages: List[Message] = Field(...)
+    model: Optional[str] = Field(None, json_schema_extra={"example": "llama-2-13b"})
+    # Sampling ranges mirror GenerationConfig.validate(), so an out-of-range
+    # value is a 400 here instead of a runtime error during generation.
+    repetition_penalty: Optional[float] = Field(
+        None, gt=0, json_schema_extra={"example": 1.15}
+    )
+    presence_penalty: Optional[float] = Field(
+        None, ge=-2.0, le=2.0, json_schema_extra={"example": 1.5}
+    )
+    frequency_penalty: Optional[float] = Field(
+        None, ge=-2.0, le=2.0, json_schema_extra={"example": 0.5}
+    )
+    # gt=0: a non-positive limit is a malformed request (HTTP 400), never
+    # forwarded to the native GenerationConfig.
+    max_completion_tokens: Optional[int] = Field(
+        settings.VLM_MAX_COMPLETION_TOKENS, gt=0, json_schema_extra={"example": 1000}
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        gt=0,
+        json_schema_extra={"description": "Older OpenAI name, used when max_completion_tokens is not set"},
+    )
+    temperature: Optional[float] = Field(None, json_schema_extra={"example": 0.3})
+    top_p: Optional[float] = Field(None, gt=0, le=1.0, json_schema_extra={"example": 0.5})
+    stream: Optional[bool] = Field(False, json_schema_extra={"example": True})
+    stream_options: Optional[Dict[str, Any]] = Field(
+        None,
+        json_schema_extra={"example": {"include_usage": True}},
+    )
+    top_k: Optional[int] = Field(None, ge=1, json_schema_extra={"example": 40})
+    do_sample: Optional[bool] = Field(None, json_schema_extra={"example": True})
+    seed: Optional[int] = Field(
+        None,
+        json_schema_extra={"example": 42, "description": "Seed for reproducibility"},
+    )
+    enable_thinking: Optional[bool] = Field(
+        None,
+        json_schema_extra={"example": False, "description": "Set False to suppress Qwen3 thinking; None keeps model default"},
+    )
+    tools: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        json_schema_extra={"description": "OpenAI function tool definitions; validated by the server"},
+    )
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+        None,
+        json_schema_extra={"description": '"none", "auto", "required" or {"type": "function", "function": {"name": ...}}'},
+    )
+    parallel_tool_calls: Optional[bool] = Field(
+        None,
+        json_schema_extra={"description": "False returns at most one tool call"},
+    )
+
+    @model_validator(mode="after")
+    def _apply_max_tokens(self):
+        if self.max_tokens is not None and "max_completion_tokens" not in self.model_fields_set:
+            self.max_completion_tokens = self.max_tokens
+        return self
+
+
+class ChatCompletionDelta(BaseModel):
+    """
+    Represents a delta in chat completion.
+
+    Attributes:
+        role (Optional[str]): The role of the message sender.
+        content (Optional[str]): The content of the message.
+    """
+
+    role: Optional[str] = None
+    content: Optional[str] = None
+
+
+class ChatUsageStats(BaseModel):
+    """
+    Represents usage statistics for a chat.
+
+    Attributes:
+        prompt_tokens (Optional[int]): The number of prompt tokens.
+        completion_tokens (Optional[int]): The number of completion tokens.
+        total_tokens (Optional[int]): The total number of tokens.
+        tps (Optional[float]): The tokens per second.
+        time_to_first_token (Optional[float]): The time to the first token.
+        latency (Optional[float]): The latency of the response.
+        completion_tokens_details (Optional[dict]): Details of completion tokens.
+    """
+
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    tps: Optional[float] = None
+    time_to_first_token: Optional[float] = None
+    latency: Optional[float] = None
+    completion_tokens_details: Optional[dict] = None
+
+
+class ChatCompletionChoice(BaseModel):
+    """
+    Represents a choice in chat completion.
+
+    Attributes:
+        index (int): The index of the choice.
+        message (ChatCompletionDelta): The message delta.
+        finish_reason (Optional[str]): The reason for finishing.
+    """
+
+    index: int
+    message: ChatCompletionDelta
+    finish_reason: Optional[str] = None
+
+
+class ChatCompletionResponse(BaseModel):
+    """
+    Represents a response for chat completion.
+
+    Attributes:
+        id (str): The ID of the response.
+        object (str): The type of the object.
+        created (int): The creation timestamp.
+        model (str): The model used for the response.
+        system_fingerprint (Optional[str]): The system fingerprint.
+        choices (List[ChatCompletionChoice]): A list of completion choices.
+        usage (Optional[ChatUsageStats]): The usage statistics.
+    """
+
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    system_fingerprint: Optional[str] = None
+    choices: List[ChatCompletionChoice]
+    usage: Optional[ChatUsageStats] = None

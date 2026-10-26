@@ -1,18 +1,43 @@
 # System Requirements
 
-This page provides detailed hardware, software, platform requirements, and supported models to help you set up and run the application efficiently.
+This page lists the hardware, software, and platform requirements, and the supported models, for setting up and running the application.
 
 ## Software and Hardware Requirements
 
+<!--hide_directive ::::{tab-set} hide_directive-->
+<!--hide_directive :sync-group: os hide_directive-->
+
+<!--hide_directive :::{tab-item} hide_directive--> Windows
+<!--hide_directive :sync: windows hide_directive-->
+
 - **OS**: Windows 11
-- **Recommended processor**: Intel® Core Ultra Series 1, 2, and 3 Processors (with integrated GPU support)
+- **Recommended processor**: Intel® Core™ Ultra Series 1, 2, and 3 processors (with integrated GPU support)
 - **Memory**: 32 GB RAM (minimum recommended)
 - **Storage**: At least 50 GB free (for models and logs)
-- **GPU/Accelerator**: Intel® iGPU (Core Ultra Series 1, Arc GPU, or higher) for summarization acceleration
-- **NPU**: Intel® NPU (Core Ultra Series 1 or higher) for Video pipelines
-- **NPU Driver**: Please download and install the latest version from [Intel NPU Driver Download Page](https://www.intel.com/content/www/us/en/download/794734/intel-npu-driver-windows.html)
+- **GPU/Accelerator**: Intel® iGPU (Intel® Core™ Ultra Series 1, Intel® Arc™ GPU, or higher) for summarization acceleration
+- **NPU**: Intel® NPU (Intel® Core™ Ultra Series 1 or higher) for Video pipelines
+- **NPU Driver**: Download and install the latest version from [Intel NPU Driver Download Page](https://www.intel.com/content/www/us/en/download/794734/intel-npu-driver-windows.html)
 - **Python**: 3.12
 - **Node.js**: v18+ (for frontend)
+
+<!--hide_directive ::: hide_directive-->
+
+<!--hide_directive :::{tab-item} hide_directive--> Linux
+<!--hide_directive :sync: linux hide_directive-->
+
+- **OS**: Ubuntu 24.04 LTS
+- **Recommended processor**: Intel® Core™ Ultra Series 1, 2, and 3 processors (with integrated GPU support)
+- **Memory**: 32 GB RAM (minimum recommended)
+- **Storage**: At least 50 GB free (for models, Docker images, and logs)
+- **GPU/Accelerator**: Intel® iGPU (Intel® Core™ Ultra Series 1, Intel® Arc™ GPU, or higher) for summarization acceleration
+- **NPU**: Intel® NPU (Intel® Core™ Ultra Series 1 or higher) for Video pipelines
+- **GPU/NPU Drivers**: Install the latest Intel GPU and NPU drivers from [Intel NPU Driver releases](https://github.com/intel/linux-npu-driver/releases) and the [Intel GPU compute runtime](https://github.com/intel/compute-runtime/releases)
+- **Docker**: Docker Engine and Docker Compose plugin
+- **Python**: 3.12
+- **Node.js**: v18+ (for frontend)
+
+<!--hide_directive ::: hide_directive-->
+<!--hide_directive :::: hide_directive-->
 
 ## Audio Pipeline Supported Models
 
@@ -31,7 +56,7 @@ This page provides detailed hardware, software, platform requirements, and suppo
   - `Qwen3-VL-8B-Instruct` (default, shared vision-language model)
   - `Qwen3.5-9B`
 - Summarization supports up to 5,120 tokens on GPU
-- Run summarization on **GPU** (Intel® iGPU / Arc GPU) for faster performance.
+- Run summarization on **GPU** (Intel® iGPU / Intel® Arc™ GPU) for faster performance.
 
 ### Content Segmentation and Topic Search
 
@@ -43,7 +68,7 @@ This page provides detailed hardware, software, platform requirements, and suppo
 
 - **int4** → Recommended default (fast + memory-efficient on GPU)
 - **int8** → Higher accuracy, larger memory footprint
-- **fp16** → Full precision (use only if sufficient memory available)
+- **fp16** → Full precision (use only if sufficient memory is available)
 
 ## Video Analytics Pipeline
 
@@ -56,7 +81,7 @@ For pipeline architecture and processing stages, see [How It Works](../how-it-wo
 ### Supported Models
 
 | Model | Format | Used In | Purpose |
-| ----- | ------ | ------- | ------- |
+| :--- | :--- | :--- | :--- |
 | **YOLOv8m-pose** (default) | OpenVINO™ IR | Front pipeline | Person detection + 17-keypoint pose estimation |
 | **YOLOv8s-pose** (default) | OpenVINO™ IR | Back pipeline | Lightweight person detection + pose estimation |
 | **YOLO11m/s-pose** | OpenVINO™ IR | Front / Back pipeline | Alternative pose model |
@@ -67,14 +92,14 @@ For pipeline architecture and processing stages, see [How It Works](../how-it-wo
 
 - All models run in OpenVINO™ Intermediate Representation (IR) format
 - Inference supported on **CPU**, **GPU**, and **NPU** (configurable per pipeline)
-- Default inference device: **NPU** (recommended for best performance on Intel® Core Ultra)
+- Default inference device: **NPU** (recommended for best performance on Intel® Core™ Ultra processors)
 
 ## Content Search Pipeline
 
 ### Content Search Supported Models
 
 | Model | Purpose | Device |
-| ----- | ------- | ------ |
+| :--- | :--- | :--- |
 | **Qwen3-VL-8B-Instruct** | Vision Language Model for video summarization and Q&A | GPU |
 | **CLIP/clip-xlm-roberta-base-vit-b-32** | Visual embedding for images and video frames | CPU |
 | **intfloat/multilingual-e5-small** | Text embedding for document chunks | CPU |
@@ -83,7 +108,7 @@ For pipeline architecture and processing stages, see [How It Works](../how-it-wo
 ### Supported File Formats
 
 | Category | Extensions |
-| -------- | ---------- |
+| :--- | :--- |
 | **Video** | `.mp4` |
 | **Document** | `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.html`, `.htm`, `.xml`, `.md` |
 | **Image** | `.jpg`, `.jpeg`, `.png` |

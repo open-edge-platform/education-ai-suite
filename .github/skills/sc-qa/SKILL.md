@@ -239,7 +239,7 @@ $health.hub.text_gen.state  # Should be "ready"
 |---|---|---|
 | `answer` is empty | No relevant content found | Check that the right files are indexed; verify tags filter isn't too narrow |
 | `code: 40000` / 400 Bad Request | Missing or malformed `question` field | Ensure `question` is a non-empty string |
-| `code: 50003` + sources returned | VLM endpoint 503 error (retrieval OK, generation failed) | Check main backend logs at `smart-classroom/logs`; VLM may be loading or crashed; restart main backend |
+| `code: 50003` + sources returned | VLM endpoint 503 error (retrieval OK, generation failed) | Check main backend logs at `smart-classroom/Windows/logs`; VLM may be loading or crashed; restart main backend |
 | Very slow response (>30 s) | VLM generation is slow | Normal for complex questions; wait up to 10 min (Flutter `receiveTimeout`) |
 | Sources are from wrong files | Tag filter not set | Pass `filter.tags` to scope retrieval |
 | History causes hallucination | Too many stale turns | Limit history to last 3 turns (matches `AppConfig.maxHistoryTurns`) |

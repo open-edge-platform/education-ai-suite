@@ -2,10 +2,10 @@
 
 <!--hide_directive
 <div class="component_card_widget">
-  <a class="icon_github" href="https://github.com/open-edge-platform/edge-ai-suites/tree/main/education-ai-suite/smart-classroom">
+  <a class="icon_github" href="https://github.com/open-edge-platform/education-ai-suite/tree/main/smart-classroom/Windows">
      GitHub
   </a>
-  <a class="icon_document" href="https://github.com/open-edge-platform/edge-ai-suites/blob/main/education-ai-suite/smart-classroom/README.md">
+  <a class="icon_document" href="https://github.com/open-edge-platform/education-ai-suite/blob/main/smart-classroom/Windows/README.md">
      Readme
   </a>
 </div>
@@ -18,8 +18,7 @@ transcription and summarization to provide comprehensive classroom intelligence.
 This application provides an end-to-end workflow, starting from file uploads or live recording,
 through parallel audio and video analysis, to generate insightful outputs like transcriptions,
 summaries, mind maps, and classroom engagement statistics. You can monitor system performance,
-switch between audio-video modes, and validate results seamlessly, ensuring an interactive and
-efficient classroom experience.
+switch between audio-video modes, and validate results.
 
 The main features are as follows:
 
@@ -49,8 +48,9 @@ The main features are as follows:
 :hidden:
 
 ./get-started
-./advance-setup-guide
+./advanced-setup-guide
 ./how-it-works
+VLM and LLM Serving Design <./vlm-llm-serving-design>
 ./application-flow
 ./content-search-flow
 ./class-report-flow

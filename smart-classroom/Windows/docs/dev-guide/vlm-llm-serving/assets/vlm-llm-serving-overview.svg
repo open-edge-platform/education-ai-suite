@@ -1,0 +1,68 @@
+<!-- SPDX-FileCopyrightText: (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">One serving path for existing and new models</title>
+  <desc id="description">A widescreen diagram with two rows. At startup, select an existing model or Qwen3.6 or Qwen3.8, prepare its files, then load and warm the target and selected accelerator. Once ready, classroom workflows use plain generation or qualified DFlash, DFlash2 or MTP and receive compatible responses through the unchanged API.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#52616b"/>
+    </marker>
+    <style>
+      text { font-family: "Aptos", "Segoe UI", sans-serif; letter-spacing: 0; }
+      .heading { font-size: 42px; font-weight: 600; fill: #172c34; }
+      .subtitle { font-size: 25px; fill: #52616b; }
+      .section { font-size: 24px; font-weight: 600; fill: #52616b; }
+      .label { font-size: 31px; font-weight: 600; fill: #172c34; }
+      .body { font-size: 24px; fill: #354b55; }
+      .connector { fill: none; stroke: #52616b; stroke-width: 3; marker-end: url(#arrow); }
+      .startup { fill: #edf5f8; stroke: #7796a6; stroke-width: 2; }
+      .request { fill: #eef7f2; stroke: #75a38b; stroke-width: 2; }
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text class="heading" x="64" y="86">One Serving Path for Existing and New Models</text>
+  <text class="subtitle" x="64" y="130">Automatic preparation. Optional acceleration. Unchanged classroom APIs.</text>
+
+  <text class="section" x="64" y="185">STARTUP</text>
+  <rect class="startup" x="64" y="210" width="420" height="180" rx="8"/>
+  <text class="label" x="94" y="261">1. Select model</text>
+  <text class="body" x="94" y="312">Existing supported models</text>
+  <text class="body" x="94" y="350">or Qwen3.6 / Qwen3.8</text>
+
+  <path class="connector" d="M 484 300 H 578"/>
+  <rect class="startup" x="590" y="210" width="420" height="180" rx="8"/>
+  <text class="label" x="620" y="261">2. Prepare files</text>
+  <text class="body" x="620" y="312">Download or reuse</text>
+  <text class="body" x="620" y="350">Convert and validate as needed</text>
+
+  <path class="connector" d="M 1010 300 H 1104"/>
+  <rect class="startup" x="1116" y="210" width="420" height="180" rx="8"/>
+  <text class="label" x="1146" y="261">3. Load and warm</text>
+  <text class="body" x="1146" y="312">Target + selected accelerator</text>
+  <text class="body" x="1146" y="350">Ready only after warm-up</text>
+
+  <path class="connector" d="M 1326 390 V 455 H 800 V 528"/>
+  <text class="body" x="1000" y="438">Ready model</text>
+
+  <text class="section" x="64" y="515">REQUESTS</text>
+  <rect class="request" x="64" y="540" width="420" height="180" rx="8"/>
+  <text class="label" x="94" y="591">Classroom workflows</text>
+  <text class="body" x="94" y="642">Chat, summaries, Q&amp;A, images</text>
+  <text class="body" x="94" y="680">and other model consumers</text>
+
+  <path class="connector" d="M 484 630 H 578"/>
+  <rect class="request" x="590" y="540" width="420" height="180" rx="8"/>
+  <text class="label" x="620" y="591">Shared model service</text>
+  <text class="body" x="620" y="642">Plain decoding</text>
+  <text class="body" x="620" y="680">or DFlash / DFlash2 / MTP</text>
+
+  <path class="connector" d="M 1010 630 H 1104"/>
+  <rect class="request" x="1116" y="540" width="420" height="180" rx="8"/>
+  <text class="label" x="1146" y="591">Compatible responses</text>
+  <text class="body" x="1146" y="642">Same API and model interface</text>
+  <text class="body" x="1146" y="680">Same classroom workflows</text>
+
+  <path d="M 64 777 H 1536" stroke="#d8e2e6" stroke-width="2"/>
+  <text class="label" x="64" y="824">Compatibility by default</text>
+  <text class="subtitle" x="64" y="864">Existing configuration remains valid. Speculation is off unless explicitly enabled.</text>
+</svg>

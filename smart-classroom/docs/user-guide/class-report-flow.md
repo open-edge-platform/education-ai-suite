@@ -31,6 +31,7 @@ available only after processing has settled:
 
 If a session is still processing, the **Generate Report** button stays disabled and the panel
 shows a hint explaining what to wait for.
+
 ## Step 1: Select Report Fields
 
 The **Report Fields** section lists every data point the report can contain, organized into
@@ -51,8 +52,8 @@ Tick a group header to toggle all of its fields at once.
 
 ### Basic Info
 
-Basic info cannot be derived from audio or video, so the teacher types it in. For each basic
-info field:
+Basic information cannot be derived from audio or video, so the teacher types it in. For each basic
+information field:
 
 - **Tick the checkbox** to include the field.
 - **Type a value**, or leave it blank to fill it in later on the printed document.
@@ -62,9 +63,9 @@ a toggleable field.
 
 > [!NOTE]
 > Fields are split into two kinds. **Raw** fields (numbers, names, keywords, mind
-> map) are filled directly from measured data and are never invented by the AI. Only the
-> **Teaching Effectiveness** fields are written by the language model, using the class summary,
-> mind map, and segmentation as context.
+  map) are filled directly from measured data and are never invented by the AI. Only the
+  **Teaching Effectiveness** fields are written by the language model, using the class summary,
+  mind map, and segmentation as context.
 
 ## Step 2: Generate the Report
 
@@ -82,7 +83,7 @@ When finished, the panel shows **✓ Report ready** with the full report rendere
 
 ## Step 3: Adjust Fields
 
-After a report exists, you can change the selected fields or edit the basic info without
+After a report exists, you can change the selected fields or edit the basic information without
 re-running the AI:
 
 - **🔄 Apply field changes** - Re-projects the report onto your current selection and manual

@@ -1,227 +1,84 @@
-# Get Started with Smart Classroom
+# Get Started
 
-> [!IMPORTANT]
-> Use **Windows PowerShell** (not Command Prompt/CMD) for all steps in this guide.
-> PowerShell scripts (`.ps1` files) will not execute in CMD — they will only open as text files.
+Smart Classroom runs on Windows 11 and Ubuntu 24.04 LTS. The services, models, and
+features are the same on both systems. The setup procedure differs, so each operating
+system has its own guide.
 
-There are two ways to run Smart Classroom. Both use the same services, models and
-configurations.
+## Overview
 
-| | [Desktop app](#desktop-app) (recommended) | [PowerShell scripts](#alternative-powershell-scripts-and-the-browser-ui) |
-|---|---|---|
-| Commands to run | `.\start-desktop-app.ps1` | `.\setup-smart-classroom.ps1`, then `.\start-smart-classroom.ps1` |
-| Prerequisites and installs | **Setup** screen, one item at a time | One scripted pass through everything |
-| Settings | **Configuration** screen | Console prompts, then editing `config.yaml` by hand |
-| Services | **Services** screen: start, stop, restart, live logs | Separate console windows |
-| Where the UI runs | Its own desktop window | Browser at <http://localhost:5173> |
+On either system, setting up Smart Classroom takes the same four stages:
 
-Whichever you pick, start by cloning the repository.
+1. Check that your machine meets the [System Requirements](./get-started/system-requirements.md).
+2. Clone the repository.
+3. Configure features, models, and (optionally) speaker diarization in `config.yaml`.
+4. Run the setup and start the services, then open the UI at <http://localhost:5173>.
 
-## Clone the Repository
+## Choose Your Operating System
 
-Go to the target directory of your choice and clone the suite.
-If you want to clone a specific release branch, replace `main` with the desired tag.
-To learn more on partial cloning, check the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
+<!--hide_directive ::::{tab-set} hide_directive-->
+<!--hide_directive :sync-group: os hide_directive-->
 
-```bash
-  git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/edge-ai-suites.git
-  cd edge-ai-suites
-  git sparse-checkout set education-ai-suite
-  cd education-ai-suite/smart-classroom
-```
+<!--hide_directive :::{tab-item} hide_directive--> Windows
+<!--hide_directive :sync: windows hide_directive-->
 
----
+Native installation with PowerShell. Choose between the desktop app (recommended) and
+PowerShell scripts with the browser UI.
 
-## Desktop App
+- **OS**: Windows 11
+- **Run with**: `.\start-desktop-app.ps1` or `.\setup-smart-classroom.ps1`
 
-The desktop app covers setup, configuration and running the services in one window.
+Continue with [Get Started on Windows](./get-started/get-started-windows.md).
 
-### Step 1: Launch the App
+<!--hide_directive ::: hide_directive-->
 
-```powershell
-.\start-desktop-app.ps1
-```
+<!--hide_directive :::{tab-item} hide_directive--> Linux
+<!--hide_directive :sync: linux hide_directive-->
 
-The script asks for your proxy settings, installs Node.js through winget if it is
-missing, builds the UI and hands over. The app then supervises the Python services
-itself.
+Docker-based installation driven by the `setup.sh` script, with the UI served by a
+Vite dev server.
 
-**Optional parameters:**
+- **OS**: Ubuntu 24.04 LTS
+- **Run with**: `./setup.sh`
 
-- `-Dev` — Run the Vite dev server with hot reload
-- `-NoAutoStart` — Open the app without starting the backend automatically
-- `-SkipNodeInstall` — Fail instead of installing Node.js when it is missing
-- `-Silent` — Skip the proxy prompts and use the saved `.proxy-config`
+Continue with [Get Started on Linux](./get-started/get-started-linux.md).
 
-### Step 2: Work Through the Setup Screen
+<!--hide_directive ::: hide_directive-->
 
-**Get started** opens first and lists what is still missing. Follow its links, or open
-**Setup** directly, and work down the list:
+<!--hide_directive :::: hide_directive-->
 
-| Section | Covers |
-|---------|--------|
-| **System and drivers** | Operating system, processor, memory, free disk space, Intel GPU and NPU drivers, Windows long paths |
-| **Software and environment** | Python 3.12, Node.js, FFmpeg, DL Streamer, the Python environment, and the grading conversion environment and layout detection model |
+## Common Configuration
 
-Each row shows what was found and what it blocks. Rows the app can fix have a button:
-**Install** for Python, FFmpeg and DL Streamer, **Create** for the Python environment,
-**Prepare** for the layout detection model. **Fix _n_ items** at the top runs everything
-outstanding in order. Progress appears in the **Output** pane below, and **Copy
-diagnostics** puts the whole list on the clipboard for a bug report.
+### Speaker Diarization (Optional)
 
-> [!NOTE]
-> Creating the Python environment downloads several gigabytes, and preparing
-> the layout detection model downloads and converts it. Both take a while on a first run.
+Speaker diarization (identifying who is speaking) is optional and requires a one-time
+Hugging Face access token. Request access to the
+[Pyannote Speaker Diarization Community v1](https://huggingface.co/pyannote/speaker-diarization-community-1)
+model and create a Read token at
+[Hugging Face Access Tokens](https://huggingface.co/settings/tokens).
+For the steps to apply the token, see the guide for your operating system, or the
+[Speaker Diarization Setup](./advanced-setup-guide.md#f-speaker-diarization-setup-optional).
 
-The backend cannot start until the Python environment exists.
+### Network Requirements
 
-### Step 3: Review the Settings
-
-**Get started** shows the settings most people change. The **Configuration** screen has
-the full list from `config.yaml`, `runtime_config.yaml` and `.proxy-config`, grouped and
-searchable. Saving a change while the services are running offers a restart.
-
-> [!NOTE]
-> Speaker diarization (identifying who is speaking) is optional and requires a
-> one-time Hugging Face access token. The **Get started** screen flags this when
-> diarization is enabled without a token; set it under **Configuration**, or see
-> [Speaker Diarization Setup](advance-setup-guide.md#f-speaker-diarization-setup-optional).
-
-### Step 4: Use the App
-
-The backend starts automatically once setup is complete, unless you passed
-`-NoAutoStart`.
-
-| Screen | What it does |
-|--------|--------------|
-| **Get started** | Overview of what is ready, what is missing, and the settings most people change |
-| **Setup** | Prerequisite checks plus the Python environment and model preparation |
-| **Configuration** | Edit `config.yaml`, `runtime_config.yaml` and `.proxy-config` |
-| **Services** | Start / stop / restart the backend and watch live logs for it and every child service |
-
----
-
-## Alternative: PowerShell Scripts and the Browser UI
-
-Use this path for unattended installs or when you want the services in visible console
-windows.
-
-### Step 1: Run the Setup Script (First-Time Only)
-
-```powershell
-.\setup-smart-classroom.ps1
-```
-
-> [!NOTE]
-> If all prerequisites are already installed (FFmpeg, DL Streamer, Python
-> dependencies), you can skip setup and go straight to `.\start-smart-classroom.ps1`.
-
-The setup script will:
-
-1. **[1] Check System Requirements**
-   - OS version, CPU, RAM, storage
-   - Python and Node.js versions
-
-2. **[2] Application Dependency Check**
-   - FFmpeg (auto-install if missing)
-   - DL Streamer (auto-download and run installer [`dlstreamer-2026.1.0-win64.exe`](advance-setup-guide.md#b-install-dl-streamer))
-
-3. **[3] Configure Settings**
-   - [3.1] Feature Configuration (enable/disable individual application features)
-   - [3.2] Language & ASR Configuration (provider, model, device)
-   - [3.3] Upload Size Limits
-   - [3.4] OCR Configuration
-   - [3.5] Board OCR Configuration
-   - [3.6] Grading Configuration (enable/disable Smart Grading)
-
-> [!NOTE]
-> Speaker diarization (identifying who is speaking) is optional and requires a one-time
-> Hugging Face access token setup if enabled — see
-> [Speaker Diarization Setup](advance-setup-guide.md#f-speaker-diarization-setup-optional).
-
-### Step 2: Start the Services
-
-Use the start script for subsequent runs, or after modifying `config.yaml`:
-
-```powershell
-.\start-smart-classroom.ps1
-```
-
-**Optional parameters:**
-
-- `-Electron` - Shortcut for `.\start-desktop-app.ps1` (see [Desktop App](#desktop-app))
-- `-Silent` - Unattended mode for CI/Ansible (skips all prompts, auto-restarts services)
-- `-NoElevate` - Skip admin privilege elevation (use when already running as administrator)
-- `-NoWindowsTerminal` - Use Invoke-WmiMethod instead of Windows Terminal (for remote sessions/Ansible)
-
-```powershell
-# Example: Automated deployment
-.\start-smart-classroom.ps1 -Silent -NoElevate -NoWindowsTerminal
-```
-
-The startup script performs:
-
-- **Service Detection** - Checks running services
-- **Restart Options** - Restart, skip, or abort choices (auto in `-Silent` mode)
-- **Proxy Configuration** - Loads from `.proxy-config`
-- **Sequential Launch** - Backend -> Content Search -> Grading (if enabled) -> Frontend
-- **Graceful Shutdown** - `Q` to stop all, `E` to keep running (auto-exits in `-Silent` mode)
-
-### Step 3: Open the UI
-
-Once all services are running, open your browser:
-
-- **Local:** <http://localhost:5173>
-- **Network:** <http://YOUR_IP:5173>
-
----
-
-## Automated Setup - Troubleshooting
-
-If you encounter issues during automated setup, refer to the manual steps below:
-
-| Issue | Solution |
-|-------|----------|
-| `PSSecurityException` when running `.ps1` scripts | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in PowerShell |
-| FFmpeg installation fails | See [Manual Step 1A](advance-setup-guide.md#a-install-ffmpeg-required-for-audio-processing) |
-| DL Streamer download fails | See [Manual Step 1B](advance-setup-guide.md#b-install-dl-streamer) |
-| Python dependencies fail | See [Manual Step 1D](advance-setup-guide.md#d-install-python-dependencies) |
-| Content Search fails | See [Manual Step 4](advance-setup-guide.md#step-4-set-up-content-search) |
-| Frontend fails to start | See [Manual Step 6](advance-setup-guide.md#step-6-bring-up-the-frontend) |
-
----
-
-## Manual Setup
-
-**[Advanced Setup Guide](advance-setup-guide.md)**:  Follow step-by-step instructions to set up the application.
-
-Advanced Setup guide covers:
-
-- **Step 1:** Install Dependencies (FFmpeg, DL Streamer, Python, Content Search)
-- **Step 2:** Configuration (config.yaml settings, including optional [Speaker Diarization Setup](advance-setup-guide.md#f-speaker-diarization-setup-optional))
-- **Step 3-6:** Run Services & Access UI
-- **[Troubleshooting](advance-setup-guide.md#troubleshooting)** — solutions for common setup and runtime issues
-- **[Known Issues](advance-setup-guide.md#known-issues)** — current limitations and workarounds
-- **[Uninstall the Application](advance-setup-guide.md#uninstall-the-application)** — steps to cleanly remove the environment and models
-
----
-
-## Service Ports Reference
-
-| Service | Port | Health Check |
-|---------|------|--------------|
-| Backend | 8000 | <http://localhost:8000/health> |
-| Content Search | 9011 | <http://localhost:9011/api/v1/system/health> (200 only when ChromaDB, file ingest and video preprocess are ready too; 503 while any is starting) |
-| Layout Detection | 9902 | <http://localhost:9902/health> |
-| Grading | 9012 | <http://localhost:9012/api/v1/health> |
-| Frontend | 5173 | <http://localhost:5173> |
-
-> [!NOTE]
-> Layout Detection and Grading services only start when `grading.enabled: true` in `config.yaml`.
-> The desktop app is its own frontend and does not use port 5173.
+- **Proxy**: If you are behind a proxy, configure `HTTP_PROXY`, `HTTPS_PROXY`, and
+  `NO_PROXY` for your shell. On Linux, also configure them for Docker.
+- **Model downloads**: Stable access to `huggingface.co` is required to download
+  pre-trained models.
 
 ## Learn More
 
 - [System Requirements](./get-started/system-requirements.md): Hardware, software, supported models, and weight formats.
+- [Advanced Setup Guide](./advanced-setup-guide.md): Manual step-by-step setup.
 - [Application Flow](./application-flow.md): End-to-end application flow.
 - [Content Search Flow](./content-search-flow.md): The flow of the content search functionality.
+
+<!--hide_directive
+:::{toctree}
+:hidden:
+
+Start on Windows <./get-started/get-started-windows>
+Start on Linux <./get-started/get-started-linux>
+./get-started/system-requirements
+
+:::
+hide_directive-->
