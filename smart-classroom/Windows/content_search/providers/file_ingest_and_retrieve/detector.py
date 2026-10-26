@@ -11,6 +11,7 @@ import numpy as np
 import openvino as ov
 
 from providers.file_ingest_and_retrieve.yolox_utils import preproc, multiclass_nms, demo_postprocess
+from utils.ov_runtime import gpu_plugin_config
 
 class Detector:
     def __init__(self, device="CPU", conf=0.85, nms=0.45, input_size=(640, 640)):
@@ -24,7 +25,9 @@ class Detector:
 
         core = ov.Core()
         self.net = core.read_model(model=self.model_file)
-        self.exec_net = core.compile_model(self.net, self.device)
+        self.exec_net = core.compile_model(
+            self.net, self.device, gpu_plugin_config(self.device)
+        )
         _, _, self.h, self.w = self.exec_net.inputs[0].shape
 
     def download_model(self):
