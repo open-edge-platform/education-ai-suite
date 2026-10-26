@@ -10,6 +10,7 @@ from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.embeddings import BaseEmbedding
 
 from providers.utils.model_utils import resolve_model_max_length
+from utils.ov_runtime import gpu_plugin_config
 
 
 class OpenVINOGenAIEmbedding(BaseEmbedding):
@@ -50,7 +51,9 @@ class OpenVINOGenAIEmbedding(BaseEmbedding):
         if text_instruction is not None:
             config.embed_instruction = text_instruction
 
-        self._pipe = ov_genai.TextEmbeddingPipeline(str(model_path), device.upper(), config)
+        self._pipe = ov_genai.TextEmbeddingPipeline(
+            str(model_path), device.upper(), config, **gpu_plugin_config(device)
+        )
         self._lock = threading.Lock()
         self._tokenizer_lock = threading.Lock()
 
