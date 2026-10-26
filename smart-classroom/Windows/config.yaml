@@ -52,6 +52,8 @@ models:
 
   model_hub: huggingface # huggingface or modelscope
 
+  gpu_queue_priority: LOW # LOW, MEDIUM, or HIGH for OpenVINO GPU services
+
   va:
     models_base_path: "models"
     device: NPU # NPU, GPU or CPU

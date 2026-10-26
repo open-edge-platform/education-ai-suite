@@ -93,3 +93,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // which a packaged build loaded over file:// is not.
   copyText: (text) => ipcRenderer.invoke('app:copyText', text),
 });
+
+// Page zoom rescales the viewport, so it fires `resize`; let the main process
+// resize the native title bar overlay to match the zoomed header. Also sent once
+// at load in case the window opens with a zoom level carried over.
+window.addEventListener('resize', () => ipcRenderer.send('titlebar:syncZoom'));
+window.addEventListener('DOMContentLoaded', () => ipcRenderer.send('titlebar:syncZoom'));
