@@ -28,6 +28,7 @@ calls to see what inference costs. The requirements behind this feature are in
 | `report` | Session data collection through the generated report | Stage + text-generation calls |
 | `board_ocr` | Board OCR worker during a session, from its start until the frame backlog is drained (or it is stopped) | Stage + OCR calls; not mirrored onto the session row, which does not declare it |
 | `document_ocr` | `POST /ocr/extract-text` | OCR calls only |
+| `board_summary` | `POST /board-ocr/summary` | Text-generation calls only |
 | `qa`, `video_captioning`, `grading` | Content-search Q&A, video captioning and grading requests to `/v1/chat/completions` | Text-generation calls only |
 | `chat_api` | Any other `/v1/chat/completions` request | Text-generation calls only |
 
@@ -63,9 +64,22 @@ submitted_at ──queue_wait_ms──▶ admitted ──latency_ms──▶ fin
   the call is `rejected` and has no latency.
 * `latency_ms`: from admission to the end of the call. A streamed call ends when
   its last token is produced, not when the stream is created.
-* For text generation, the runtime also reports `ttft_ms`, `tpot_ms`,
-  `decode_tps`, `input_tokens` and `output_tokens`. With DFlash it also reports
-  `draft_tokens` (tokens drafted) and `accepted_tokens` (tokens accepted).
+* For text generation, the runtime also reports `ttft_ms` (time to first
+  token), `tpot_ms` (time per output token after the first), `decode_tps`
+  (1000 ÷ `tpot_ms`), `input_tokens` and `output_tokens`. With DFlash it also
+  reports `draft_tokens` (tokens drafted) and `accepted_tokens` (tokens
+  accepted).
+
+Two throughputs are derived from these fields when statistics are computed,
+so older records get them too:
+
+* `prefill_tps`: `input_tokens` per second of `ttft_ms`.
+* `output_tps`: `output_tokens` per second of `latency_ms`. It includes
+  prefill, so it is lower than `decode_tps`, most of all for short answers to
+  long prompts.
+
+Neither is an estimate of an unreported subphase: each is a ratio of two
+measured values, and is unavailable when either value is missing.
 
 Records hold timing metadata only. They never contain prompts, transcripts,
 images, tool arguments or local paths.
@@ -120,7 +134,9 @@ The response contains three lists of statistics:
 * `model_calls_by_model`: the same grouping without the stage.
 
 Each metric is a distribution over successful samples. Failed and cancelled
-attempts are counted separately. An abridged real response:
+attempts are counted separately. A model-call group has one distribution per
+field in [Model Calls](#model-calls), including `tpot_ms`, `decode_tps`,
+`prefill_tps` and `output_tps`. An abridged real response:
 
 ```json
 {
@@ -185,6 +201,11 @@ Without `-o`, the report is printed to the console. For each session it shows:
   included) and their queue wait. A call is counted for the last attempt of its
   stage that started before the call was submitted, so a retried stage does not
   show the same calls twice.
+* **Text generation**: one row per VLM/LLM call, in submission order, with its
+  stage, status, prompt and output tokens, queue wait, latency, TTFT, TPOT,
+  decode, output and prefill tokens/s, and DFlash accepted/drafted tokens. The
+  model (name, precision, device, decoding) is given once above the table, or
+  as a column when the session used more than one.
 * **Video analytics**: one row per pipeline attempt, read from the runner logs in
   `<session>/raw/va/logs` (`<pipeline>_<launch epoch>.log`; a restarted pipeline
   has one log per attempt). Each row has the input (file name, or "RTSP stream"),
@@ -216,10 +237,20 @@ Without `-o`, the report is printed to the console. For each session it shows:
   real-time pipeline that ran 260 s and processed 261 s of a 300 s file did not
   run fast: the backend was stopped 40 s before the end of the video.
 
-After the per-session sections, the report adds two tables for all sessions:
-stage-duration statistics, and model-call statistics. The model-call table
-shows latency, queue wait, TTFT, decode throughput, token counts, DFlash
-accepted/drafted tokens, and failures.
+A session directory that was renamed or copied (for example
+`20261022-162922-0fa7-qwen3.6-dflash`) is reported under the session ID its
+records carry, so its VA runs and its `sessions.db` row join the right session.
+
+After the per-session sections, the report adds three tables for all sessions:
+
+* **Stage Durations**: stage-duration statistics.
+* **Model Calls**: for every capability, latency mean, p50 and p95, queue wait
+  and failures.
+* **Text Generation**: for each text-generation model (name, precision, device
+  and decoding), one row per stage and an **all stages** row: TTFT and TPOT p50
+  and p95, decode, output and prefill tokens/s p50, token totals, DFlash
+  accepted/drafted tokens and failures. Use it to compare models or decoding
+  methods stage by stage.
 
 Plain-text timeline from a real session (Qwen3.6-35B-A3B with DFlash, live
 recording):
@@ -262,6 +293,10 @@ shutdown.
 * **Model TTFT is not the time to the first visible text.** `ttft_ms` is measured
   inside the runtime. What the user sees also includes request preparation,
   queueing, transport, and earlier map calls when a summary is chunked.
+* **Decode versus output tokens/s.** Decode tokens/s (1000 ÷ TPOT) is the
+  generation speed once the first token is out. Output tokens/s divides by the
+  whole call, so a long prompt (high TTFT) lowers it. With DFlash, TPOT is
+  per committed token, so it already includes the drafter and verification.
 * **Small samples.** `small_sample: true` (⚠ in the report) means fewer than 20
   samples. A p95 over a single run is an observation, not a distribution.
   Compare repeated warm runs with the same input, settings and enabled stages.
@@ -277,7 +312,8 @@ shutdown.
 **Stage record** (`stage_events.jsonl`, `raw.stages`): `session_id`, `stage`,
 `status` (`done`, `failed` or `interrupted`), `started_at` and `ended_at` (UTC,
 millisecond precision), `duration_sec`. Records in the session file also carry
-`error_class` and `error_detail`.
+`error_class` and `error_detail` (the exception message with absolute local
+paths replaced by `<path>`, cut to 300 characters).
 
 **Model-call record** (`model_calls.jsonl`, `raw.model_calls`):
 

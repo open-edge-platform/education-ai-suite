@@ -119,13 +119,76 @@ def test_stage_rows_count_each_attempts_own_calls_including_failures():
 def test_acceptance_needs_both_counters():
     calls = [_call("text_gen", "summarize", "2026-10-17T15:56:45.000+00:00", 1_000.0,
                    draft_tokens=100)]
-    row = next(line for line in rep.calls_table(calls).splitlines() if "text_gen" in line)
+    row = next(line for line in rep.text_gen_table(calls).splitlines() if "| summarize" in line)
     assert "| — |" in row
     # 75/100 plus a call without an accepted count is 75/100 over 1 of 2 calls, not 75/200.
     calls.append(_call("text_gen", "summarize", "2026-10-17T15:57:45.000+00:00", 1_000.0,
                        draft_tokens=100, accepted_tokens=75))
-    row = next(line for line in rep.calls_table(calls).splitlines() if "text_gen" in line)
+    row = next(line for line in rep.text_gen_table(calls).splitlines() if "| summarize" in line)
     assert "75 / 100 (75%), 1 of 2 calls" in row
+
+
+def _tg(stage, submitted, latency_ms, **extra):
+    defaults = {"precision": "int4", "device": "GPU", "decoding": "plain", "ttft_ms": 2_000.0,
+                "tpot_ms": 50.0, "decode_tps": 20.0, "input_tokens": 1_000, "output_tokens": 401}
+    return _call("text_gen", stage, submitted, latency_ms, **{**defaults, **extra})
+
+
+def test_text_gen_table_has_ttft_tpot_and_rates_per_stage_and_overall():
+    calls = [_tg("summarize", "2026-10-17T15:56:45.000+00:00", 22_000.0),
+             _tg("mindmap", "2026-10-17T15:57:10.000+00:00", 10_000.0, ttft_ms=1_000.0,
+                 tpot_ms=25.0, decode_tps=40.0, output_tokens=361),
+             _call("asr", "transcribe", "2026-10-17T15:55:00.000+00:00", 1_000.0)]
+    lines = rep.text_gen_table(calls).splitlines()
+    summarize = next(line for line in lines if line.startswith("| summarize"))
+    # 401 tokens in 22 s is 18.2 tok/s overall; 1,000 prompt tokens in 2 s of TTFT is 500.
+    assert "| 2,000 / 2,000 | 50.0 / 50.0 | 20.0 | 18.2 | 500 | 1,000 / 401 |" in summarize
+    overall = next(line for line in lines if line.startswith("| **all stages**"))
+    assert "| m | int4 | GPU | plain | 2 ⚠ | 1,000 / 2,000 | 25.0 / 50.0 |" in overall
+    assert "| 2,000 / 762 |" in overall
+    assert not any("asr" in line for line in lines)  # text generation only
+    # A model seen in one stage needs no "all stages" row.
+    assert "all stages" not in rep.text_gen_table(calls[:1])
+    assert rep.text_gen_table(calls[2:]) == "No text-generation calls recorded.\n"
+
+
+def test_session_lists_each_text_gen_call_with_its_timing():
+    stages = [{"session_id": SID, "stage": "summarize", "status": "done", "duration_sec": 30.0,
+               "started_at": "2026-10-17T15:56:40.000+00:00"}]
+    calls = [_tg("summarize", "2026-10-17T15:56:45.000+00:00", 22_000.0),
+             _tg("summarize", "2026-10-17T15:57:08.000+00:00", None, status="rejected",
+                 ttft_ms=None, tpot_ms=None, decode_tps=None, input_tokens=None,
+                 output_tokens=None)]
+    text = rep.session_section(SID, stages, calls)
+    section = text.split("### Text generation")[1]
+    assert "Model: `m int4 GPU plain`." in section
+    assert ("| summarize | 5.0 | ok | 1,000 / 401 | 500 | 22.0 | 2,000 | 50.0 | 20.0 | "
+            "18.2 | 500 | — |") in section
+    # Unavailable values are dashes, never zero.
+    assert "| summarize | 28.0 | rejected | — / — | 500 | — | — | — | — | — | — | — |" in section
+    # A second model in the session gets a column instead of the one-line note.
+    calls.append(_tg("mindmap", "2026-10-17T15:57:30.000+00:00", 5_000.0, decoding="dflash",
+                     draft_tokens=200, accepted_tokens=150))
+    section = rep.session_section(SID, stages, calls).split("### Text generation")[1]
+    assert "Model:" not in section and "| Model |" in section
+    assert "| m int4 GPU dflash |" in section and "| 150 / 200 (75%) |" in section
+
+
+def test_a_renamed_session_directory_keeps_its_session_id(tmp_path):
+    import sqlite3
+    session = _va_session(tmp_path)
+    renamed = session.rename(tmp_path / f"{SID}-qwen3")
+    conn = sqlite3.connect(tmp_path / "sessions.db")
+    conn.execute("CREATE TABLE sessions (session_id TEXT, state TEXT, stages TEXT, error TEXT)")
+    conn.execute("INSERT INTO sessions VALUES (?, ?, ?, ?)",
+                 (SID, "completed", json.dumps({"transcribe": "done"}), None))
+    conn.commit()
+    conn.close()
+    text = rep.report([str(renamed)])
+    # One session: the VA runs and the session row join the records' own id.
+    assert "1 session(s)" in text and f"## Session `{SID}-qwen3`" not in text
+    assert "Session state: **completed**." in text
+    assert "    section va front" in text.split(f"## Session `{SID}`")[1]
 
 
 def test_cli_writes_the_report(tmp_path):

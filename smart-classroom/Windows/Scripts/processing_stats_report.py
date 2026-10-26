@@ -12,7 +12,9 @@ A source is a session directory (its ``logs/stage_events.jsonl`` and
 ``logs/model_calls.jsonl``, which survive restarts) or the JSON saved from
 ``GET /processing-stats?raw=true``. Each session gets a timeline: one lane per
 workflow stage plus one per model capability, drawn as a Mermaid Gantt chart
-and as plain text. Distributions reuse ``utils.processing_stats``, so they match
+and as plain text. Each VLM/LLM call of a session gets a row with its TTFT,
+TPOT and tokens/s; the closing tables give the same per stage and per model
+across sessions. Distributions reuse ``utils.processing_stats``, so they match
 the API. See smart-classroom/docs/vlm-llm-serving/processing-time-statistics.md.
 
 Video analytics runs as three GStreamer subprocesses (front, back, content)
@@ -28,12 +30,13 @@ import json
 import re
 import sys
 from datetime import datetime
+from itertools import groupby
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from utils.processing_stats import call_groups, stage_groups  # noqa: E402  (needs _ROOT)
+from utils.processing_stats import call_groups, call_rates, stage_groups  # noqa: E402  (needs _ROOT)
 
 _OK_STAGE, _OK_CALL = "done", "ok"
 _WIDTH = 64  # columns of the plain-text timeline
@@ -74,6 +77,16 @@ def _session_dir(source: Path):
     if not source.is_dir():
         return None
     return source.parent if source.name == "logs" else source
+
+
+def _session_id(session_dir: Path, records: list) -> str:
+    """The session id its records carry, else the directory name.
+
+    A session directory copied or renamed for safekeeping (``<id>-qwen3``) keeps
+    its records' id, and the VA runs and session row must join that id.
+    """
+    ids = {r.get("session_id") for r in records if r.get("session_id")}
+    return ids.pop() if len(ids) == 1 else session_dir.name
 
 
 # ---------------------------------------------------------------------------
@@ -234,13 +247,14 @@ def va_run(path: Path, session_id: str):
     return run
 
 
-def load_va(source: Path) -> list:
+def load_va(source: Path, session_id: str = None) -> list:
     """Every VA pipeline attempt of a session directory, in launch order."""
     session_dir = _session_dir(source)
     log_dir = session_dir / "raw" / "va" / "logs" if session_dir else None
     if log_dir is None or not log_dir.is_dir():
         return []
-    runs = [r for r in (va_run(p, session_dir.name) for p in log_dir.iterdir()) if r]
+    session_id = session_id or session_dir.name
+    runs = [r for r in (va_run(p, session_id) for p in log_dir.iterdir()) if r]
     runs.sort(key=lambda r: r["start"])
     # Result records per pipeline (frames with published metadata, per file),
     # and how far into its input the pipeline got: the last frame published.
@@ -258,7 +272,7 @@ def load_va(source: Path) -> list:
     return runs
 
 
-def load_session_rows(source: Path) -> dict:
+def load_session_rows(source: Path, session_id: str = None) -> dict:
     """The session store's rows (state, declared stages) next to a session directory.
 
     Read-only and best effort: the store records which stages a session
@@ -268,6 +282,7 @@ def load_session_rows(source: Path) -> dict:
     db = session_dir.parent / "sessions.db" if session_dir else None
     if db is None or not db.is_file():
         return {}
+    session_id = session_id or session_dir.name
     import sqlite3
     try:
         conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=1)
@@ -276,7 +291,7 @@ def load_session_rows(source: Path) -> dict:
             request = "request" if "request" in columns else "NULL"
             rows = conn.execute(
                 f"SELECT session_id, state, stages, error, {request} FROM sessions "
-                "WHERE session_id = ?", (session_dir.name,)).fetchall()
+                "WHERE session_id = ?", (session_id,)).fetchall()
         finally:
             conn.close()
     except sqlite3.Error:
@@ -610,8 +625,8 @@ def session_section(session: str, stages: list, calls: list, va_runs: list = (),
             f"Workflow window{' so far' if live else ''}: **{t1 - t0:,.1f} s**, from "
             f"{datetime.fromtimestamp(t0).astimezone().isoformat(timespec='seconds')} "
             "to the end of the last stage, call or VA pipeline."]
-    transcribe = [stage_interval(r) for r in stages
-                  if r.get("stage") == "transcribe" and stage_interval(r)]
+    transcribe = [span for r in stages if r.get("stage") == "transcribe"
+                  if (span := stage_interval(r))]
     if transcribe:
         tail = t1 - max(end for _, end in transcribe)
         out.append(f"After transcription ended, the remaining outputs took **{tail:,.1f} s**"
@@ -640,10 +655,19 @@ def session_section(session: str, stages: list, calls: list, va_runs: list = (),
             out.append(f"| {name} | {shown} | {start - t0:,.1f} | {end - t0:,.1f} | "
                        f"{end - start:,.1f} | {n} | {model:,.1f} | {queued:,.1f} |")
     out.append("")
+    text_gen = session_text_gen_table(calls, t0)
+    if text_gen:
+        out += ["### Text generation", "",
+                f"One row per VLM/LLM call; start is its submission. {_TEXT_GEN_LEGEND}", "",
+                text_gen]
     requested = requested_va_pipelines(row)
     if va_runs or requested:
         out += ["### Video analytics", "", va_table(va_runs, stages, t0, live, requested)]
     return "\n".join(out)
+
+
+def _count(d) -> str:
+    return f"{d['count']}{' ⚠' if d.get('small_sample') else ''}"
 
 
 def calls_table(calls: list) -> str:
@@ -652,29 +676,105 @@ def calls_table(calls: list) -> str:
     if not groups:
         return "No model calls recorded.\n"
     out = ["| Capability | Stage | Model | Precision | Device | Decoding | OK | "
-           "Latency p50 / p95 (ms) | Queue wait p95 (ms) | TTFT p50 (ms) | "
-           "Decode p50 (tok/s) | Tokens in / out | Accepted / drafted | Failed / cancelled |",
-           "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | "
-           "---: | ---: |"]
+           "Latency mean / p50 / p95 (ms) | Queue wait p95 (ms) | Failed / cancelled |",
+           "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |"]
     for g in groups:
         lat = g["latency_ms"]
-        # Paired samples only: a call missing either counter is left out.
-        acc = g["acceptance"]
-        acceptance = "—"
-        if acc["calls"]:
-            acceptance = (f"{_num(acc['accepted'], 0)} / {_num(acc['drafted'], 0)} "
-                          f"({acc['rate']:.0%})")
-            if acc["calls"] < lat["count"]:
-                acceptance += f", {acc['calls']} of {lat['count']} calls"
         out.append(
             f"| {g['capability']} | {g['stage'] or '—'} | {g['model'] or '—'} | "
             f"{g['precision'] or '—'} | {g['device'] or '—'} | {g['decoding'] or '—'} | "
-            f"{lat['count']}{' ⚠' if lat.get('small_sample') else ''} | "
-            f"{_num(lat['p50'], 0)} / {_num(lat['p95'], 0)} | "
-            f"{_num(g['queue_wait_ms']['p95'], 0)} | {_num(g['ttft_ms']['p50'], 0)} | "
-            f"{_num(g['decode_tps']['p50'])} | {_num(g['input_tokens']['total'], 0)} / "
-            f"{_num(g['output_tokens']['total'], 0)} | {acceptance} | "
+            f"{_count(lat)} | {_num(lat['mean'], 0)} / {_num(lat['p50'], 0)} / "
+            f"{_num(lat['p95'], 0)} | {_num(g['queue_wait_ms']['p95'], 0)} | "
             f"{g['failed_count']} / {g['cancelled_count']} |")
+    return "\n".join(out) + "\n"
+
+
+_TEXT_GEN = "text_gen"
+_MODEL_KEYS = ("model", "precision", "device", "decoding")
+_TEXT_GEN_LEGEND = (
+    "TTFT (model time to first token) and TPOT (time per output token after the "
+    "first) are runtime-reported; decode tok/s is 1000 / TPOT, prefill tok/s is prompt "
+    "tokens per second of TTFT, and output tok/s is generated tokens per second of call "
+    "latency (prefill included). Accepted / drafted counts DFlash draft tokens.")
+
+
+def _acceptance(acc: dict, calls: int) -> str:
+    """Accepted / drafted (rate); paired samples only, so it may cover fewer calls."""
+    if not acc["calls"]:
+        return "—"
+    text = f"{_num(acc['accepted'], 0)} / {_num(acc['drafted'], 0)} ({acc['rate']:.0%})"
+    return text + (f", {acc['calls']} of {calls} calls" if acc["calls"] < calls else "")
+
+
+def text_gen_table(calls: list) -> str:
+    """Per stage, then all stages, for every text-generation model identity."""
+    calls = [r for r in calls if r.get("capability") == _TEXT_GEN]
+    by_stage = call_groups(calls, (*_MODEL_KEYS, "stage"))
+    if not by_stage:
+        return "No text-generation calls recorded.\n"
+    overall = {tuple(g[k] for k in _MODEL_KEYS): g for g in call_groups(calls, _MODEL_KEYS)}
+    out = ["| Stage | Model | Precision | Device | Decoding | OK | TTFT p50 / p95 (ms) | "
+           "TPOT p50 / p95 (ms) | Decode p50 (tok/s) | Output p50 (tok/s) | "
+           "Prefill p50 (tok/s) | Tokens in / out | Accepted / drafted | Failed / cancelled |",
+           "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+           "---: | ---: |"]
+
+    def row(g, stage):
+        ok = g["latency_ms"]["count"]
+        return (f"| {stage} | {g['model'] or '—'} | {g['precision'] or '—'} | "
+                f"{g['device'] or '—'} | {g['decoding'] or '—'} | {_count(g['latency_ms'])} | "
+                f"{_num(g['ttft_ms']['p50'], 0)} / {_num(g['ttft_ms']['p95'], 0)} | "
+                f"{_num(g['tpot_ms']['p50'])} / {_num(g['tpot_ms']['p95'])} | "
+                f"{_num(g['decode_tps']['p50'])} | {_num(g['output_tps']['p50'])} | "
+                f"{_num(g['prefill_tps']['p50'], 0)} | "
+                f"{_num(g['input_tokens']['total'], 0)} / {_num(g['output_tokens']['total'], 0)} | "
+                f"{_acceptance(g['acceptance'], ok)} | "
+                f"{g['failed_count']} / {g['cancelled_count']} |")
+
+    # Grouped by identity first, so each model's stages are contiguous.
+    for identity, rows in groupby(by_stage, key=lambda g: tuple(g[k] for k in _MODEL_KEYS)):
+        rows = list(rows)
+        out += [row(g, g["stage"] or "—") for g in rows]
+        if len(rows) > 1:
+            out.append(row(overall[identity], "**all stages**"))
+    return "\n".join(out) + "\n"
+
+
+def _identity(r) -> str:
+    return " ".join(str(r[k]) for k in _MODEL_KEYS if r.get(k))
+
+
+def session_text_gen_table(calls: list, t0: float) -> str:
+    """One row per text-generation call of a session, in submission order."""
+    calls = sorted((r for r in calls if r.get("capability") == _TEXT_GEN),
+                   key=lambda r: _ts(r.get("submitted_at")) or 0.0)
+    if not calls:
+        return ""
+    identities = sorted({_identity(r) for r in calls})
+    many = len(identities) > 1
+    out = [] if many else [f"Model: `{identities[0]}`.", ""]
+    out += ["| Stage | Start (s) | Status | " + ("Model | " if many else "")
+            + "Tokens in / out | Queue wait (ms) | Latency (s) | TTFT (ms) | TPOT (ms) | "
+            "Decode (tok/s) | Output (tok/s) | Prefill (tok/s) | Accepted / drafted |",
+            "| --- | ---: | --- | " + ("--- | " if many else "")
+            + "---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    for r in calls:
+        submitted, rates = _ts(r.get("submitted_at")), call_rates(r)
+        latency = r.get("latency_ms")
+        drafted, accepted = r.get("draft_tokens"), r.get("accepted_tokens")
+        acceptance = (f"{accepted:,} / {drafted:,} ({accepted / drafted:.0%})"
+                      if isinstance(accepted, int) and isinstance(drafted, int) and drafted
+                      else "—")
+        out.append(
+            f"| {r.get('stage') or '—'} | "
+            f"{_num(submitted - t0 if submitted is not None else None)} | "
+            f"{r.get('status') or '—'} | " + (f"{_identity(r)} | " if many else "")
+            + f"{_num(r.get('input_tokens'), 0)} / {_num(r.get('output_tokens'), 0)} | "
+            f"{_num(r.get('queue_wait_ms'), 0)} | "
+            f"{_num(latency / 1000.0 if isinstance(latency, (int, float)) else None)} | "
+            f"{_num(r.get('ttft_ms'), 0)} | {_num(r.get('tpot_ms'))} | "
+            f"{_num(rates['decode_tps'])} | {_num(rates['output_tps'])} | "
+            f"{_num(rates['prefill_tps'], 0)} | {acceptance} |")
     return "\n".join(out) + "\n"
 
 
@@ -684,7 +784,7 @@ def stages_table(stages: list) -> str:
            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for g in stage_groups(stages):
         d = g["duration_sec"]
-        out.append(f"| {g['stage']} | {d['count']}{' ⚠' if d.get('small_sample') else ''} | "
+        out.append(f"| {g['stage']} | {_count(d)} | "
                    f"{_num(d['mean'])} | {_num(d['p50'])} | {_num(d['p95'])} | "
                    f"{_num(d['min'])} / {_num(d['max'])} | {g['failed_count']} | "
                    f"{g['cancelled_count']} |")
@@ -697,8 +797,11 @@ def report(sources: list, session: str = None) -> str:
         s, c = load(Path(source))
         stages += s
         calls += c
-        va_runs += load_va(Path(source))
-        rows.update(load_session_rows(Path(source)))
+        session_dir = _session_dir(Path(source))
+        if session_dir:
+            sid = _session_id(session_dir, s + c)
+            va_runs += load_va(session_dir, sid)
+            rows.update(load_session_rows(session_dir, sid))
     if session:
         stages = [r for r in stages if r.get("session_id") == session]
         calls = [r for r in calls if r.get("session_id") == session]
@@ -723,9 +826,13 @@ def report(sources: list, session: str = None) -> str:
             stages_table(stages),
             "## Model Calls", "",
             "Latency runs from admission to the end of the call; queue wait is "
-            "separate. TTFT and decode throughput are runtime-reported. "
+            "separate. Distributions cover successful calls. "
             f"{len(unattributed)} call(s) had no session (for example chat API calls).",
-            "", calls_table(calls)]
+            "", calls_table(calls),
+            "## Text Generation", "",
+            "VLM/LLM performance per stage, and across all stages for each model. "
+            f"{_TEXT_GEN_LEGEND} Token counts are totals over successful calls.", "",
+            text_gen_table(calls)]
     return "\n".join(out)
 
 
