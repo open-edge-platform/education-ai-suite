@@ -64,3 +64,13 @@ def test_concurrent_writes_keep_every_line():
             t.join()
         lines = (Path(tmp) / "logs" / "stage_events.jsonl").read_text(encoding="utf-8").splitlines()
         assert len(lines) == 200 and all(json.loads(line)["status"] == "done" for line in lines)
+
+
+def test_error_detail_drops_local_paths_and_is_bounded():
+    with tempfile.TemporaryDirectory() as tmp, _patch_dir(tmp):
+        StageEventWriter.write("s1", "va", "failed", "t0", "t1", 1.0, error_class="VideoAnalyticsError",
+                               error_detail=r"cannot open C:\Users\bob\v\in.mp4 for Qwen/Qwen3-8B " + "x" * 500)
+        event = json.loads((Path(tmp) / "logs" / "stage_events.jsonl").read_text(encoding="utf-8"))
+        assert event["error_detail"].startswith("cannot open <path> for Qwen/Qwen3-8B x")
+        assert len(event["error_detail"]) == 300
+        assert "bob" not in event["error_detail"]

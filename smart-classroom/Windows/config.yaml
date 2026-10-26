@@ -89,7 +89,7 @@ models:
     # with weight_format int4 (drafter z-lab/Qwen3.6-35B-A3B-DFlash). Opt-in: set
     # that vlm_name and mode: auto (falls back to plain when DFlash cannot run) or
     # "on" (requires it). "off" is plain generation; the other fields are then
-    # ignored. See docs/dev-guide/vlm-llm-serving/serving-guide.md.
+    # ignored. See smart-classroom/docs/vlm-llm-serving/serving-guide.md.
     speculative:
       mode: "off"          # "off" | auto | "on"
       method: dflash

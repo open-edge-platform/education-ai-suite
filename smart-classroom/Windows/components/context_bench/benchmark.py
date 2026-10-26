@@ -27,7 +27,7 @@ Exit codes: 0 valid plan or completed run with every case ``ok``; 1 failed, part
 unqualified cases, or an orchestration/output-write failure; 2 invalid arguments,
 configuration or missing dependencies; 130 Ctrl-C after checkpoint and child cleanup.
 
-See docs/dev-guide/context-bench/context-bench-guide.md.
+See smart-classroom/docs/context-bench/context-bench-guide.md.
 """
 
 from __future__ import annotations
@@ -328,6 +328,7 @@ def _new_case(planned: dict, settings, static: dict, redactor) -> dict:
         "context_tokens": planned["context_tokens"],
         "throughput_task": planned["throughput_task"],
         "task_sha256": planned["task_sha256"],
+        "task_variant": planned.get("task_variant"),
         "profile": profile["name"],
         "pipeline_mode": profile["pipeline_mode"],
         "cache_pool": profile["cache_pool"],
@@ -772,7 +773,8 @@ class RunState:
             "warnings": self.warnings + ([f"orchestration failure: {self.fatal}"] if self.fatal else []),
             "plan": [{"case_id": p["case_id"], "label": p["label"], "mode": p["mode"],
                       "model": p["model"], "context_tokens": p["context_tokens"],
-                      "throughput_task": p["throughput_task"], "profile": p["profile"]["name"],
+                      "throughput_task": p["throughput_task"],
+                      "task_variant": p.get("task_variant"), "profile": p["profile"]["name"],
                       "planned_iterations": p["planned_iterations"],
                       "planned_probes": p["planned_probes"], "state": self.state[p["case_id"]]}
                      for p in self.planned],

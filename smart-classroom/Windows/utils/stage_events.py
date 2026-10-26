@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import threading
 
 from utils.session_paths import SessionPaths
@@ -10,6 +11,20 @@ logger = logging.getLogger(__name__)
 # One writer at a time: on Windows an append through separate handles is not
 # atomic, and stages ending together (transcribe, board OCR, VA) would drop lines.
 _LOCK = threading.Lock()
+
+# Absolute local paths (drive, UNC, POSIX) in an exception message; Hub repo
+# ids such as ``Qwen/<model>`` are kept.
+_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\|(?<![\w.-])/)[^\s'\"]+")
+# Enough to identify the failure; an exception quoting its input (a transcript,
+# model output) must not carry it into the record whole.
+_DETAIL_MAX_CHARS = 300
+
+
+def sanitize_detail(detail):
+    """``detail`` without local paths, cut to ``_DETAIL_MAX_CHARS``; None stays None."""
+    if detail is None:
+        return None
+    return _PATH_RE.sub("<path>", str(detail))[:_DETAIL_MAX_CHARS]
 
 
 class StageEventWriter:
@@ -29,7 +44,7 @@ class StageEventWriter:
             "ended_at": ended_at,
             "duration_sec": duration_sec,
             "error_class": error_class,
-            "error_detail": error_detail,
+            "error_detail": sanitize_detail(error_detail),
         }
         try:
             path = SessionPaths.stage_events_path(session_id)
