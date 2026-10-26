@@ -13,7 +13,7 @@ from utils import session_store
 from utils.session_paths import SessionPaths
 from utils.session_log import session_log_handler, bind_session
 from utils.stage_tracker import stage_tracker
-from utils.va_completion import va_pipeline_sources, wait_for_va_completion
+from utils.va_completion import save_va_outputs, va_pipeline_sources, wait_for_va_completion
 from components.va.va_pipeline_service import VideoAnalyticsPipelineService, PipelineOptions
 
 logger = logging.getLogger(__name__)
@@ -285,6 +285,8 @@ def _run_va_if_needed(session_id: str, request: dict, stages: list) -> None:
 
             if not _any_success(final_status, wanted):
                 raise _OrchestrationError("all va pipelines failed")
+            # Inside the stage, so the report stage (which waits for va) finds the stats.
+            save_va_outputs(service, session_id)
             need_cleanup = False
         finally:
             if need_cleanup:

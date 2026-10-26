@@ -26,6 +26,7 @@ from components.va.va_pipeline_service import VideoAnalyticsPipelineService, Pip
 from components.va.media_service import ensure_media_service_running
 from utils.pipeline_catalog import FEATURE_STAGE
 from utils.processing_stats import stage_scope
+from utils.va_completion import save_va_outputs
 from utils.session_manager import PATH_SAFE_SESSION_ID, generate_session_id
 from dto.search_dto import SearchRequest
 from utils.session_state_manager import SessionState
@@ -236,8 +237,6 @@ def start_video_analytics_pipeline(
                 _pname    = name
                 def _on_all_pipelines_done(session_id, _svc=va_services[x_session_id],
                                            _loc=_location, _n=_pname):
-                    from utils.scp_sender import write_engagement_reports, get_scp_sender
-                    from utils.telegram_sender import get_sender
                     # "stopped" is the teacher ending the recording and "eos" is
                     # a file source running out - both are normal ends. Only
                     # every pipeline failing makes the stage a failure.
@@ -249,41 +248,7 @@ def start_video_analytics_pipeline(
                         None if _finished_ok
                         else f"no pipeline ended normally; final statuses: {_statuses}",
                     )
-                    try:
-                        _session_dir     = str(SessionPaths.session_dir(session_id))
-                        _front_posture   = str(SessionPaths.va_dir(session_id) / "front_posture.txt")
-                        # Use the same engine as the /class-statistics UI endpoint
-                        va_stats, _ = _svc.get_pose_stats(_front_posture)
-
-                        # Persist the video duration alongside the pose stats so
-                        # video-only sessions have a reliable, on-disk duration
-                        # source for report generation (SessionState is in-memory
-                        # only and is lost on restart / async re-generation).
-                        _video_dur = SessionState.get_video_duration(session_id)
-                        if isinstance(_video_dur, (int, float)) and _video_dur > 0:
-                            va_stats["duration_sec"] = round(float(_video_dur), 1)
-
-                        logger.info(f"[VA done] Final stats for {session_id}: {va_stats}")
-
-                        try:
-                            _stats_path = str(SessionPaths.class_statistics_path(session_id))
-                            os.makedirs(os.path.dirname(_stats_path), exist_ok=True)
-                            with open(_stats_path, "w", encoding="utf-8") as _fh:
-                                json.dump(va_stats, _fh, indent=2, ensure_ascii=False)
-                            logger.info(f"[VA done] Saved class_statistics.json to {_stats_path}")
-                        except Exception as _e:
-                            logger.error(f"[VA done] Failed to save class_statistics.json: {_e}")
-
-                        # Always write the files regardless of sender config
-                        write_engagement_reports(session_id, _session_dir, va_stats)
-                        _scp = get_scp_sender()
-                        if _scp:
-                            _scp.send_engagement_package_async(session_id, _session_dir, va_stats)
-                        _tg = get_sender()
-                        if _tg:
-                            _tg.send_engagement_package_async(session_id, _session_dir, _front_posture)
-                    except Exception as _e:
-                        logger.error(f"[VA done] Failed to generate/send reports: {_e}", exc_info=True)
+                    save_va_outputs(_svc, session_id)
 
                     # Board OCR: stop only if eos/stopped
                     try:

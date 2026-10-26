@@ -30,6 +30,23 @@ def test_va_report_without_segmentation_completes(client):
     assert status["stages"]["report"] == "done"
 
 
+# An orchestrated va stage writes class_statistics.json, as the UI path does;
+# the report generator reads its VA metrics from that file.
+def test_va_writes_class_statistics(client):
+    data, client = _create(client, ["va"],
+                           video_sources={"front": "rtsp://127.0.0.1:8554/live"})
+    session_id = data["session_id"]
+    state, _ = _await_status(client, session_id)
+    assert state == "completed"
+
+    artifacts = client.get(f"/api/v1/sessions/{session_id}/artifacts").json()["artifacts"]
+    va = next((a for a in artifacts if a["stage"] == "va"), None)
+    assert va is not None and va["kind"] == "stats", artifacts
+    resp = client.get(f"/api/v1/sessions/{session_id}/artifacts/va")
+    assert resp.status_code == 200, resp.text
+    assert '"raise_up_count": 5' in resp.json()["content"]
+
+
 # A single transcribe stage completes and all other stages stay skipped.
 def test_transcribe_only(client, tmp_path):
     audio = tmp_path / "lecture.wav"
