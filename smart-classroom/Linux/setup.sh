@@ -185,7 +185,9 @@ if [[ -d "$UI_DIR" ]]; then
     log "UI dev server already running (PID $(cat "$UI_PID_FILE")) — leaving it as is."
   else
     log "Starting UI dev server in the background (npm run dev --port ${UI_PORT})…"
-    (cd "$UI_DIR" && nohup npm run dev -- --host 0.0.0.0 --port "$UI_PORT" >"$UI_LOG" 2>&1 & echo $! >"$UI_PID_FILE")
+    # Loopback only: the dev server proxies to the unauthenticated content-search and
+    # grading backends, so binding 0.0.0.0 would expose them to the whole network.
+    (cd "$UI_DIR" && nohup npm run dev -- --host 127.0.0.1 --port "$UI_PORT" >"$UI_LOG" 2>&1 & echo $! >"$UI_PID_FILE")
     log "✅ UI: http://localhost:${UI_PORT}/  (logs: ${UI_LOG})"
     log "   Stop with: kill \$(cat \"${UI_PID_FILE}\")"
   fi

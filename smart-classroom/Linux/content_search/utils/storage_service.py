@@ -12,11 +12,24 @@ from fastapi import HTTPException, UploadFile
 from typing import Optional
 
 from utils.file_validator import file_validator
+from utils.path_ingest_policy import default_policy
 
 # Stream in 1 MiB chunks so memory stays bounded even for multi-GB uploads.
 _STREAM_CHUNK_SIZE = 1024 * 1024
 
 logger = logging.getLogger(__name__)
+
+
+def _asset_type_segment(content_type: Optional[str]) -> str:
+    """Reduce a client-supplied Content-Type to one safe path segment.
+
+    The main type becomes a directory name, so a header like ``../../x/plain``
+    must not survive as a path component.
+    """
+    main_type = (content_type or "").split("/")[0].strip().lower()
+    if not (main_type.isascii() and main_type.isalnum()):
+        return "application"
+    return main_type
 
 class StorageService:
     def __init__(self):
@@ -64,7 +77,7 @@ class StorageService:
             return {"validation_error": f"File size {file.size / 1024 / 1024:.2f} MB exceeds maximum allowed {max_size_bytes / 1024 / 1024:.2f} MB", "error_type": "file_too_large"}
 
         run_id = str(uuid.uuid4())
-        main_type = file.content_type.split('/')[0]
+        main_type = _asset_type_segment(file.content_type)
         object_key = self._store.build_raw_object_key(
             run_id=run_id,
             asset_type=main_type,
@@ -137,6 +150,19 @@ class StorageService:
             raise RuntimeError(f"Storage Service is unavailable: {self._error_msg}")
 
         src = pathlib.Path(src_path).expanduser()
+        # Location check before the existence check, so protected directories
+        # cannot be probed for which files exist.
+        try:
+            denied_reason = default_policy().check(src.resolve())
+        except (OSError, RuntimeError):
+            denied_reason = None
+        if denied_reason:
+            logger.warning(f"Ingest rejected: {src_path} is in a protected location ({denied_reason})")
+            return {
+                "validation_error": "Files in this location cannot be added. Copy the file to a regular folder (e.g. Documents) and try again.",
+                "error_type": "invalid_file",
+            }
+
         try:
             src = src.resolve(strict=True)
         except (OSError, RuntimeError):
@@ -169,7 +195,7 @@ class StorageService:
             return {"validation_error": f"File size {file_size / 1024 / 1024:.2f} MB exceeds maximum allowed {max_size_bytes / 1024 / 1024:.2f} MB", "error_type": "file_too_large"}
 
         run_id = str(uuid.uuid4())
-        main_type = content_type.split('/')[0]
+        main_type = _asset_type_segment(content_type)
         object_key = self._store.build_raw_object_key(
             run_id=run_id,
             asset_type=main_type,
@@ -226,6 +252,16 @@ class StorageService:
             "file_hash": hasher.hexdigest(),
             "size_bytes": total_bytes,
         }
+
+    def get_run_directory(self, run_id: str, bucket_name: Optional[str] = None):
+        """Resolve a run directory, guaranteed to sit inside the bucket.
+
+        Callers delete this recursively, and ``run_id`` is derived from a stored
+        ``file_key`` that originally came from the client.
+        """
+        if not self.is_available:
+            raise RuntimeError(f"Storage Service is unavailable: {self._error_msg}")
+        return self._store.run_path(run_id, bucket_name=bucket_name)
 
     def get_file_disk_path(self, file_key: str):
         if not self.is_available:

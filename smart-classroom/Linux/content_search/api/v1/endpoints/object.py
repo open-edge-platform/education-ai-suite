@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import os
 import urllib.parse
 import mimetypes
 import json
@@ -131,8 +132,14 @@ class IngestPathRequest(BaseModel):
     chunk_duration: Optional[int] = None
 
 
-# Loopback addresses allowed to use server-side path ingest.
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"}
+# Opt-in for a local client that runs alongside the backend (inherited by
+# content_search through main.py -> start_services.py). The Linux setup never
+# sets it, so path ingest does not exist in browser deployments.
+_PATH_INGEST_ENV = "CS_ENABLE_PATH_INGEST"
+
+
+def _path_ingest_enabled() -> bool:
+    return os.environ.get(_PATH_INGEST_ENV, "").strip().lower() in {"1", "true", "yes"}
 
 
 @router.post("/ingest-path")
@@ -149,15 +156,16 @@ async def ingest_local_path(
     localhost HTTP. The file is copied into the object store, so the user's original
     is never touched by later cleanup/delete operations.
 
-    Restricted to loopback callers: the UI is often served on 0.0.0.0, and reading
-    arbitrary server-side paths must not be reachable from other devices.
+    Only enabled when ``_PATH_INGEST_ENV`` is set. A peer-address check cannot gate
+    this: every request arrives through the UI's reverse proxy, so the peer is
+    always 127.0.0.1.
     """
-    client_host = request.client.host if request.client else None
-    if client_host not in _LOOPBACK_HOSTS:
-        logger.warning(f"Rejected /ingest-path from non-loopback client: {client_host}")
+    if not _path_ingest_enabled():
+        client_host = request.client.host if request.client else None
+        logger.warning(f"Rejected /ingest-path (disabled; set {_PATH_INGEST_ENV}) from {client_host}")
         return resp_200(
             code=40300,
-            message="Path-based ingest is only available to local clients."
+            message="Path-based ingest is not enabled on this server."
         )
 
     if not payload.path or not payload.path.strip():
@@ -324,7 +332,7 @@ async def delete_specific_task(
         # Strategy: Delete entire run_id directory (includes raw + derived + OCR)
         if run_id:
             import shutil
-            run_dir = storage_service._store._bucket_path(f_bucket) / "runs" / run_id
+            run_dir = storage_service.get_run_directory(run_id, bucket_name=f_bucket)
             if run_dir.exists():
                 shutil.rmtree(run_dir)
                 logger.info(f"Deleted entire run directory: {run_dir} (raw + derived + OCR)")
@@ -465,7 +473,7 @@ async def delete_file_by_hash(
         # Strategy: Delete entire run_id directory (includes raw + derived + OCR)
         if run_id:
             import shutil
-            run_dir = storage_service._store._bucket_path(f_bucket) / "runs" / run_id
+            run_dir = storage_service.get_run_directory(run_id, bucket_name=f_bucket)
             if run_dir.exists():
                 shutil.rmtree(run_dir)
                 deletion_results["storage_deleted"] = True
