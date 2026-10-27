@@ -1,0 +1,35 @@
+FROM intel/dlstreamer:2026.2.0-ubuntu24
+USER root
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
+
+COPY components/ components/
+COPY utils/ utils/
+COPY config.yaml .
+
+# models/ and outputs/ are mounted volumes (see the smart-classroom
+# docker-compose.yml), not baked into the image.
+
+# Run the service as a non-root user whose uid matches the smart-classroom app
+# (10001). Everything VA writes into the shared storage volume
+# (<session>/raw/va/*, the GStreamer registry under storage/gstreamer/) is then
+# owned by 10001 — consistent with the app and manageable without sudo — rather
+# than root. pip install above runs as root; we drop privileges here. Device
+# access (/dev/dri, /dev/accel) still works via `group_add: render` in
+# docker-compose.gpu.yml. A writable HOME is provided for any library cache.
+RUN useradd --uid 10001 --create-home --home-dir /home/appuser \
+        --shell /usr/sbin/nologin appuser 2>/dev/null || true; \
+    mkdir -p /home/appuser && chown -R 10001:10001 /home/appuser /app
+ENV HOME=/home/appuser
+
+# Distinct internal port (8020) so the VA side-car does not collide
+# conceptually with the app's own 8000. Overridable via VA_PORT.
+ENV VA_PORT=8020
+EXPOSE 8020
+
+USER 10001
+
+ENTRYPOINT ["sh", "-c", "exec uvicorn components.va.control_api:app --host 0.0.0.0 --port ${VA_PORT}"]
+

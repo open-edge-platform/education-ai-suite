@@ -11,19 +11,13 @@ interface SummaryState {
   streamingText: string;
   finalText: string | null;
   status: 'idle' | 'streaming' | 'done';
-  // Where a long, chunked summary has got to, and whether the board OCR input
-  // was only partially available. The stream that reports both runs outside
-  // AISummaryTab (see useAudioPipeline), so they live here instead of in the
-  // tab's local state.
   progress: SummaryProgress | null;
-  boardOcrPartial: boolean;
 }
 const initialState: SummaryState = {
   streamingText: '',
   finalText: null,
   status: 'idle',
   progress: null,
-  boardOcrPartial: false,
 };
 
 const summarySlice = createSlice({
@@ -36,7 +30,6 @@ const summarySlice = createSlice({
       state.streamingText = '';
       state.finalText = null;
       state.progress = null;
-      state.boardOcrPartial = false;
     },
     appendSummary(state, action: PayloadAction<string>) {
       state.streamingText += action.payload;
@@ -51,9 +44,6 @@ const summarySlice = createSlice({
     setSummaryProgress(state, action: PayloadAction<SummaryProgress>) {
       state.progress = action.payload;
     },
-    setBoardOcrPartial(state, action: PayloadAction<boolean>) {
-      state.boardOcrPartial = action.payload;
-    },
   },
 });
 
@@ -63,6 +53,5 @@ export const {
   appendSummary,
   finishSummary,
   setSummaryProgress,
-  setBoardOcrPartial,
 } = summarySlice.actions;
 export default summarySlice.reducer;

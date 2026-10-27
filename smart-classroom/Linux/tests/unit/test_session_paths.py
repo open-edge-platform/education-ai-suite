@@ -112,13 +112,6 @@ def test_class_statistics_path():
         )
 
 
-def test_board_ocr_dir():
-    with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
-        assert SessionPaths.board_ocr_dir("s1") == (
-            Path(tmp) / "proj" / "s1" / "raw" / "board_ocr"
-        )
-
-
 def test_summary_path():
     with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
         assert SessionPaths.summary_path("s1") == (
@@ -137,41 +130,6 @@ def test_topics_path():
     with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
         assert SessionPaths.topics_path("s1") == (
             Path(tmp) / "proj" / "s1" / "result" / "topics.json"
-        )
-
-
-def test_report_md_path():
-    with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
-        assert SessionPaths.report_md_path("s1") == (
-            Path(tmp) / "proj" / "s1" / "result" / "class_report.md"
-        )
-
-
-def test_report_docx_path():
-    with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
-        assert SessionPaths.report_docx_path("s1") == (
-            Path(tmp) / "proj" / "s1" / "result" / "class_report.docx"
-        )
-
-
-def test_report_pdf_path():
-    with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
-        assert SessionPaths.report_pdf_path("s1") == (
-            Path(tmp) / "proj" / "s1" / "result" / "class_report.pdf"
-        )
-
-
-def test_report_fields_path():
-    with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
-        assert SessionPaths.report_fields_path("s1") == (
-            Path(tmp) / "proj" / "s1" / "result" / "class_report_fields.json"
-        )
-
-
-def test_mindmap_png_path():
-    with tempfile.TemporaryDirectory() as tmp, _patch_project(tmp, "proj"):
-        assert SessionPaths.mindmap_png_path("s1") == (
-            Path(tmp) / "proj" / "s1" / "result" / "mindmap_report.png"
         )
 
 

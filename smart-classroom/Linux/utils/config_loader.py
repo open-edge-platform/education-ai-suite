@@ -11,11 +11,10 @@ KNOWN_FEATURE_IDS = frozenset({
     "summary",
     "mindmap",
     "topic_segmentation",
-    "board_ocr",
+    "video_analytics",
     "content_search",
     "qa",
     "grading",
-    "report",
 })
 
 

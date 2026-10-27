@@ -28,7 +28,7 @@ services:
         find /app/storage -type f -exec chmod 0664 {} +
       "
     volumes:
-      - storage:/app/storage
+      - ${STORAGE_DIR:-../storage}:/app/storage
     restart: "no"
     networks: [smart-classroom]
 
@@ -58,6 +58,8 @@ services:
       start_period: 180s
     restart: unless-stopped
     networks: [smart-classroom]
+    group_add:
+      - "1000"
     depends_on:
       storage-permissions: { condition: service_completed_successfully }
       metrics-collector: { condition: service_healthy }
@@ -65,6 +67,7 @@ services:
       - METRICS_COLLECTOR_URL=http://metrics-collector:9000
       - AUDIO_ANALYZER_URL=http://audio-analyzer:8010
       - SERVING_BASE_URL=${SERVING_BASE_URL:-http://ovms:9000}
+      - VIDEO_ANALYTICS_URL=${VIDEO_ANALYTICS_URL:-http://video-analytics:8020}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-}
@@ -72,7 +75,7 @@ services:
       - https_proxy=${HTTPS_PROXY:-}
       - no_proxy=${NO_PROXY:-}
     volumes:
-      - storage:/app/storage
+      - ${STORAGE_DIR:-../storage}:/app/storage
       - model-cache:/app/models
     # NOTE: no hard `depends_on: ovms` here — `ovms` carries the "text-gen"
     # Compose profile while `app` is unprofiled (always-on), and
@@ -271,14 +274,110 @@ services:
   #   restart: unless-stopped
   #   networks: [smart-classroom]
 
+  va-model-provision:  # one-shot: export VA OpenVINO IR models into the model volume
+    profiles: ["va"]
+    build:
+      context: ../video-analytics
+      dockerfile: docker/Dockerfile.va-provision
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    image: sc-va-model-provision:local
+    container_name: sc-va-model-provision
+    environment:
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${HTTP_PROXY:-}
+      - https_proxy=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
+      - no_proxy=${NO_PROXY:-}
+    volumes:
+      - video-analytics-models:/app/models
+    restart: "no"
+    networks: [smart-classroom]
+
+  mediamtx:            # RTSP ingest + WebRTC/HLS relay for annotated VA streams
+    profiles: ["va"]
+    image: ${VA_MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.20.0}
+    container_name: sc-mediamtx
+    environment:
+      # Inter-container RTSP must bypass any corporate proxy baked into the
+      # dlstreamer image, or rtspclientsink's connect fails with
+      # "HTTP proxy connection failed".
+      - no_proxy=mediamtx,video-analytics,localhost,127.0.0.1,${NO_PROXY:-}
+      - NO_PROXY=mediamtx,video-analytics,localhost,127.0.0.1,${NO_PROXY:-}
+    ports:
+      - "${VA_MEDIAMTX_RTSP_PORT:-8554}:8554"            # RTSP (publish + read)
+      - "${VA_MEDIAMTX_HLS_PORT:-8888}:8888"             # HLS (browser playback)
+      - "${VA_MEDIAMTX_WEBRTC_PORT:-8889}:8889"          # WebRTC (browser playback, signaling)
+      - "${VA_MEDIAMTX_WEBRTC_ICE_PORT:-8189}:8189/udp"  # WebRTC ICE/UDP
+    restart: unless-stopped
+    networks: [smart-classroom]
+
+  video-analytics:     # DL Streamer VA pipeline engine (control API on :8020)
+    profiles: ["va"]
+    build:
+      context: ../video-analytics
+      dockerfile: docker/Dockerfile.va-pipeline
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    image: sc-video-analytics:local
+    container_name: sc-video-analytics
+    environment:
+      - VA_PORT=8020
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${HTTP_PROXY:-}
+      - https_proxy=${HTTPS_PROXY:-}
+      - no_proxy=mediamtx,video-analytics,localhost,127.0.0.1,${NO_PROXY:-}
+      - NO_PROXY=mediamtx,video-analytics,localhost,127.0.0.1,${NO_PROXY:-}
+      # VA pipeline behaviour; unset -> defaults baked into
+      # va_pipeline_service.py's __init__.
+      - VA_RTSP_CODEC=${VA_RTSP_CODEC:-h264}
+      - VA_RTSP_ENCODER_BACKEND=${VA_RTSP_ENCODER_BACKEND:-va}
+      - VA_POSE_MIN_FRAMES_FOR_TRANSITION=${VA_POSE_MIN_FRAMES_FOR_TRANSITION:-3}
+      - VA_POSE_MIN_FRAMES_FOR_TRANSITION_UNID=${VA_POSE_MIN_FRAMES_FOR_TRANSITION_UNID:-15}
+      - VA_POSE_ABSENCE_THRESHOLD=${VA_POSE_ABSENCE_THRESHOLD:-90}
+      - VA_POSE_MIN_STAND_FRAMES=${VA_POSE_MIN_STAND_FRAMES:-10}
+      - VA_POSE_CENTER_DIST_THRESHOLD=${VA_POSE_CENTER_DIST_THRESHOLD:-0.1}
+      - VA_POSE_UNIDENTIFIED_MAX=${VA_POSE_UNIDENTIFIED_MAX:-50}
+      - VA_POSE_STALE_UNIDENTIFIED_THRESHOLD=${VA_POSE_STALE_UNIDENTIFIED_THRESHOLD:-30}
+      - VA_POSE_STUDENT_COUNT_WINDOW_FRAMES=${VA_POSE_STUDENT_COUNT_WINDOW_FRAMES:-150}
+      # Per-pipeline default device; a launch call may still override it.
+      - VA_FRONT_DEVICE=${VA_FRONT_DEVICE:-NPU}
+      - VA_BACK_DEVICE=${VA_BACK_DEVICE:-NPU}
+      - VA_CONTENT_DEVICE=${VA_CONTENT_DEVICE:-NPU}
+    volumes:
+      - video-analytics-models:/app/models:ro
+      - ${STORAGE_DIR:-../storage}:/app/storage
+    # NPU/GPU device passthrough lives in docker-compose.gpu.yml (opt-in).
+    depends_on:
+      va-model-provision: { condition: service_completed_successfully }
+      mediamtx: { condition: service_started }
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8020/health').status==200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+    networks: [smart-classroom]
+
 networks:
   smart-classroom:
     driver: bridge
 
 volumes:
   model-cache:
-  storage:
   metrics:
+  video-analytics-models:
   audio-analyzer-models:
   audio-analyzer-chunks:
   audio-analyzer-storage:

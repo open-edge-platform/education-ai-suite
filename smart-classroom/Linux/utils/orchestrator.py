@@ -160,14 +160,6 @@ def _run_audio_chain(session_id: str, request: dict, stages: list) -> None:
             pipeline.run_content_segmentation()
         session_store.SessionStore.set_stage(session_id, "segmentation", "done")
 
-    if "report" in stages:
-        _check_cancel(session_id)
-        session_store.SessionStore.set_stage(session_id, "report", "running")
-        _touch_heartbeat(session_id)
-        with stage_tracker(session_id, "report"):
-            _drain(pipeline.run_report_generator())
-        session_store.SessionStore.set_stage(session_id, "report", "done")
-
 
 def _drain(gen) -> None:
     for _ in gen:
