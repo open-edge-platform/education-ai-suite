@@ -4,7 +4,6 @@ import HeaderBar from './components/Header/Header';
 import Body from './components/common/Body';
 import GradingScreen from './components/Grading/GradingScreen';
 import Footer from './components/Footer/Footer';
-import ReportPanel from './components/ReportPanel';
 import './App.css';
 import './assets/css/HeaderBar.css';
 import MetricsPoller from './components/common/MetricsPoller';
@@ -25,7 +24,6 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [backendStatus, setBackendStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
   const [activeScreen, setActiveScreen] = useState<'main' | 'content-search' | 'grading'>('main');
-  const [isReportOpen, setIsReportOpen] = useState(false);
   useVideoPipelineMonitor();
   // Both pipelines are driven from here, not from the panels that display them,
   // so they keep running while the user moves around the UI.
@@ -36,14 +34,14 @@ const App: React.FC = () => {
 
   // Check if any main features are enabled
   const hasMainFeatures = featuresLoaded && guard ? 
-    ['asr', 'summary', 'mindmap', 'topic_segmentation', 'video_analytics', 'report'].some(f => guard.hasFeature(f)) : 
+    ['asr', 'summary', 'mindmap', 'topic_segmentation', 'video_analytics'].some(f => guard.hasFeature(f)) : 
     true; // Default to true during loading
 
   // Auto-switch to content-search or grading screen if only those features are enabled
   useEffect(() => {
     if (!featuresLoaded || !guard) return;
 
-    const mainFeatures = ['asr', 'summary', 'mindmap', 'topic_segmentation', 'video_analytics', 'report'];
+    const mainFeatures = ['asr', 'summary', 'mindmap', 'topic_segmentation', 'video_analytics'];
     const contentSearchFeatures = ['content_search', 'qa'];
     const gradingFeatures = ['grading'];
 
@@ -172,7 +170,6 @@ const App: React.FC = () => {
         setActiveScreen={openScreen}
         featureGuard={guard}
         hasMainFeatures={hasMainFeatures}
-        onViewReport={() => setIsReportOpen(true)}
       />
       <div style={{ display: activeScreen === 'main' ? 'contents' : 'none' }}>
         <HeaderBar projectName={projectName} setProjectName={setProjectName} featureGuard={guard} />
@@ -195,13 +192,6 @@ const App: React.FC = () => {
         </>
       )}
       <Footer />
-      
-      {/* Report Panel */}
-      <ReportPanel
-        isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
-        featureGuard={guard}
-      />
     </div>
   );
 };

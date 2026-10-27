@@ -31,12 +31,6 @@ export interface UIState {
   summaryComplete: boolean;
   mindmapEnabled: boolean;
   mindmapLoading: boolean;
-  // True once the mind-map image step has finished — i.e. the browser captured
-  // the jsMind view and (attempted to) upload it as the report's mind-map image.
-  // Set even when the capture/upload fails, so report auto-generation is never
-  // blocked forever; a failure just means the report renders without the image.
-  // Report auto-generation waits on this so the PNG is on disk before the
-  // backend reads it (see ReportPanel auto-trigger).
   mindmapImageReady: boolean;
   activeTab: Tab;
   autoSwitched: boolean;

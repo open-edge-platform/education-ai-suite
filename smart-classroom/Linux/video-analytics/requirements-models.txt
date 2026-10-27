@@ -1,0 +1,12 @@
+# Model export/conversion tooling
+# Dev-time only -- NOT needed by the running service/control API, so not
+# installed in docker/Dockerfile.va-pipeline (see requirements.txt for that).
+openvino==2026.3.0
+nncf==3.3.0
+
+torch==2.8.0
+torchvision==0.23.0
+ultralytics==8.4.39
+
+numpy==2.2.6
+certifi>=2025.7.14

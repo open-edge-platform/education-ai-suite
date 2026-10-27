@@ -1,5 +1,4 @@
 from components.base_component import PipelineComponent
-from components.board_ocr.board_ocr_service import read_board_ocr_with_status
 from utils.runtime_config_loader import RuntimeConfig
 from utils.config_loader import config
 from utils.prompt_loader import load_prompt
@@ -88,8 +87,6 @@ class SummarizerComponent(PipelineComponent):
     def __init__(self, session_id, mode="dialog"):
         self.session_id = session_id
         self.mode = mode.lower()
-        self.board_ocr_partial = False
-        
         text_gen = config.models.text_gen
         SummarizerComponent._model = ModelManager.instance().text_gen()
         SummarizerComponent._config = ("vlm", text_gen.vlm_name, text_gen.device)
@@ -103,13 +100,7 @@ class SummarizerComponent(PipelineComponent):
     def _get_system_prompt(self, has_board=False):
         lang = config.app.language
         mode_name = self.mode if self.mode in ("teacher", "hybrid") else "dialog"
-        prompt = load_prompt("summarizer", lang, mode_name)
-
-        if has_board:
-            addendum = load_prompt("summarizer", lang, "board_ocr_addendum")
-            prompt = f"{prompt}\n\n{addendum}"
-
-        return prompt
+        return load_prompt("summarizer", lang, mode_name)
 
     # ---------------- INPUT SELECTOR ----------------
 
@@ -122,18 +113,10 @@ class SummarizerComponent(PipelineComponent):
         return StorageManager.read_text_file(path)
 
     def _load_board_ocr_text(self):
-        try:
-            text, status = read_board_ocr_with_status(self.session_id)
-        except Exception as e:
-            logger.warning(f"Could not load board OCR text: {e}")
-            return ""
-        self.board_ocr_partial = bool(text) and status not in ("done", "not_started")
-        if self.board_ocr_partial:
-            logger.warning(
-                f"Board OCR still {status} for session {self.session_id}; the summary's "
-                f"board content may be incomplete."
-            )
-        return text
+        # Board OCR was removed from this build; summaries are produced from the
+        # transcript alone. Kept as a no-op so the board_text plumbing below
+        # stays inert without touching the summarization flow.
+        return ""
 
     # ---------------- MESSAGE BUILDER ----------------
 

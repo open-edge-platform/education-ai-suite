@@ -6,7 +6,7 @@ from threading import Lock
 
 from utils.runtime_config_loader import RuntimeConfig
 
-_ALL_STAGES = ("transcribe", "summarize", "mindmap", "segmentation", "report")
+_ALL_STAGES = ("transcribe", "summarize", "mindmap", "segmentation", "video_analytics")
 
 _DB_FILE = "sessions.db"
 

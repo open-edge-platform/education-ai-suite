@@ -5,6 +5,7 @@ import folderIcon from '../../assets/images/folder.svg';
 import {
   startVideoAnalyticsPipeline,
   uploadAudio,
+  uploadVideo,
   storeAudioDuration,
   createSession,
   startPipelineMonitoring,
@@ -52,7 +53,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ isOpen, onClose, fe
   const [frontCameraPath, setFrontCameraPath] = useState<File | null>(null);
   const [rearCameraPath, setRearCameraPath] = useState<File | null>(null);
   const [boardCameraPath, setBoardCameraPath] = useState<File | null>(null);
-  const [baseDirectory, setBaseDirectory] = useState(() => sessionStorage.getItem('baseDirectory') || "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // The same fact as `loading`, kept where handleApply can trust it. `disabled`
@@ -72,13 +72,8 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ isOpen, onClose, fe
   const hasAudioFeatures = featureGuard.hasFeature('asr') ||
     featureGuard.hasFeature('summary') ||
     featureGuard.hasFeature('mindmap') ||
-    featureGuard.hasFeature('topic_segmentation') ||
-    featureGuard.hasFeature('report');
+    featureGuard.hasFeature('topic_segmentation');
 
-  const constructFilePath = (fileName: string): string => {
-    const normalizedBaseDirectory = baseDirectory.endsWith("\\") ? baseDirectory : `${baseDirectory}\\`;
-    return `${normalizedBaseDirectory}${fileName}`;
-  };
 
   const handleFileSelect = (
     setter: React.Dispatch<React.SetStateAction<File | null>>,
@@ -239,16 +234,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ isOpen, onClose, fe
       return;
     }
 
-    // Video pipelines need a full path, reconstructed from the base directory
-    // plus the filename, so require the base directory when a video is selected.
-    if (hasVideoFiles && !baseDirectory.trim()) {
-      setError(t('uploadFiles.baseDirectoryRequired'));
-      return;
-    }
-
-    if (baseDirectory.trim()) {
-      sessionStorage.setItem('baseDirectory', baseDirectory);
-    }
 
     setNotification(t('uploadFiles.startingProcessing'));
     dispatch(resetFlow());  // Reset flow FIRST
@@ -321,12 +306,20 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ isOpen, onClose, fe
         boardCameraPath: boardCameraPath ? `File: ${boardCameraPath.name}` : 'null'
       });
 
-      // Reconstruct the absolute path from the base directory + filename.
-      const frontFullPath = frontCameraPath ? constructFilePath(frontCameraPath.name) : "";
-      const rearFullPath = rearCameraPath ? constructFilePath(rearCameraPath.name) : "";
-      const boardFullPath = boardCameraPath ? constructFilePath(boardCameraPath.name) : "";
+      // Upload each selected clip to the backend, which persists it into the
+      // shared storage volume and returns a container-absolute path the
+      // video-analytics side-car can read.
+      let frontFullPath = "";
+      let rearFullPath = "";
+      let boardFullPath = "";
+      if (hasVideoFiles && hasVideoAnalyticsFeature) {
+        setNotification(t('uploadFiles.startingVideo'));
+        if (frontCameraPath) frontFullPath = (await uploadVideo(frontCameraPath, 'front', sessionId)).path;
+        if (rearCameraPath) rearFullPath = (await uploadVideo(rearCameraPath, 'back', sessionId)).path;
+        if (boardCameraPath) boardFullPath = (await uploadVideo(boardCameraPath, 'content', sessionId)).path;
+      }
 
-      console.log('📹 Constructed file paths for video analytics:', {
+      console.log('📹 Uploaded video source paths:', {
         front: frontFullPath,
         rear: rearFullPath,
         board: boardFullPath,
@@ -448,15 +441,6 @@ const UploadFilesModal: React.FC<UploadFilesModalProps> = ({ isOpen, onClose, fe
         <h2>{t('uploadFiles.title')}</h2>
         <hr className="modal-title-line" />
         <div className="modal-body">
-          <div className="modal-input-group">
-            <label>{t('uploadFiles.baseDirectoryLabel')}</label>
-            <input
-              type="text"
-              value={baseDirectory}
-              onChange={(e) => setBaseDirectory(e.target.value)}
-              placeholder={t('uploadFiles.enterBaseDirectory')}
-            />
-          </div>
 
           {/* Audio upload section - only show if audio features are enabled */}
           {hasAudioFeatures ? (

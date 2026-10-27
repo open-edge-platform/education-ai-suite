@@ -1,0 +1,7 @@
+# Runtime deps for the running service/control API (docker/Dockerfile.va-pipeline).
+PyYAML==6.0.2
+psutil==7.2.2
+
+# Control API (VA-16)
+fastapi==0.118.0
+uvicorn==0.37.0

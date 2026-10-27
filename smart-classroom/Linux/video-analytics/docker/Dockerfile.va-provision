@@ -1,0 +1,47 @@
+# VA model provisioning (dev-time / one-shot).
+#
+# Exports the OpenVINO IR models the VA pipeline needs into /app/models/va,
+# which docker-compose maps to the `video-analytics-models` volume consumed
+# read-only by the `video-analytics` service. This is the containerized
+# equivalent of the host-side setup.sh model-export step, and mirrors the
+# ovms-provision one-shot pattern.
+#
+# Heavy export tooling (torch, torchvision, ultralytics, openvino, nncf) lives
+# ONLY in this image, never in the runtime service image
+# (docker/Dockerfile.va-pipeline installs requirements.txt only).
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NO_PROXY=""
+
+# libgl1 + libglib2.0-0 are required by opencv (pulled in by ultralytics);
+# ca-certificates so model downloads validate TLS.
+RUN HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" NO_PROXY="$NO_PROXY" \
+    apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements-models.txt .
+RUN HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" NO_PROXY="$NO_PROXY" \
+    pip install --no-cache-dir -r requirements-models.txt
+
+COPY utils/ utils/
+COPY config.yaml .
+
+# Export YOLO pose + classification/ReID models into /app/models/va. Both
+# converters are idempotent: they skip any model whose IR already exists, so
+# re-running the provision step is cheap. On TLS-intercepting proxy networks
+# point requests + stdlib ssl at the system CA bundle (same as setup.sh).
+CMD ["sh", "-c", "\
+    if [ -f /etc/ssl/certs/ca-certificates.crt ]; then \
+        export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt; \
+        export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt; \
+    fi; \
+    python -m utils.convert_yolo_models && \
+    python -m utils.convert_classification_models"]

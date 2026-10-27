@@ -1,0 +1,5 @@
+models:
+  va:
+    models_base_path: models
+    front_pose_model: yolov8m-pose
+    back_pose_model: yolov8s-pose

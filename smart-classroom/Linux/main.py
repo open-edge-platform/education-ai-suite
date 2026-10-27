@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     startup(app)
+    # Mount the SPA fallback AFTER feature routers are registered by startup(),
+    # so the catch-all is last in the route table and its reserved-segment set
+    # includes every feature API route (video_analytics, ...). Registering it at
+    # import time shadowed those GET routes, since feature routers are only
+    # added here in the lifespan.
+    _mount_spa(app)
     from utils.session_store import SessionStore
     SessionStore.recover_after_restart()
     yield
@@ -122,7 +128,9 @@ def _mount_spa(app: FastAPI) -> None:
         return FileResponse(str(index_file))
 
 
-_mount_spa(app)
+# NOTE: _mount_spa(app) is invoked from the lifespan startup (after feature
+# routers are registered), not here at import time — otherwise the SPA catch-all
+# would precede and shadow feature GET routes.
 
 
 @app.exception_handler(QueueFullError)
