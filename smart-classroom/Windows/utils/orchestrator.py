@@ -314,6 +314,11 @@ def _run_va_if_needed(session_id: str, request: dict, stages: list) -> None:
                 raise _OrchestrationError("all va pipelines failed")
             # Inside the stage, so the report stage (which waits for va) finds the stats.
             save_va_outputs(service, session_id)
+            # Board OCR on a live content source never runs out, so it would keep
+            # reading the camera after the session. On a file it finishes by itself
+            # once its frame backlog is drained; stopping it here would cut that short.
+            if wanted.get("content", "").startswith("rtsp://"):
+                _stop_board_ocr_if_enabled(session_id, final_status)
             need_cleanup = False
         finally:
             if need_cleanup:

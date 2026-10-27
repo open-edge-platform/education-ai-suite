@@ -73,6 +73,29 @@ def test_va_records_file_video_duration(client, tmp_path, monkeypatch):
     assert probed == [str(video)]
 
 
+# Board OCR on a live content camera never ends by itself, so a finished va
+# stage stops it rather than leaving it reading the camera.
+def test_va_stops_board_ocr_on_live_content(client, _mock_orchestrator):
+    data, client = _create(client, ["va"],
+                           video_sources={"content": "rtsp://127.0.0.1:8554/board"})
+    state, _ = _await_status(client, data["session_id"])
+    assert state == "completed"
+    _mock_orchestrator["start_ocr"].assert_called_once()
+    _mock_orchestrator["stop_ocr"].assert_called_once_with(data["session_id"])
+
+
+# On a file it finishes by itself once its frame backlog is drained; stopping
+# it when va ends would drop the frames it has not read yet.
+def test_va_leaves_board_ocr_on_file_content_to_finish(client, _mock_orchestrator, tmp_path):
+    video = tmp_path / "board.mp4"
+    video.write_bytes(b"\x00")
+    data, client = _create(client, ["va"], video_sources={"content": str(video)})
+    state, _ = _await_status(client, data["session_id"])
+    assert state == "completed"
+    _mock_orchestrator["start_ocr"].assert_called_once()
+    _mock_orchestrator["stop_ocr"].assert_not_called()
+
+
 # A single transcribe stage completes and all other stages stay skipped.
 def test_transcribe_only(client, tmp_path):
     audio = tmp_path / "lecture.wav"
