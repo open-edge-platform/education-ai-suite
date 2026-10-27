@@ -1,3 +1,4 @@
+import json
 import re
 
 from tests.integration.conftest import wait_for_state
@@ -44,7 +45,32 @@ def test_va_writes_class_statistics(client):
     assert va is not None and va["kind"] == "stats", artifacts
     resp = client.get(f"/api/v1/sessions/{session_id}/artifacts/va")
     assert resp.status_code == 200, resp.text
-    assert '"raise_up_count": 5' in resp.json()["content"]
+    stats = json.loads(resp.json()["content"])
+    assert stats["raise_up_count"] == 5
+    # A live source has no length to record.
+    assert "duration_sec" not in stats
+
+
+# A file source's length is recorded, as the UI's /store-video-duration does,
+# so the report has a video duration to fall back on.
+def test_va_records_file_video_duration(client, tmp_path, monkeypatch):
+    video = tmp_path / "lesson.mp4"
+    video.write_bytes(b"\x00")
+    probed = []
+
+    def fake_probe(path):
+        probed.append(path)
+        return 1800.04
+
+    monkeypatch.setattr("components.ffmpeg.audio_preprocessing.get_audio_duration", fake_probe)
+    data, client = _create(client, ["va"], video_sources={"front": str(video)})
+    state, _ = _await_status(client, data["session_id"])
+    assert state == "completed"
+
+    resp = client.get(f"/api/v1/sessions/{data['session_id']}/artifacts/va")
+    assert resp.status_code == 200, resp.text
+    assert json.loads(resp.json()["content"])["duration_sec"] == 1800.0
+    assert probed == [str(video)]
 
 
 # A single transcribe stage completes and all other stages stay skipped.

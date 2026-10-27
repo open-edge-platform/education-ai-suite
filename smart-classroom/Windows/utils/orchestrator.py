@@ -216,6 +216,32 @@ def _join_va(va_thread, va_error) -> None:
             raise _OrchestrationError(first)
 
 
+def _record_video_duration(session_id: str, wanted: dict) -> None:
+    """Store the video length, as the UI does through /store-video-duration.
+
+    save_va_outputs writes it into class_statistics.json, where the report
+    reads it. Live (rtsp) sources have no length; a probe failure only costs
+    the report its video-duration fallback.
+    """
+    from components.ffmpeg.audio_preprocessing import get_audio_duration
+    from utils.session_state_manager import SessionState
+
+    if SessionState.get_video_duration(session_id):
+        return
+    for name in ("front", "back", "content"):
+        source = wanted.get(name)
+        if not source or source.startswith("rtsp://"):
+            continue
+        try:
+            duration = get_audio_duration(source)  # ffprobe format=duration; any media
+        except Exception as e:
+            logger.warning(f"[orchestrator] could not read the duration of {source}: {e}")
+            continue
+        if duration > 0:
+            SessionState.set_video_duration(session_id, duration)
+        return
+
+
 def _run_va_if_needed(session_id: str, request: dict, stages: list) -> None:
     if FEATURE_STAGE["video_analytics"] not in stages:
         return
@@ -229,6 +255,7 @@ def _run_va_if_needed(session_id: str, request: dict, stages: list) -> None:
     with stage_tracker(session_id, FEATURE_STAGE["video_analytics"]):
         va_out_dir = _va_output_dir(session_id)
         os.makedirs(va_out_dir, exist_ok=True)
+        _record_video_duration(session_id, wanted)
 
         service = VideoAnalyticsPipelineService()
         service.x_session_id = session_id
