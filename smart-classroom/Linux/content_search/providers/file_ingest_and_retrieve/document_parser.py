@@ -41,7 +41,12 @@ def _patched_textnode_init(self, **data):
 Document.__init__ = _patched_document_init
 TextNode.__init__ = _patched_textnode_init
 
-from providers.file_ingest_and_retrieve.utils import DocxParagraphPicturePartitioner, ensure_directory, is_supported_file
+from providers.file_ingest_and_retrieve.utils import (
+    DocxParagraphPicturePartitioner,
+    NullDocxPicturePartitioner,
+    ensure_directory,
+    is_supported_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +218,14 @@ class DocumentParser:
                 )
 
         if ext == ".docx":
-            DocxParagraphPicturePartitioner.output_dir = self.image_output_dir
-            register_picture_partitioner(DocxParagraphPicturePartitioner)
+            # Honor extract_images like the PDF branch. Registration is process-global,
+            # so register the null partitioner explicitly when off. Consistency only,
+            # not a security fix: path safety lives in DocxParagraphPicturePartitioner.
+            if self.extract_images:
+                DocxParagraphPicturePartitioner.output_dir = self.image_output_dir
+                register_picture_partitioner(DocxParagraphPicturePartitioner)
+            else:
+                register_picture_partitioner(NullDocxPicturePartitioner)
 
         unstructured_kwargs = {
             "strategy": "fast",

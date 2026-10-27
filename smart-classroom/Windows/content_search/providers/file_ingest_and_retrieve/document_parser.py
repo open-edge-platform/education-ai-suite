@@ -41,7 +41,12 @@ def _patched_textnode_init(self, **data):
 Document.__init__ = _patched_document_init
 TextNode.__init__ = _patched_textnode_init
 
-from providers.file_ingest_and_retrieve.utils import DocxParagraphPicturePartitioner, ensure_directory, is_supported_file
+from providers.file_ingest_and_retrieve.utils import (
+    DocxParagraphPicturePartitioner,
+    NullDocxPicturePartitioner,
+    ensure_directory,
+    is_supported_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,53 @@ _GLUED_CJK_REV_RE = re.compile(r'([一-鿿])([a-zA-Z])')
 # Tokens reserved below the embedding model's limit for the pipeline's
 # instruction prefix ("passage: ") plus the [CLS]/[SEP] special tokens.
 _CHUNK_TOKEN_MARGIN = 16
+
+# NLTK resources that `unstructured` needs for sentence tokenization and POS
+# tagging during PDF/text partitioning. When missing, partition() returns 0
+# elements silently, so a document's body text is never indexed (only image OCR).
+_NLTK_REQUIRED = (
+    ("tokenizers/punkt_tab", "punkt_tab"),
+    ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
+)
+
+
+def _ensure_nltk_data() -> None:
+    """Make NLTK data available, including behind a corporate proxy.
+    """
+    try:
+        import nltk
+    except ImportError:
+        logger.warning("nltk not installed; PDF body-text extraction may be degraded.")
+        return
+
+    os.environ.setdefault("NLTK_ALLOW_PROXIED_URLOPEN", "1")
+
+    data_dir = os.environ.get("NLTK_DATA") or str(
+        Path(__file__).resolve().parents[2] / "data" / "nltk_data"
+    )
+    try:
+        ensure_directory(data_dir)
+    except Exception:
+        pass
+    os.environ["NLTK_DATA"] = data_dir
+    if data_dir not in nltk.data.path:
+        nltk.data.path.insert(0, data_dir)
+
+    for resource_path, package in _NLTK_REQUIRED:
+        try:
+            nltk.data.find(resource_path)
+            continue
+        except LookupError:
+            pass
+        try:
+            nltk.download(package, download_dir=data_dir, quiet=True)
+            logger.info("Provisioned NLTK resource '%s' into %s", package, data_dir)
+        except Exception as e:
+            logger.warning(
+                "Failed to provision NLTK resource '%s' (%s); PDF body text may not "
+                "be indexed. Behind a proxy, ensure HTTP(S)_PROXY is set.",
+                package, e,
+            )
 
 
 def _clean_text(text: str) -> str:
@@ -136,6 +188,8 @@ class DocumentParser:
             semantic_min_chunk_size: Minimum characters per chunk when using semantic splitting.
                                      Chunks shorter than this are merged into the next chunk (default: 400).
         """
+        _ensure_nltk_data()
+
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.extract_images = extract_images
@@ -213,8 +267,14 @@ class DocumentParser:
                 )
 
         if ext == ".docx":
-            DocxParagraphPicturePartitioner.output_dir = self.image_output_dir
-            register_picture_partitioner(DocxParagraphPicturePartitioner)
+            # Honor extract_images like the PDF branch. Registration is process-global,
+            # so register the null partitioner explicitly when off. Consistency only,
+            # not a security fix: path safety lives in DocxParagraphPicturePartitioner.
+            if self.extract_images:
+                DocxParagraphPicturePartitioner.output_dir = self.image_output_dir
+                register_picture_partitioner(DocxParagraphPicturePartitioner)
+            else:
+                register_picture_partitioner(NullDocxPicturePartitioner)
 
         unstructured_kwargs = {
             "strategy": "fast",
@@ -247,6 +307,12 @@ class DocumentParser:
                 _n.metadata.pop("file_directory", None)
 
             if ext == ".pdf":
+                if not nodes:
+                    logger.warning(
+                        f"No body-text elements extracted from PDF {file_path}; only "
+                        f"image OCR (if any) will be indexed. This usually means NLTK "
+                        f"datais missing."
+                    )
                 if not self.extract_images:
                     logger.info(f"Image extraction disabled for DocumentParser.")
                 elif not self._is_ocr_enabled():

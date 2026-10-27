@@ -316,6 +316,20 @@ def test_derived_target_links_weights_and_annotates_layers(tmp_path):
     assert prep.ensure_dflash_target(target, _write_draft(tmp_path / "d")) == derived
 
 
+def test_derived_target_is_rebuilt_for_a_drafter_reading_other_layers(tmp_path):
+    target = _write_target(tmp_path / "int4")
+    derived = prep.ensure_dflash_target(target, _write_draft(tmp_path / "d", layer_ids=(1, 2)))
+    # Same target IR, another drafter: the old annotation would hand it the wrong layers.
+    assert prep.ensure_dflash_target(target, _write_draft(tmp_path / "e", layer_ids=(0, 2))) == derived
+
+    import xml.etree.ElementTree as ET
+    node = ET.parse(derived / "openvino_language_model.xml").getroot().find(
+        f"rt_info/{prep.DFLASH_TARGET_RT_INFO_KEY}")
+    assert set(json.loads(node.get("value"))["layers"]) == {"0", "2"}
+    stamp = json.loads((derived / ".derived.json").read_text(encoding="utf-8"))
+    assert stamp["target_layer_ids"] == [0, 2]
+
+
 def test_has_model_rt_info_ignores_per_layer_rt_info(tmp_path):
     xml = tmp_path / "m.xml"
     xml.write_text('<net><layers><layer id="0"><rt_info><hidden_states_decoder_layers '

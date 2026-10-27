@@ -206,6 +206,10 @@ def initialize_model():
 
     try:
         ov_config = settings.get_ov_config_dict()
+        if settings.VLM_DEVICE.upper().startswith("GPU"):
+            from utils.ov_runtime import gpu_queue_priority
+
+            ov_config.setdefault("GPU_QUEUE_PRIORITY", gpu_queue_priority())
         logger.debug(f"Using OpenVINO configuration: {ov_config}")
         pipe = ov_genai.VLMPipeline(
             model_dir, device=settings.VLM_DEVICE.upper(), **ov_config
@@ -242,7 +246,7 @@ async def chat_completions(request: ChatRequest):
             if isinstance(last_user_message.content, str):
                 prompt = last_user_message.content
             else:
-                for content in last_user_message.content:
+                for content in last_user_message.content or []:
                     if isinstance(content, MessageContentImageUrl):
                         image_urls.append(content.image_url.get("url"))
                     elif isinstance(content, MessageContentText):

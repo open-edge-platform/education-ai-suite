@@ -488,7 +488,6 @@ class TestAcknowledgementProtocol(_ParentHarness):
             checkpoint = next(t for kind, i, t in timeline if kind == "checkpointed" and i == index - 1)
             started = next(t for kind, i, t in timeline if kind == "generate" and i == index)
             self.assertLessEqual(checkpoint, started)
-        acks = []
         control = ctx.queues[1]
         # The child consumed every ack; the parent sent ready+recorded for each iteration.
         self.assertTrue(control.empty())
@@ -931,10 +930,6 @@ class TestPlanningIsSideEffectFree(unittest.TestCase):
         self.assertEqual(before, after)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestMessageSanitizing(unittest.TestCase):
     def test_a_home_directory_with_a_space_is_fully_redacted(self):
         home = r"C:\Users\John Smith"
@@ -942,3 +937,7 @@ class TestMessageSanitizing(unittest.TestCase):
             text = trial_runner.sanitize_message(f"cannot open {home}" + r"\models\x.xml")
         self.assertNotIn("Smith", text)
         self.assertIn("<home>", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

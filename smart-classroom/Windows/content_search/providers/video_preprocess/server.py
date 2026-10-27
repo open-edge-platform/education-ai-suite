@@ -23,6 +23,7 @@ import io
 import json
 import os
 import queue as _queue
+import re
 import tempfile
 import threading
 import time
@@ -333,7 +334,12 @@ def _process(job_id: str, req: PreprocessRequest, t0: float,
     ingest_threads: List[threading.Thread] = []
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        local_video = os.path.join(tmpdir, asset_id)
+        # Fixed local name: asset_id comes from the request and os.path.join would
+        # follow "..\\" or an absolute path out of tmpdir before it is validated.
+        suffix = os.path.splitext(req.file_key.rsplit("/", 1)[-1])[1]
+        if not re.fullmatch(r"\.[A-Za-z0-9]{1,10}", suffix):
+            suffix = ""
+        local_video = os.path.join(tmpdir, f"input{suffix}")
         print(f"[preprocess] Loading video from storage: {req.file_key}")
         store.get_file(req.file_key, local_video)
 

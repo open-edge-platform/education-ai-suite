@@ -13,6 +13,8 @@ from components.board_ocr.board_ocr_service import (
     read_board_ocr,
 )
 from utils.config_loader import config
+from utils.processing_stats import stage_scope
+from utils.session_manager import PATH_SAFE_SESSION_ID
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,8 @@ def summarize_board_ocr(session_id: Optional[str]) -> dict:
         {"role": "system", "content": board_summary_system_prompt(config.app.language)},
         {"role": "user", "content": board_text},
     ]
-    raw = tg.generate(messages=messages, stream=False, enable_thinking=False)
+    with stage_scope(board["session_id"], "board_summary"):
+        raw = tg.generate(messages=messages, stream=False, enable_thinking=False)
     summary = raw if isinstance(raw, str) else "".join(raw)
 
     logger.info(
@@ -71,6 +74,9 @@ def get_board_ocr_endpoint(x_session_id: Optional[str] = Header(None)):
 
 
 @board_ocr_router.post("/board-ocr/summary")
-def board_ocr_summary_endpoint(x_session_id: Optional[str] = Header(None)):
+def board_ocr_summary_endpoint(
+    x_session_id: Optional[str] = Header(None, pattern=PATH_SAFE_SESSION_ID),
+):
+    # The session id names the directory its model-call record is written to.
     """Summarize the board OCR text via the text_gen (VLM) capability."""
     return JSONResponse(content=summarize_board_ocr(x_session_id), status_code=200)

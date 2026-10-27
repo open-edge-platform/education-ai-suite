@@ -13,10 +13,9 @@ active:
 python -m pytest components/tests -q
 ```
 
-`test_paraformer.py` loads the real FunASR model and downloads a sample clip;
-it is marked `slow`. Everything else runs against fakes — no model loaded, no
-audio decoded, nothing read from or written to `storage/` — so the line for a
-quick check is:
+Tests that need a real model, the network, or a live service are marked `slow`.
+Everything else runs against fakes — no model loaded, no audio decoded, nothing
+read from or written to `storage/` — so the line for a quick check is:
 
 ```sh
 python -m pytest components/tests -q -m "not slow"

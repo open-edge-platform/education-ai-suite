@@ -112,6 +112,26 @@ class TestDeterminism(unittest.TestCase):
             self.assertTrue(all(v not in haystack for v in spec.truths))
             self.assertEqual(len(set(spec.truths)), 5)
 
+    def test_vt_plants_every_copy_after_the_assignment_it_copies(self):
+        # "Final value" reads the transcript top to bottom: a copy planted above its source
+        # would copy nothing, and the planted truths would grade a correct trace wrong.
+        for seed in range(30):
+            spec = _spec("vt", seed=seed, options={"chain_length": 12, "num_chains": 12})
+            planted = [sentence for _depth, sentence in sorted(spec.inserts, key=lambda p: p[0])]
+            assigned = set()
+            for sentence in planted:
+                name, _, source = sentence.removeprefix("Bookkeeping: ").partition(" is set to ")
+                if source.startswith("the value of "):
+                    self.assertIn(source.removeprefix("the value of ").rstrip("."), assigned)
+                assigned.add(name)
+            # Chains are still interleaved, not planted one block after another.
+            chains = [sentence.split()[1][:6] for sentence in planted]
+            self.assertGreater(sum(a != b for a, b in zip(chains, chains[1:])), len(chains) // 4)
+            # No variable name is a scoring hit for another once normalized.
+            names = [scoring.normalize(n) for n in spec.truths + spec.distractors]
+            self.assertEqual(len(set(names)), len(names))
+            self.assertFalse(any(a != b and a in b for a in names for b in names))
+
     def test_task_options_are_validated(self):
         self.assertEqual(tasks.validate_task_options("niah_multikey", {"num_distractors": 3}),
                          {"num_distractors": 3})

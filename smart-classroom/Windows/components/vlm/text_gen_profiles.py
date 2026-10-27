@@ -39,7 +39,8 @@ SPECULATIVE_KEYS = frozenset({
 # Target rt_info GenAI reads to locate the hidden states a DFlash drafter consumes.
 DFLASH_TARGET_RT_INFO_KEY = "hidden_states_decoder_layers"
 
-_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+# Revisions become path components and pins; only full commit hashes qualify.
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class SpeculativeConfigError(ValueError):
@@ -97,8 +98,10 @@ _QWEN36_DFLASH = SpeculativeProfile(
     draft_repo="z-lab/Qwen3.6-35B-A3B-DFlash",
     draft_revision="f181eece646affea2c38b2765f1aaa01a9734ccd",
     draft_export_weight_format="int4",
-    # k=3 was best for classroom summaries at 8K; k=7 for code/math.
-    num_assistant_tokens=3,
+    # Measured on the Arc B390 iGPU (context_bench, 30 s idle gap): k=5 is best for the
+    # classroom summary at 8K (1.34x vs 1.29x at k=3) and for chat (1.43x vs 1.38x), and
+    # keeps most of k=7's code/math gain (2.2-2.4x vs 1.8x at k=3). k=7 suits code/math only.
+    num_assistant_tokens=5,
     # block_size 16 includes the seed token, and the 17 linear-attention rows
     # cover max_num_seqs + k + 1 up to k=15.
     num_assistant_tokens_range=(1, 15),
@@ -304,11 +307,14 @@ def resolve_plan(text_gen) -> TextGenPlan:
         raise SpeculativeConfigError(
             f"speculative.num_assistant_tokens must be a positive integer or null (got {tokens!r})"
         )
-    if revision is not None and not _COMMIT_RE.match(revision.lower()):
-        raise SpeculativeConfigError(
-            "speculative.draft_revision must be a full 40-character commit hash "
-            "(branches and tags are mutable)"
-        )
+    if revision is not None:
+        # Preparation, pins and the manifest compare lowercase hashes.
+        revision = revision.lower()
+        if not COMMIT_RE.match(revision):
+            raise SpeculativeConfigError(
+                "speculative.draft_revision must be a full 40-character commit hash "
+                "(branches and tags are mutable)"
+            )
     _check_source_shape(method, source, draft_model, revision)
 
     resolved_method = method

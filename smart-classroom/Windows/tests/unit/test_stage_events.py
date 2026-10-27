@@ -48,3 +48,29 @@ def test_write_swallows_os_error():
         "utils.stage_events.os.makedirs", side_effect=OSError("disk full")
     ):
         StageEventWriter.write("s1", "va", "done", "t0", "t1", 1.0)  # no raise
+
+
+def test_concurrent_writes_keep_every_line():
+    """Stages end on different threads (transcribe, board OCR, VA)."""
+    import threading
+    with tempfile.TemporaryDirectory() as tmp, _patch_dir(tmp):
+        def burst(stage):
+            for _ in range(50):
+                StageEventWriter.write("s1", stage, "done", "t0", "t1", 1.0)
+        threads = [threading.Thread(target=burst, args=(s,)) for s in ("a", "b", "c", "d")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        lines = (Path(tmp) / "logs" / "stage_events.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 200 and all(json.loads(line)["status"] == "done" for line in lines)
+
+
+def test_error_detail_drops_local_paths_and_is_bounded():
+    with tempfile.TemporaryDirectory() as tmp, _patch_dir(tmp):
+        StageEventWriter.write("s1", "va", "failed", "t0", "t1", 1.0, error_class="VideoAnalyticsError",
+                               error_detail=r"cannot open C:\Users\bob\v\in.mp4 for Qwen/Qwen3-8B " + "x" * 500)
+        event = json.loads((Path(tmp) / "logs" / "stage_events.jsonl").read_text(encoding="utf-8"))
+        assert event["error_detail"].startswith("cannot open <path> for Qwen/Qwen3-8B x")
+        assert len(event["error_detail"]) == 300
+        assert "bob" not in event["error_detail"]

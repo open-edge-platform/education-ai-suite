@@ -35,7 +35,7 @@ from components.context_bench.tasks import (  # re-exported for benchmark.py and
 
 __all__ = [
     "SUITE_GENERATION", "SUITE_RETRIEVAL", "ProbeSpec",
-    "RETRIEVAL_METRICS", "GENERATION_METRICS", "PROBE_SCORE_FIELDS", "FIDELITY_FIELDS",
+    "RETRIEVAL_METRICS", "GENERATION_METRICS", "FIDELITY_FIELDS",
     "build_probe_specs", "planned_probe_count", "probe_payload", "score_retrieval",
     "score_grounding", "score_fidelity", "score_case", "fill_generation_fidelity",
     "fill_deltas", "aggregate", "group_aggregate", "delta", "metrics_for",
@@ -53,12 +53,6 @@ _AGGREGATE_NAMES = {
     "identical": "identical_rate",
 }
 _PROBE_FIELD = {aggregate: probe for probe, aggregate in _AGGREGATE_NAMES.items()}
-
-PROBE_SCORE_FIELDS = (
-    "exact_match", "recall", "token_f1", "distractor_rate",
-    "similarity", "rouge1", "rouge2", "rouge_l", "chrf",
-    "fdt", "fdt_norm", "sdt", "sdt_norm", "identical", "fact_coverage",
-)
 
 # Cross-case fields, cleared and recomputed on every fill so repeated fills never accumulate.
 FIDELITY_FIELDS = (
@@ -190,12 +184,9 @@ def score_fidelity(prediction: str, reference: str,
     }
 
 
-def _depth_label(depth) -> str:
-    return "-" if depth is None else f"{float(depth):.2f}"
-
-
 def probe_key(probe: dict) -> tuple:
-    return (probe.get("task"), _depth_label(probe.get("depth")), probe.get("sample"))
+    """The probe's `ProbeSpec.coordinate`, built with the same depth key so they pair."""
+    return (probe.get("task"), tasks.depth_key(probe.get("depth")), probe.get("sample"))
 
 
 def score_case(probes: list, specs: list) -> tuple:
@@ -265,7 +256,7 @@ def summarize_suite(suite: str, rows: list, specs: list | None = None) -> dict:
         entry["planned"] = (sum(1 for s in specs if s.task == task) if specs is not None
                             else len(task_rows))
     swept = [r for r in completed if tasks.is_depth_swept(r["task"])]
-    summary["per_depth"] = group_aggregate(swept, fields, lambda r: _depth_label(r.get("depth")))
+    summary["per_depth"] = group_aggregate(swept, fields, lambda r: tasks.depth_key(r.get("depth")))
     return summary
 
 

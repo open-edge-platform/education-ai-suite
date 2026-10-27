@@ -341,7 +341,8 @@ def iteration_record(
         "detokenization_time": non_negative_number(detokenization_time),
         "prefill_throughput": (1000.0 * input_size / ttft) if ttft and input_size else None,
         "decode_throughput": (1000.0 / tpot) if tpot else None,
-        "e2e_throughput": _rate((input_size or 0) + (output_size or 0), generation),
+        "e2e_throughput": (_rate(input_size + output_size, generation)
+                           if input_size is not None and output_size is not None else None),
         "num_assistant_tokens": count_value(num_assistant_tokens),
         "mtp_draft_tokens": drafted,
         "mtp_accepted_tokens": accepted if (drafted is None or accepted is None
@@ -431,6 +432,8 @@ def aggregate(records: list) -> dict:
         out[f"{metric}_mean"] = stats["mean"]
         out[f"{metric}_p95"] = stats["p95"]
         out[f"{metric}_count"] = stats["count"]
+        # A metric with nulls has fewer samples than iterations; its p95 is small-sample too.
+        out["small_sample"] = out["small_sample"] or stats["small_sample"]
         if metric == "generation_time":
             out["generation_time_total"] = stats["total"]
     for metric in MEDIAN_ONLY_METRICS:

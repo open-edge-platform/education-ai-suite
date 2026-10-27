@@ -1,6 +1,6 @@
 from components.asr.base_asr import BaseASR
 import soundfile as sf
-import librosa, time
+import librosa
 import numpy as np
 import json
 import whisper
@@ -8,6 +8,7 @@ from openvino import Core
 import logging
 from utils.config_loader import config
 from utils.ensure_model import get_asr_model_path
+from utils.ov_runtime import gpu_plugin_config
 
 logger = logging.getLogger(__name__)  
  
@@ -40,13 +41,16 @@ class Whisper(BaseASR):
         if threads_limit and threads_limit > 0:
             core.set_property("CPU", {"INFERENCE_NUM_THREADS": str(threads_limit)})
         
+        ov_config = gpu_plugin_config(self.device)
         self.encoder = core.compile_model(
             f"{self.model_path}/openvino_encoder_model.xml",
-            self.device
+            self.device,
+            ov_config,
         )
         self.decoder = core.compile_model(
             f"{self.model_path}/openvino_decoder_model.xml",
-            self.device
+            self.device,
+            ov_config,
         )
         # Newer optimum-intel exports of the stateful decoder have no
         # `cache_position` input; feed it only where the IR declares it.

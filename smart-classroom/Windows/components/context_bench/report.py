@@ -38,9 +38,8 @@ _MEMORY_LEGEND = (
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
-def _fmt(value, spec="{:.1f}") -> str:
-    value = metrics.finite_number(value)
-    return spec.format(value) if value is not None else "--"
+# The console formatter, shared so the live log and the report render a value identically.
+_fmt = metrics._f
 
 
 def _ttft_seconds(case: dict) -> str:
@@ -286,6 +285,12 @@ def _mtp_output_check(cases: list) -> str | None:
     return "Greedy output check: all matched speculative profiles match their baseline exactly."
 
 
+def task_label(case: dict) -> str | None:
+    """The case's task, with the application settings it was resolved from if any."""
+    task, variant = case.get("throughput_task"), case.get("task_variant")
+    return f"{task} ({variant})" if task and variant else task
+
+
 def _task_groups(cases: list) -> list:
     groups: dict = {}
     for case in cases:
@@ -403,7 +408,8 @@ def _reference_lines(rows: list, reference: dict | None) -> list:
         )
     missing = [task for task in names if task not in at_k]
     if missing:
-        lines.append(f"No k={k} profile ran for {', '.join(missing)}; add one to compare.")
+        # A blank line first: Markdown would otherwise read the sentence as a table row.
+        lines += ["", f"No k={k} profile ran for {', '.join(missing)}; add one to compare."]
     lines.append("")
     return lines
 
@@ -531,7 +537,7 @@ def _retrieval_section(cases: list, context: int, settings: dict) -> list:
     baseline_name = settings["accuracy"].get("baseline_profile")
     ordered = _ordered_cases(cases, accuracy.SUITE_RETRIEVAL)
     task_names = list(section["tasks"])
-    lines = _heading(f"{context:,} tokens -- RETRIEVAL ACCURACY (RULER)")
+    lines = _heading(f"{context_label(context)} -- RETRIEVAL ACCURACY (RULER)")
     lines += [
         "Cells are each task's own RULER score: share of planted items found, or "
         "intersection-over-union for the aggregation tasks (cwe/fwe) which must punish "
@@ -591,7 +597,7 @@ def _generation_section(cases: list, context: int, settings: dict,
     units = sorted({p.get("divergence_unit") for c in ordered for p in c.get("probes", [])
                     if p.get("divergence_unit")})
     unit = units[0] if len(units) == 1 else ("mixed units" if units else "tokens")
-    lines = _heading(f"{context:,} tokens -- GENERATION FIDELITY (who_what_benchmark)")
+    lines = _heading(f"{context_label(context)} -- GENERATION FIDELITY (who_what_benchmark)")
     lines += [
         "The model does the real classroom task at full answer length; each answer is scored "
         f"against the baseline profile `{baseline_name or '--'}`'s answer to the identical "
@@ -762,6 +768,11 @@ def _header(snapshot: dict) -> list:
         f"Contexts  : {', '.join(context_label(c) for c in settings.get('context_tokens') or [])} | "
         f"{settings.get('warmup')} warmup + {workload}",
     ]
+    variants = {p.get("throughput_task"): p["task_variant"]
+                for p in snapshot.get("plan") or [] if p.get("task_variant")}
+    if variants:
+        lines.append("Tasks     : " + ", ".join(f"{task} resolved as {variant} (app config.yaml)"
+                                                for task, variant in variants.items()))
     if acc:
         lines.append(f"Accuracy  : {', '.join(acc['suites'])} | baseline "
                      f"{acc.get('baseline_profile') or '(none)'} | seed {acc['seed']}")

@@ -8,7 +8,6 @@ import gc
 import json
 import logging
 import math
-import re
 import threading
 import time
 from pathlib import Path
@@ -25,25 +24,25 @@ from components.vlm.text_gen_profiles import (
 )
 from utils.chat_prompt import render_chat_prompt, template_supports_tools
 from utils.markdown_cleaner import StreamThinkFilter, strip_think_tokens
-from utils.model_paths import openvino_model_dir
 from utils.ov_genai_util import YieldingTextStreamer
+from utils.stage_events import sanitize_detail
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_NEW_TOKENS = 5120
+
+# Per-request decoding parameters accepted through ``generate(sampling=...)``,
+# named as in GenerationConfig and the OpenAI request.
+SAMPLING_KEYS = ("top_p", "top_k", "repetition_penalty", "presence_penalty",
+                 "frequency_penalty")
 
 # Plain-mode decision retained for the process lifetime: once speculative
 # activation failed under ``mode: auto``, a reload (after shutdown/eviction)
 # does not try the failing drafter again.
 _PLAIN_DECISION: Optional[str] = None
 
-# Strip absolute local paths (drive, UNC, POSIX) from reasons surfaced through
-# /health; Hub repo ids such as ``z-lab/<model>`` are kept.
-_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\|(?<![\w.-])/)[^\s'\"]+")
-
-
-def _sanitize(text) -> str:
-    return _PATH_RE.sub("<path>", str(text))[:300]
+# Reasons surfaced through /health drop absolute local paths, as stage records do.
+_sanitize = sanitize_detail
 
 
 class VLMTextGen:
@@ -102,14 +101,14 @@ class VLMTextGen:
         # Invalid speculative settings fail here, before any model work.
         self._plan = resolve_plan(text_gen)
 
-    def _model_dir(self) -> Path:
-        """Return the shared IR directory ``models/openvino/<name>/<weight>``."""
-        return openvino_model_dir(self._model_name, self._weight_format)
-
     def _ov_config(self) -> dict:
         """Runtime config for the pipeline; large allocations help on GPU."""
+        from utils.ov_runtime import gpu_plugin_config
+
         if self._device.startswith("GPU"):
-            return {"GPU_ENABLE_LARGE_ALLOCATIONS": "YES"}
+            return gpu_plugin_config(
+                self._device, {"GPU_ENABLE_LARGE_ALLOCATIONS": "YES"}
+            )
         return {}
 
     def _speculative_kwargs(self, settings: SpeculativeSettings, draft_dir: Path) -> dict:
@@ -119,6 +118,9 @@ class VLMTextGen:
             key: value for key, value in profile.ov_properties.items()
             if self._device.startswith("GPU") or not key.startswith("GPU_")
         }
+        from utils.ov_runtime import gpu_plugin_config
+
+        kwargs = gpu_plugin_config(self._device, kwargs)
         scheduler = ov_genai.SchedulerConfig()
         for key, value in profile.scheduler.items():
             if not hasattr(scheduler, key):
@@ -131,13 +133,14 @@ class VLMTextGen:
     def _load(self) -> None:
         global _PLAIN_DECISION
         plan = self._plan
+        if _PLAIN_DECISION is not None and plan.wants_speculative:
+            # Prepare only the target: the drafter already failed this process.
+            plan = plan.without_speculative(_PLAIN_DECISION)
         started = time.monotonic()
         prepared = text_gen_prepare.prepare(plan)
         timings = {"prepare_s": round(time.monotonic() - started, 3)}
         fallback = prepared.speculative_error
         spec = prepared.speculative
-        if spec is not None and _PLAIN_DECISION is not None:
-            fallback, spec = _PLAIN_DECISION, None
 
         if spec is not None:
             try:
@@ -296,6 +299,7 @@ class VLMTextGen:
         force_tool_call: Optional[str] = None,
         call=None,
         finish_info: Optional[dict] = None,
+        sampling: Optional[dict] = None,
     ) -> Union[Iterator[str], str]:
         """Generate from a chat history using the warm pipeline.
 
@@ -324,6 +328,9 @@ class VLMTextGen:
         ``call`` (a ``utils.processing_stats.ModelCall``) records timing, and
         ``finish_info`` receives token counts and truncation once generation
         ends.
+        ``sampling`` sets per-request decoding parameters on top of the
+        defaults: any of ``SAMPLING_KEYS``. Penalties also apply to greedy
+        decoding; ``top_p``/``top_k`` only take effect when sampling.
         """
         if self._pipe is None:
             raise RuntimeError("VLM pipeline is not loaded")
@@ -341,13 +348,23 @@ class VLMTextGen:
                 f"{self._speculative.method} pipeline supports greedy decoding only; "
                 "omit temperature or set it to 0"
             )
+        unknown = set(sampling or ()) - set(SAMPLING_KEYS)
+        if unknown:
+            raise ValueError(f"Unsupported sampling parameters: {sorted(unknown)}")
+        if self._speculative is not None and sampling:
+            # Draft verification compares raw greedy picks; penalised logits
+            # would make the target disagree with its own drafts.
+            raise UnsupportedRequestError(
+                f"{sorted(sampling)} are not supported by the active "
+                f"{self._speculative.method} pipeline (greedy decoding only)"
+            )
         if (tools or force_tool_call is not None) and not self._tool_calls:
             raise UnsupportedRequestError(f"{self._model_name} does not support tool calling")
 
         if call is not None:
             call.started()
         try:
-            config = self._generation_config(max_new_tokens, temperature, json_schema)
+            config = self._generation_config(max_new_tokens, temperature, json_schema, sampling)
             prompt = self._render(messages, config, enable_thinking, bool(images), tools)
             prefill = ""
             if force_tool_call is not None:
@@ -424,6 +441,7 @@ class VLMTextGen:
         max_new_tokens: Optional[int],
         temperature: Optional[float],
         json_schema: Optional[str] = None,
+        sampling: Optional[dict] = None,
     ) -> "ov_genai.GenerationConfig":
         max_tokens = (
             int(max_new_tokens) if max_new_tokens is not None else self._max_new_tokens
@@ -432,6 +450,8 @@ class VLMTextGen:
         if temperature is not None:
             kwargs["temperature"] = float(temperature)
             kwargs["do_sample"] = float(temperature) > 0.0
+        for key, value in (sampling or {}).items():
+            kwargs[key] = int(value) if key == "top_k" else float(value)
         config = ov_genai.GenerationConfig(**kwargs)
         if self._speculative is not None:
             # Greedy verification with a fixed draft window; the runtime owns

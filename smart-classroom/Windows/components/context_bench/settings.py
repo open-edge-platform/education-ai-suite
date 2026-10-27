@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import math
-import os
 import re
 from pathlib import Path
 
@@ -586,7 +585,9 @@ def _resolve_accuracy(section, args, profiles: list, notices: list | None = None
     wanted = args.accuracy_suites if args.accuracy_suites else section.get(
         "suites", [accuracy.SUITE_RETRIEVAL, accuracy.SUITE_GENERATION]
     )
-    if not isinstance(wanted, list) or not wanted or any(s not in _SUITE_DEFAULTS for s in wanted):
+    if not isinstance(wanted, list) or not wanted or any(
+        not isinstance(s, str) or s not in _SUITE_DEFAULTS for s in wanted
+    ):
         raise ConfigError(
             f"accuracy.suites must be a non-empty subset of {{{', '.join(_SUITE_DEFAULTS)}}}"
         )
@@ -1036,6 +1037,20 @@ def throughput_task_prompt(name: str | None, model_name: str, app_config_path=No
     raise ConfigError(f"unknown throughput task {name!r}")
 
 
+def task_variant(framing: dict | None) -> str | None:
+    """The application settings a task's framing was resolved from (`classroom_summary`'s
+    language and mode), or None for a fixed framing.
+
+    Shown wherever the task is named: config.yaml can change between runs, and a Chinese and
+    an English summary are different workloads (DFlash accepts far fewer tokens on the
+    former) that would otherwise share one task name.
+    """
+    framing = framing or {}
+    if not framing.get("language"):
+        return None
+    return f"{framing['language']}, {framing.get('summary_mode') or 'dialog'}"
+
+
 def task_sha256(framing: dict | None) -> str:
     """Identity of a task's prompt framing, so different workloads never match."""
     import json
@@ -1110,6 +1125,7 @@ def plan_run(settings, app_config_path=None) -> list:
                         "throughput_task": task,
                         "task_framing": framings[task],
                         "task_sha256": task_sha256(framings[task]) if task else None,
+                        "task_variant": task_variant(framings[task]),
                         "profile": profile,
                         "warmup": settings["warmup"],
                         "planned_iterations": 0 if accuracy_cfg else settings["iterations"],
@@ -1225,7 +1241,8 @@ def plan_grid(entries: list) -> list:
 def task_legend(settings, planned: list) -> list:
     """One line per task that runs, saying what its cases decode."""
     lines = []
-    for task in dict.fromkeys(p["throughput_task"] for p in planned):
+    variants = {p["throughput_task"]: p.get("task_variant") for p in planned}
+    for task in variants:
         if task is None:
             acc = settings["accuracy"]
             suites = "; ".join(f"{suite}: {', '.join(acc[suite]['tasks'])}"
@@ -1238,6 +1255,8 @@ def task_legend(settings, planned: list) -> list:
             if task == "classroom_summary" and settings["output_tokens"] < CLASSROOM_SUMMARY_TOKENS:
                 where = (f"; cut off at {settings['output_tokens']} output tokens, run it with "
                          f"--output-tokens {CLASSROOM_SUMMARY_TOKENS}")
+            if variants[task]:
+                where += f"; resolved as {variants[task]}"
             lines.append(f"  {task:<18} {TASK_DESCRIPTIONS[task]}{where}")
     return lines
 

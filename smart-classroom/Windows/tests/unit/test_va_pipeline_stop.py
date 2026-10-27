@@ -207,6 +207,25 @@ def test_monitor_still_restarts_a_genuine_crash():
     assert svc.pipeline_retry_counts["front"] == 1
 
 
+def test_normal_exit_closes_the_log_handle(tmp_path):
+    """An open handle locks the log on Windows, so deleting the session failed."""
+    log = open(tmp_path / "front.log", "w")
+    finished = []
+    svc = make_service(
+        pipelines={"front": FakeProcess(alive=False, normal_exit=True)},
+        monitor_stop_flags={"front": threading.Event()},
+        pipeline_log_handles={"front": log},
+        on_all_pipelines_done=finished.append,
+    )
+    svc.x_session_id = "s1"
+
+    svc._monitor_pipeline("front")
+
+    assert svc.pipeline_final_status == {"front": "eos"}
+    assert log.closed
+    assert finished == ["s1"]
+
+
 # --- 2. the status stream that never ended -----------------------------------
 
 

@@ -742,7 +742,7 @@ function Install-NPUDriver {
     Write-Host ""
 
     $npuDevicesRecheck = Get-PnpDevice -ErrorAction SilentlyContinue |
-                        Where-Object { $_.FriendlyName -match "Intel.*(NPU|Neural|AI Boost|VPU|Accelerator)" }
+                        Where-Object { $_.FriendlyName -match "Intel.*(NPU|Neural|AI Boost|VPU|Accelerator)" -and $_.FriendlyName -notmatch "GNA" }
 
     if ($npuDevicesRecheck) {
         $npuName = ($npuDevicesRecheck | Select-Object -First 1).FriendlyName
@@ -761,9 +761,10 @@ try {
                   Where-Object { $_.FriendlyName -match "NPU|Neural|AI Boost|VPU" -and $_.FriendlyName -match "Intel" }
 
     if (-not $npuDevices) {
-        # Broader search including Accelerator keyword
+        # Broader search including Accelerator keyword; exclude GNA, which is a
+        # separate Scoring Accelerator (not an NPU) and otherwise matches here.
         $npuDevices = Get-PnpDevice -ErrorAction SilentlyContinue |
-                      Where-Object { $_.FriendlyName -match "Intel.*(NPU|Neural|AI Boost|VPU|Accelerator)" }
+                      Where-Object { $_.FriendlyName -match "Intel.*(NPU|Neural|AI Boost|VPU|Accelerator)" -and $_.FriendlyName -notmatch "GNA" }
     }
 
     if ($npuDevices) {

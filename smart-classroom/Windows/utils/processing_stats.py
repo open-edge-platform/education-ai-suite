@@ -104,7 +104,7 @@ class ModelCall:
     """
 
     def __init__(self, capability: str, *, model=None, precision=None, device=None,
-                 decoding=None, artifact=None, stream: bool = False,
+                 decoding=None, stream: bool = False,
                  recorder: Optional["ProcessingStats"] = None) -> None:
         session_id, stage = current_stage()
         self._recorder = recorder or STATS
@@ -124,7 +124,6 @@ class ModelCall:
             "precision": precision,
             "device": device,
             "decoding": decoding,
-            "artifact": artifact,
             "stream": bool(stream),
             "submitted_at": _now_iso(),
         }
@@ -236,11 +235,6 @@ class ProcessingStats:
             self._calls.append(record)
         _append_session_line(record)
 
-    def clear(self) -> None:
-        with self._lock:
-            self._stages.clear()
-            self._calls.clear()
-
     def records(self, session_id=None) -> tuple:
         with self._lock:
             stages = list(self._stages)
@@ -280,8 +274,33 @@ _CALL_OK = {"ok"}
 _CALL_CANCELLED = {"cancelled"}
 
 _CALL_METRICS = ("latency_ms", "queue_wait_ms", "first_output_ms", "ttft_ms",
-                 "tpot_ms", "decode_tps", "input_tokens", "output_tokens",
-                 "draft_tokens", "accepted_tokens")
+                 "tpot_ms", "decode_tps", "prefill_tps", "output_tps", "input_tokens",
+                 "output_tokens", "draft_tokens", "accepted_tokens")
+
+
+def _positive(value) -> Optional[float]:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) \
+            and math.isfinite(value) and value > 0:
+        return float(value)
+    return None
+
+
+def call_rates(record: dict) -> dict:
+    """Throughput of one text-generation call, from its measured fields.
+
+    ``decode_tps`` is the runtime's own (1000 / TPOT). ``prefill_tps`` is prompt
+    tokens per second of model TTFT; ``output_tps`` is generated tokens per
+    second of call latency, so it includes prefill. Ratios of measured values,
+    never a subphase estimated by subtraction; unavailable inputs give None.
+    Derived on read, so records written before these existed get them too.
+    """
+    def rate(tokens, ms):
+        tokens, ms = _positive(record.get(tokens)), _positive(record.get(ms))
+        return round(tokens * 1000.0 / ms, 3) if tokens and ms else None
+
+    return {"decode_tps": _positive(record.get("decode_tps")),
+            "prefill_tps": rate("input_tokens", "ttft_ms"),
+            "output_tps": rate("output_tokens", "latency_ms")}
 
 
 def distribution(values: Iterable) -> dict:
@@ -344,7 +363,7 @@ def call_groups(records: list, keys: tuple) -> list:
         groups.setdefault(tuple(r.get(k) for k in keys), []).append(r)
     out = []
     for group_key, rows in sorted(groups.items(), key=lambda kv: tuple(map(str, kv[0]))):
-        ok = [r for r in rows if r.get("status") in _CALL_OK]
+        ok = [{**r, **call_rates(r)} for r in rows if r.get("status") in _CALL_OK]
         entry = dict(zip(keys, group_key))
         for metric in _CALL_METRICS:
             entry[metric] = distribution(r.get(metric) for r in ok)

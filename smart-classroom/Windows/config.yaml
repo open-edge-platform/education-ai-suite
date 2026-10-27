@@ -52,8 +52,11 @@ models:
 
   model_hub: huggingface # huggingface or modelscope
 
+  gpu_queue_priority: LOW # LOW, MEDIUM, or HIGH for OpenVINO GPU services
+
   va:
     models_base_path: "models"
+    device: NPU # NPU, GPU or CPU
     front_pose_model: yolov8m-pose # yolov8m-pose/yolo11m-pose/yolo26m-pose
     back_pose_model: yolov8s-pose # yolov8s-pose/yolo11s-pose/yolo26s-pose
     threshold: 0.5 # confidence threshold for YOLO detections
@@ -86,14 +89,14 @@ models:
     # with weight_format int4 (drafter z-lab/Qwen3.6-35B-A3B-DFlash). Opt-in: set
     # that vlm_name and mode: auto (falls back to plain when DFlash cannot run) or
     # "on" (requires it). "off" is plain generation; the other fields are then
-    # ignored. See docs/vlm-llm-serving/serving-guide.md.
+    # ignored. See smart-classroom/docs/vlm-llm-serving/serving-guide.md.
     speculative:
       mode: "off"          # "off" | auto | "on"
       method: dflash
       draft_source: null    # null = Hub drafter | local (draft_model = an exported IR directory)
       draft_model: null     # null = z-lab/Qwen3.6-35B-A3B-DFlash
       draft_revision: null  # null = the tested pinned commit; a full 40-char commit overrides it
-      num_assistant_tokens: null  # null = 3, the tested value for classroom summaries
+      num_assistant_tokens: null  # null = 5, the tested value for classroom summaries and chat
 
     chunking:
       enabled: true                  # false = summarize the whole transcript in one pass

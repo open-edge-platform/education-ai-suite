@@ -76,3 +76,11 @@ For more information see [How it works](../docs/user-guide/how-it-works.md)
 ## Learn More
 
 - [Release Notes](../docs/user-guide/release-notes.md)
+
+## GPU Queue Priority
+
+Set `models.gpu_queue_priority` in [config.yaml](./config.yaml) to control the
+OpenVINO GPU queue priority used by Smart Classroom services. It defaults to
+`LOW`; set it to `MEDIUM` or `HIGH` to raise Smart Classroom's priority as needed.
+The setting applies to services running OpenVINO on a GPU; CPU and NPU workloads
+are unaffected.

@@ -27,7 +27,7 @@ Exit codes: 0 valid plan or completed run with every case ``ok``; 1 failed, part
 unqualified cases, or an orchestration/output-write failure; 2 invalid arguments,
 configuration or missing dependencies; 130 Ctrl-C after checkpoint and child cleanup.
 
-See docs/context-bench/context-bench-guide.md.
+See smart-classroom/docs/context-bench/context-bench-guide.md.
 """
 
 from __future__ import annotations
@@ -73,7 +73,6 @@ from components.context_bench.sizing import (
     load_model_config,
     precision_matches_label,
     state_rows,
-    text_config,
     validate_fixed_cache_size,
     weight_disk_gb,
 )
@@ -222,7 +221,7 @@ def _preflight_case(planned: dict, settings, static: dict) -> dict:
         raise _Rejected("missing_ir", static["hint"])
     model_dir = static["model_dir"]
     prepared = {"warnings": [], "draft_dir": None, "draft_weight_precision": None,
-                "draft_identity": None, "draft_weight_gb": 0.0}
+                "draft_weight_gb": 0.0}
     draft_config = None
     if mtp.get("enabled"):
         draft_dir = resolve_path(mtp["model"])
@@ -233,24 +232,16 @@ def _preflight_case(planned: dict, settings, static: dict) -> dict:
                 f"DFlash draft IR is incomplete (missing {', '.join(missing)}); the serving "
                 "workflow exports it to models/openvino/<name>-DFlash/<weight_format>"
             ))
+        # The serving preparation's pair check: layer ids, target depth and vocabulary. k=1
+        # never trips its block-size check, which is applied below as `unsupported`.
+        from components.vlm.text_gen_prepare import CompatibilityError, validate_dflash_pair
+
         try:
-            layer_ids = trial_runner.dflash_target_layer_ids(str(draft_dir))
-        except ValueError as exc:
+            validate_dflash_pair(model_dir, draft_dir, 1)
+        except CompatibilityError as exc:
             raise _Rejected("artifact", str(exc)) from exc
-        target = text_config(static["model_config"])
-        depth = target.get("num_hidden_layers")
-        if isinstance(depth, int) and max(layer_ids) >= depth:
-            raise _Rejected("artifact", (
-                f"the draft reads target layer {max(layer_ids)} but the target has {depth} "
-                "layers; the drafter belongs to a different model"
-            ))
         draft_config = load_model_config(draft_dir)
-        draft_vocab, target_vocab = text_config(draft_config).get("vocab_size"), target.get("vocab_size")
-        if isinstance(draft_vocab, int) and isinstance(target_vocab, int) and draft_vocab != target_vocab:
-            raise _Rejected("artifact", (
-                f"draft vocabulary ({draft_vocab}) does not match the target ({target_vocab})"
-            ))
-        block_size = trial_runner.dflash_block_size(str(draft_dir))
+        block_size = trial_runner.dflash_block_size(draft_dir)
         if block_size and mtp["num_assistant_tokens"] > block_size - 1:
             raise _Rejected("unsupported", (
                 f"num_assistant_tokens={mtp['num_assistant_tokens']} exceeds the draft's "
@@ -337,6 +328,7 @@ def _new_case(planned: dict, settings, static: dict, redactor) -> dict:
         "context_tokens": planned["context_tokens"],
         "throughput_task": planned["throughput_task"],
         "task_sha256": planned["task_sha256"],
+        "task_variant": planned.get("task_variant"),
         "profile": profile["name"],
         "pipeline_mode": profile["pipeline_mode"],
         "cache_pool": profile["cache_pool"],
@@ -522,7 +514,7 @@ def _finalize_case(case: dict, settings, specs: list) -> dict:
 
 def _apply_result(case: dict, result: dict) -> None:
     for key in ("load_ok", "load_time_s", "prompt", "prompt_tokens", "stage_reached", "phase",
-                "active_iteration", "error", "device_diagnostics", "cleanup_confirmed",
+                "active_iteration", "error", "cleanup_confirmed",
                 "exit_code", "memory_baseline", "peak_ram_gb", "peak_ram_pct",
                 "min_available_ram_gb", "peak_gpu_gb", "post_load_peak_ram_gb",
                 "post_load_peak_gpu_gb", "memory_samples", "memory_sample_interval_s",
@@ -781,7 +773,8 @@ class RunState:
             "warnings": self.warnings + ([f"orchestration failure: {self.fatal}"] if self.fatal else []),
             "plan": [{"case_id": p["case_id"], "label": p["label"], "mode": p["mode"],
                       "model": p["model"], "context_tokens": p["context_tokens"],
-                      "throughput_task": p["throughput_task"], "profile": p["profile"]["name"],
+                      "throughput_task": p["throughput_task"],
+                      "task_variant": p.get("task_variant"), "profile": p["profile"]["name"],
                       "planned_iterations": p["planned_iterations"],
                       "planned_probes": p["planned_probes"], "state": self.state[p["case_id"]]}
                      for p in self.planned],

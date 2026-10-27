@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       smart-classroom_changed: ${{ steps.filter.outputs.smart-classroom }}
+      ai-teaching-assistant_changed: ${{ steps.filter.outputs.ai-teaching-assistant }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -27,11 +28,13 @@ jobs:
           persist-credentials: false
       - name: Set paths filter
         id: filter
-        uses: dorny/paths-filter@4512585405083f25c027a35db413c2b3b9006d50
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
         with:
           filters: |
             smart-classroom:
               - 'smart-classroom/docs/user-guide/**'
+            ai-teaching-assistant:
+              - 'ai-teaching-assistant/docs/user-guide/**'
 
   build-smart-classroom:
     permissions:
@@ -41,3 +44,12 @@ jobs:
     uses: ./.github/workflows/docs-reusable-workflow.yaml
     with:
       docs_directory: smart-classroom
+
+  build-ai-teaching-assistant:
+    permissions:
+      contents: read # needed for actions/checkout
+    needs: filter
+    if: ${{ needs.filter.outputs.ai-teaching-assistant_changed == 'true' }}
+    uses: ./.github/workflows/docs-reusable-workflow.yaml
+    with:
+      docs_directory: ai-teaching-assistant

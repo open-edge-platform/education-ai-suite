@@ -55,16 +55,3 @@ def test_the_text_gen_dir_is_none_when_the_config_says_nothing(monkeypatch):
 
     monkeypatch.setattr(config.models, "text_gen", None, raising=False)
     assert model_paths.text_gen_model_dir() is None
-
-
-def test_vlm_text_gen_resolves_its_dir_through_this_module():
-    """The duplicate path arithmetic in VLMTextGen was replaced by this call."""
-    from components.vlm.text_gen_vlm import VLMTextGen
-
-    handler = VLMTextGen.__new__(VLMTextGen)
-    handler._model_name = "Qwen/Qwen3-VL-8B-Instruct"
-    handler._weight_format = "int4"
-
-    assert handler._model_dir() == model_paths.openvino_model_dir(
-        "Qwen/Qwen3-VL-8B-Instruct", "int4"
-    )

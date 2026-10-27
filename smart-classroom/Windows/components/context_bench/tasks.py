@@ -38,7 +38,7 @@ SUITE_GENERATION = "generation"
 
 # Bumped whenever a builder changes what it plants or asks, so stored fixture identities from
 # an older version are never paired with new ones.
-FIXTURE_VERSION = 2
+FIXTURE_VERSION = 3
 
 # Unambiguous upper-case letters and digits (no O/0 or I/1/l): a scorer never has to decide
 # which character the model "meant", and no run of classroom dialog produces one by chance.
@@ -154,10 +154,10 @@ class ProbeSpec:
     def coordinate(self) -> tuple:
         """The key that pairs an answer back to this spec, and pairs a probe with the
         baseline profile's probe for the same work. Stable across processes and runs."""
-        return (self.task, _depth_key(self.depth), self.sample)
+        return (self.task, depth_key(self.depth), self.sample)
 
 
-def _depth_key(depth) -> str:
+def depth_key(depth) -> str:
     return "-" if depth is None else f"{float(depth):.2f}"
 
 
@@ -222,7 +222,7 @@ def validate_task_options(task: str, options) -> dict:
 # ---------------------------------------------------------------------------
 def probe_seed(seed: int, context_tokens: int, task: str, depth, sample: int) -> str:
     """The probe's coordinate as the string `probe_rng` seeds from (the reference's key)."""
-    return f"{seed}|{context_tokens}|{task}|{_depth_key(depth)}|{sample}"
+    return f"{seed}|{context_tokens}|{task}|{depth_key(depth)}|{sample}"
 
 
 def probe_rng(seed: int, context_tokens: int, task: str, depth, sample: int) -> random.Random:
@@ -371,19 +371,28 @@ def _build_vt(rng, haystack, _depth, options) -> dict:
     chain_values = _draw_distinct(rng, haystack, chains, value_length)
     value = chain_values[0]
 
-    statements, target_names, decoy_names = [], [], []
+    per_chain, target_names, decoy_names = [], [], []
     for chain in range(chains):
-        names = [f"VAR_{chain}_{step}" for step in range(length)]
-        statements.append(f"Bookkeeping: {names[0]} is set to {chain_values[chain]}.")
-        statements += [
-            f"Bookkeeping: {names[step]} is set to the value of {names[step - 1]}."
-            for step in range(1, length)
-        ]
+        # Fixed width: scoring normalization drops the underscores, and unpadded names would
+        # collide ("VAR_1_10" and "VAR_11_0" are both "var110") or contain one another.
+        names = [f"VAR_{chain:02d}_{step:02d}" for step in range(length)]
+        per_chain.append(
+            [f"Bookkeeping: {names[0]} is set to {chain_values[chain]}."]
+            + [
+                f"Bookkeeping: {names[step]} is set to the value of {names[step - 1]}."
+                for step in range(1, length)
+            ]
+        )
         (target_names if chain == 0 else decoy_names).extend(names)
 
     # Interleaved before spreading, so following one chain requires carrying it across the
-    # others rather than reading a single block.
-    rng.shuffle(statements)
+    # others rather than reading a single block. Each chain keeps its own order, as RULER's
+    # interleave does: a copy never precedes the assignment it copies, so "final value" has
+    # one reading. `_spread` is monotonic, so the planted order is this order.
+    order = [chain for chain in range(chains) for _ in range(length)]
+    rng.shuffle(order)
+    cursors = [iter(chain) for chain in per_chain]
+    statements = [next(cursors[chain]) for chain in order]
     return {
         "question": (
             f"The transcript assigns values to variables, sometimes by copying another "
@@ -578,7 +587,7 @@ def build_spec(task: str, sample: int, depth, haystack: str, seed: int,
         "suite": suite,
         "task": task,
         "sample": sample,
-        "depth": _depth_key(effective_depth),
+        "depth": depth_key(effective_depth),
         "seed": seed,
         "context_tokens": context_tokens,
         "question": built["question"],
