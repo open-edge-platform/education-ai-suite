@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+import hashlib
 import os
 import uuid
 import numpy as np
@@ -120,21 +121,33 @@ class DocxParagraphPicturePartitioner:
             return
         imgs = paragraph._element.xpath(".//pic:pic")
         if imgs:
-            os.makedirs(cls.output_dir, exist_ok=True)
+            # Path components are hex digests only: r:embed comes from the uploaded
+            # file and must never reach the path (e.g. "..\\x" or "C:\\x").
+            src = opts.metadata_file_path or ""
+            doc_hash = hashlib.md5(os.path.abspath(src).encode(), usedforsecurity=False).hexdigest()[:12]
+            doc_dir = os.path.join(cls.output_dir, doc_hash)
+            os.makedirs(doc_dir, exist_ok=True)
             for img in imgs:
                 try:
                     embed = img.xpath(".//a:blip/@r:embed")[0]
                     related_part = opts.document.part.related_parts[embed]
                     image_blob = related_part.blob
                     image = PILImage.open(BytesIO(image_blob))
-                    image_filename = f"{embed}_{related_part.sha1}.png"
-                    image_path = os.path.join(cls.output_dir, image_filename)
+                    image_path = os.path.join(doc_dir, f"{related_part.sha1}.png")
                     image.save(image_path)
                     element_metadata = ElementMetadata(image_path=image_path)
                     yield Image(text="IMAGE", metadata=element_metadata)
                 except Exception as e:
                     print(f"Warning: Failed to extract image from DOCX: {e}")
                     continue
+
+
+class NullDocxPicturePartitioner:
+    """Picture partitioner that extracts nothing, used when image extraction is off."""
+
+    @classmethod
+    def iter_elements(cls, paragraph: Paragraph, opts: DocxPartitionerOptions) -> Iterator[Image]:
+        return iter(())
 
 
 def ensure_directory(path: str) -> str:
