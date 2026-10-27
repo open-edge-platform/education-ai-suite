@@ -37,6 +37,32 @@ const TITLE_BAR_THEMES = {
   dimmed: { color: '#003862', symbolColor: '#7f7f7f' },
 };
 
+// The overlay height is in device-independent pixels, but the TopPanel it must
+// line up with is in CSS pixels, which page zoom (Ctrl+-/Ctrl+=/Ctrl+wheel)
+// rescales. Left at a fixed height, zooming out shrinks the header under the
+// native controls and they hang over the header bar below it. So the overlay is
+// re-applied at TITLE_BAR_HEIGHT x zoom factor, remembering per window the
+// theme the renderer last asked for and the height last applied. Rounded down:
+// the height is whole DIPs, and rounding up lets the overlay cover the header's
+// bottom border by a device pixel (visible at 150% display scaling), while a
+// short overlay is invisible against the header's identical blue.
+const titleBarState = new WeakMap();
+
+function applyTitleBarOverlay(win, theme) {
+  if (process.platform === 'darwin' || !win || win.isDestroyed()) return;
+  const state = titleBarState.get(win) || { theme: 'default', height: 0 };
+  const nextTheme = theme || state.theme;
+  const height = Math.floor(TITLE_BAR_HEIGHT * win.webContents.getZoomFactor());
+  if (nextTheme === state.theme && height === state.height) return;
+  const colors = TITLE_BAR_THEMES[nextTheme] || TITLE_BAR_THEMES.default;
+  try {
+    win.setTitleBarOverlay({ ...colors, height });
+    titleBarState.set(win, { theme: nextTheme, height });
+  } catch {
+    // Overlay unavailable on this platform/frame — leave the caption alone.
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Native-menu localization
 // ---------------------------------------------------------------------------
@@ -210,6 +236,18 @@ async function createWindow() {
     return { action: 'allow' };
   });
 
+  // The zoomIn menu role is bound to Ctrl+Plus, which on a US layout means
+  // Ctrl+Shift+=, so the unshifted Ctrl+= and numpad + did nothing while
+  // Ctrl+- and Ctrl+0 worked. Handle every zoom-in key here, mirroring the
+  // role's 0.5 zoom-level step; preventDefault also stops the menu
+  // accelerator, so Ctrl+Shift+= still zooms only once.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.alt || !(input.control || input.meta)) return;
+    if (input.key !== '=' && input.key !== '+') return;
+    event.preventDefault();
+    mainWindow.webContents.zoomLevel += 0.5;
+  });
+
   // Right-click context menu with basic text operations.
   mainWindow.webContents.on('context-menu', (_event, params) => {
     const menu = buildContextMenu(params);
@@ -263,15 +301,14 @@ if (!app.requestSingleInstanceLock()) {
   // Renderer reports the surface currently covering the caption area (a modal,
   // the report panel, or nothing) so the overlay can be recoloured to match.
   ipcMain.on('titlebar:setTheme', (event, theme) => {
-    if (process.platform === 'darwin') return;
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win.isDestroyed()) return;
-    const colors = TITLE_BAR_THEMES[theme] || TITLE_BAR_THEMES.default;
-    try {
-      win.setTitleBarOverlay({ ...colors, height: TITLE_BAR_HEIGHT });
-    } catch {
-      // Overlay unavailable on this platform/frame — leave the caption alone.
-    }
+    const name = Object.hasOwn(TITLE_BAR_THEMES, theme) ? theme : 'default';
+    applyTitleBarOverlay(BrowserWindow.fromWebContents(event.sender), name);
+  });
+
+  // Renderer's viewport changed size, which is also how a page-zoom change
+  // shows up there; rescale the overlay if the zoom factor moved.
+  ipcMain.on('titlebar:syncZoom', (event) => {
+    applyTitleBarOverlay(BrowserWindow.fromWebContents(event.sender));
   });
 
   // Renderer reports its active language; rebuild the native application menu

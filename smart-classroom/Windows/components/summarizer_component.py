@@ -100,9 +100,6 @@ _MAP_FOCUS_PROMPTS = {
 }
 
 class SummarizerComponent(PipelineComponent):
-    _model = None
-    _config = None
-
     def __init__(self, session_id, mode="dialog"):
         self.session_id = session_id
         self.mode = mode.lower()
@@ -116,10 +113,7 @@ class SummarizerComponent(PipelineComponent):
         self.warnings = OverloadWarnings(session_id, "summary")
 
         text_gen = config.models.text_gen
-        SummarizerComponent._model = ModelManager.instance().text_gen()
-        SummarizerComponent._config = ("vlm", text_gen.vlm_name, text_gen.device)
-
-        self.summarizer = SummarizerComponent._model
+        self.summarizer = ModelManager.instance().text_gen()
         self.model_name = text_gen.vlm_name
         self.provider = text_gen.provider
 

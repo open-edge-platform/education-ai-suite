@@ -26,7 +26,7 @@ A `FakeTokenizer` that splits on whitespace stands in for the real one, so token
 counts in the tests are readable numbers rather than model-specific ones.
 
 The chunking modules are documented for the Windows variant in
-[`Windows/docs/dev-guide/transcript-chunking/prompt-budget.md`](../../../Windows/docs/dev-guide/transcript-chunking/prompt-budget.md).
+[`docs/dev-guide/transcript-chunking/prompt-budget.md`](../../../docs/dev-guide/transcript-chunking/prompt-budget.md).
 
 ## Adding a Test
 

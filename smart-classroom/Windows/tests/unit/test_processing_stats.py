@@ -126,6 +126,29 @@ def test_stage_scope_attributes_calls_and_resets(stats):
     assert outside.record["stage"] is None
 
 
+def test_call_rates_are_ratios_of_measured_values():
+    rates = ps.call_rates({"input_tokens": 1000, "ttft_ms": 2000.0, "output_tokens": 401,
+                           "latency_ms": 22000.0, "decode_tps": 20.0})
+    assert rates == {"decode_tps": 20.0, "prefill_tps": 500.0, "output_tps": 18.227}
+    # Missing, zero or sentinel inputs are unavailable, not zero.
+    assert ps.call_rates({"input_tokens": 0, "ttft_ms": -1, "output_tokens": 5}) == \
+        {"decode_tps": None, "prefill_tps": None, "output_tps": None}
+
+
+def test_call_groups_report_derived_rates_for_old_records(stats):
+    # Written before prefill_tps/output_tps existed: derived when grouped.
+    stats.record_call({"capability": "text_gen", "stage": "summary", "status": "ok",
+                       "latency_ms": 10000.0, "ttft_ms": 1000.0, "input_tokens": 800,
+                       "output_tokens": 300})
+    stats.record_call({"capability": "text_gen", "stage": "summary", "status": "failed",
+                       "latency_ms": 1.0, "ttft_ms": 1.0, "input_tokens": 800,
+                       "output_tokens": 300})
+    (group,) = stats.snapshot()["model_calls_by_stage"]
+    assert group["prefill_tps"]["p50"] == 800.0 and group["output_tps"]["p50"] == 30.0
+    assert group["output_tps"]["count"] == 1  # the failed call is not a sample
+    assert "prefill_tps" not in stats.records()[1][0]  # raw records stay as written
+
+
 def test_snapshot_groups_shared_model_by_stage_and_counts_failures(stats):
     for stage, status, latency in [("summary", "ok", 100), ("summary", "ok", 300),
                                    ("mindmap", "ok", 50), ("mindmap", "failed", 20)]:

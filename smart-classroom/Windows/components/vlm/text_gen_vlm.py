@@ -8,7 +8,6 @@ import gc
 import json
 import logging
 import math
-import re
 import threading
 import time
 from pathlib import Path
@@ -26,6 +25,7 @@ from components.vlm.text_gen_profiles import (
 from utils.chat_prompt import render_chat_prompt, template_supports_tools
 from utils.markdown_cleaner import StreamThinkFilter, strip_think_tokens
 from utils.ov_genai_util import YieldingTextStreamer
+from utils.stage_events import sanitize_detail
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +41,8 @@ SAMPLING_KEYS = ("top_p", "top_k", "repetition_penalty", "presence_penalty",
 # does not try the failing drafter again.
 _PLAIN_DECISION: Optional[str] = None
 
-# Strip absolute local paths (drive, UNC, POSIX) from reasons surfaced through
-# /health; Hub repo ids such as ``z-lab/<model>`` are kept.
-_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\|(?<![\w.-])/)[^\s'\"]+")
-
-
-def _sanitize(text) -> str:
-    return _PATH_RE.sub("<path>", str(text))[:300]
+# Reasons surfaced through /health drop absolute local paths, as stage records do.
+_sanitize = sanitize_detail
 
 
 class VLMTextGen:
@@ -108,8 +103,12 @@ class VLMTextGen:
 
     def _ov_config(self) -> dict:
         """Runtime config for the pipeline; large allocations help on GPU."""
+        from utils.ov_runtime import gpu_plugin_config
+
         if self._device.startswith("GPU"):
-            return {"GPU_ENABLE_LARGE_ALLOCATIONS": "YES"}
+            return gpu_plugin_config(
+                self._device, {"GPU_ENABLE_LARGE_ALLOCATIONS": "YES"}
+            )
         return {}
 
     def _speculative_kwargs(self, settings: SpeculativeSettings, draft_dir: Path) -> dict:
@@ -119,6 +118,9 @@ class VLMTextGen:
             key: value for key, value in profile.ov_properties.items()
             if self._device.startswith("GPU") or not key.startswith("GPU_")
         }
+        from utils.ov_runtime import gpu_plugin_config
+
+        kwargs = gpu_plugin_config(self._device, kwargs)
         scheduler = ov_genai.SchedulerConfig()
         for key, value in profile.scheduler.items():
             if not hasattr(scheduler, key):

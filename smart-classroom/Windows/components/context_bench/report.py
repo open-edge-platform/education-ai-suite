@@ -285,6 +285,12 @@ def _mtp_output_check(cases: list) -> str | None:
     return "Greedy output check: all matched speculative profiles match their baseline exactly."
 
 
+def task_label(case: dict) -> str | None:
+    """The case's task, with the application settings it was resolved from if any."""
+    task, variant = case.get("throughput_task"), case.get("task_variant")
+    return f"{task} ({variant})" if task and variant else task
+
+
 def _task_groups(cases: list) -> list:
     groups: dict = {}
     for case in cases:
@@ -762,6 +768,11 @@ def _header(snapshot: dict) -> list:
         f"Contexts  : {', '.join(context_label(c) for c in settings.get('context_tokens') or [])} | "
         f"{settings.get('warmup')} warmup + {workload}",
     ]
+    variants = {p.get("throughput_task"): p["task_variant"]
+                for p in snapshot.get("plan") or [] if p.get("task_variant")}
+    if variants:
+        lines.append("Tasks     : " + ", ".join(f"{task} resolved as {variant} (app config.yaml)"
+                                                for task, variant in variants.items()))
     if acc:
         lines.append(f"Accuracy  : {', '.join(acc['suites'])} | baseline "
                      f"{acc.get('baseline_profile') or '(none)'} | seed {acc['seed']}")

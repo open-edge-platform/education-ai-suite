@@ -769,8 +769,18 @@ class VideoAnalyticsPipelineService:
         stop_pipeline() can both reach the same dying pipeline, and the first
         verdict is the informative one. "eos" must not become "stopped" just
         because teardown ran after the process had already finished on its own.
+
+        The runner has exited on every route here, so our copy of its log file
+        is closed too. Left open it locks the file on Windows, and deleting the
+        session fails, until something tears the whole service down.
         """
         self.pipeline_final_status.setdefault(pipeline_name, status)
+        handle = self.pipeline_log_handles.get(pipeline_name)
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:
+                pass
         self._fire_done_callback_if_all_finished()
 
     def _fire_done_callback_if_all_finished(self):

@@ -1,6 +1,7 @@
 from components.ocr.base_ocr import BaseOCR
 from components.ocr.openvino import openvino_pipeline as pipeline
 from utils.config_loader import config
+from utils.ov_runtime import gpu_plugin_config
 from typing import List, Tuple, Optional
 import logging
 import numpy as np
@@ -77,12 +78,13 @@ class OpenVINOOCRProcessor(BaseOCR):
 
         logger.info("Loading OpenVINO models...")
         core = ov.Core()
+        ov_config = gpu_plugin_config(self.device)
 
         det_ir = self.ir_models_dir / "det" / config.models.ocr.det_model / "inference.xml"
         if not det_ir.exists():
             raise FileNotFoundError(f"Detection model not found: {det_ir}")
         logger.info(f"Loading detection: {det_ir}")
-        self.det_compiled = core.compile_model(str(det_ir), self.device)
+        self.det_compiled = core.compile_model(str(det_ir), self.device, ov_config)
         OpenVINOOCRProcessor._det_compiled = self.det_compiled
 
         rec_ir = self.ir_models_dir / "rec" / config.models.ocr.rec_model / "inference.xml"
@@ -95,14 +97,14 @@ class OpenVINOOCRProcessor(BaseOCR):
             if input_shape.rank.is_static and input_shape.rank.get_length() == 4:
                 input_shape[3] = -1
                 rec_model.reshape({input_layer: input_shape})
-        self.rec_compiled = core.compile_model(rec_model, self.device)
+        self.rec_compiled = core.compile_model(rec_model, self.device, ov_config)
         OpenVINOOCRProcessor._rec_compiled = self.rec_compiled
 
         if self.use_angle_cls:
             cls_ir = self.ir_models_dir / "cls" / config.models.ocr.cls_model / "inference.xml"
             if cls_ir.exists():
                 logger.info(f"Loading classification: {cls_ir}")
-                self.cls_compiled = core.compile_model(str(cls_ir), self.device)
+                self.cls_compiled = core.compile_model(str(cls_ir), self.device, ov_config)
                 OpenVINOOCRProcessor._cls_compiled = self.cls_compiled
             else:
                 logger.warning(f"Classification model not found: {cls_ir}")
