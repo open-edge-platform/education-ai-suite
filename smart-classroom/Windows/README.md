@@ -79,7 +79,7 @@ For more information see [How it works](../docs/user-guide/how-it-works.md)
 
 ## GPU Queue Priority
 
-[OpenCL](https://www.khronos.org/opencl/) (Open Computing Language) is an open
+OpenCL (Open Computing Language) is an open
 Khronos Group standard for running compute workloads on GPUs and other accelerators.
 Work is submitted to the device through command queues, and the OpenVINO GPU plugin
 uses OpenCL to execute models on Intel GPUs. OpenCL lets each queue carry a priority
