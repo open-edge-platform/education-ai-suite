@@ -79,8 +79,33 @@ For more information see [How it works](../docs/user-guide/how-it-works.md)
 
 ## GPU Queue Priority
 
+OpenCL (Open Computing Language) is an open
+Khronos Group standard for running compute workloads on GPUs and other accelerators.
+Work is submitted to the device through command queues, and the OpenVINO GPU plugin
+uses OpenCL to execute models on Intel GPUs. OpenCL lets each queue carry a priority
+hint, so the GPU driver can schedule higher-priority work first when several
+workloads compete for the GPU.
+
 Set `models.gpu_queue_priority` in [config.yaml](./config.yaml) to control the
-OpenVINO GPU queue priority used by Smart Classroom services. It defaults to
-`LOW`; set it to `MEDIUM` or `HIGH` to raise Smart Classroom's priority as needed.
-The setting applies to services running OpenVINO on a GPU; CPU and NPU workloads
-are unaffected.
+OpenVINO GPU queue priority used by Smart Classroom services. It maps to the
+OpenVINO GPU plugin property `GPU_QUEUE_PRIORITY` (`ov::intel_gpu::hint::queue_priority`),
+which sets the OpenCL queue priority hint defined in the
+[OpenCL 2.1 extensions specification](https://www.khronos.org/registry/OpenCL/specs/opencl-2.1-extensions.pdf).
+
+```yaml
+models:
+  gpu_queue_priority: LOW # LOW, MEDIUM, or HIGH
+```
+
+| Value    | OpenCL priority hint           | Notes                                              |
+|----------|--------------------------------|----------------------------------------------------|
+| `LOW`    | `CL_QUEUE_PRIORITY_LOW_KHR`    | Smart Classroom default; yields GPU to other apps  |
+| `MEDIUM` | `CL_QUEUE_PRIORITY_MED_KHR`    | OpenVINO plugin default                            |
+| `HIGH`   | `CL_QUEUE_PRIORITY_HIGH_KHR`   | Favors Smart Classroom when sharing the GPU        |
+
+- Values are case-insensitive; missing or invalid values fall back to `LOW`.
+- The setting applies only to services running OpenVINO on a GPU device
+  (for example the VLM serving component); CPU and NPU workloads are unaffected.
+- Restart Smart Classroom after changing the value.
+- The priority is a hint to the driver; its effect depends on GPU driver support
+  and is most noticeable when multiple applications share the GPU.
