@@ -8,6 +8,8 @@ import argparse
 import json
 import logging
 import os
+import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -33,6 +35,55 @@ _STARTUP_TYPE_BY_KIND = {
 }
 
 _DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-base"
+
+# When set (docker compose sets it), provisioning first waits for model-downloader's
+# startup jobs to finish. Its compose healthcheck only says the API is up, while the
+# startup model exports keep running afterwards.
+MODEL_DOWNLOADER_URL = os.environ.get("MODEL_DOWNLOADER_URL", "")
+MODEL_DOWNLOADER_WAIT_TIMEOUT_S = float(os.environ.get("MODEL_DOWNLOADER_WAIT_TIMEOUT_S", "1800"))
+_TERMINAL_JOB_STATES = {"completed", "failed", "canceled", "cancelled"}
+
+
+def _fetch_downloader_jobs(url: str) -> list:
+    # Internal service call: bypass any HTTP(S)_PROXY from the environment.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(f"{url.rstrip('/')}/jobs", timeout=10) as resp:
+        return json.load(resp).get("jobs", [])
+
+
+def wait_for_downloader_jobs(
+    url: str = MODEL_DOWNLOADER_URL,
+    timeout_s: float = MODEL_DOWNLOADER_WAIT_TIMEOUT_S,
+    poll_s: float = 5.0,
+) -> None:
+    """Block until model-downloader has no in-flight jobs (no-op if ``url`` is unset)."""
+    if not url:
+        return
+    deadline = time.monotonic() + timeout_s
+    announced = False
+    while True:
+        try:
+            jobs = _fetch_downloader_jobs(url)
+        except (OSError, ValueError) as exc:
+            logger.warning("⚠️  Could not query model-downloader at %s (%s) — relying on the on-disk check.", url, exc)
+            return
+        active = [j for j in jobs if str(j.get("status", "")).lower() not in _TERMINAL_JOB_STATES]
+        if not active:
+            failed = [j.get("model_name") for j in jobs if str(j.get("status", "")).lower() == "failed"]
+            if failed:
+                logger.warning("⚠️  model-downloader job(s) failed: %s", ", ".join(map(str, failed)))
+            return
+        if not announced:
+            logger.info(
+                "⏳ Waiting for model-downloader to finish: %s",
+                ", ".join(str(j.get("model_name")) for j in active),
+            )
+            announced = True
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"model-downloader still has {len(active)} job(s) in progress after {timeout_s:.0f}s."
+            )
+        time.sleep(poll_s)
 
 
 @dataclass
@@ -281,6 +332,7 @@ def provision_ovms_models(specs: Optional[List[Servable]] = None, check: bool = 
     assembles the mediapipe config that points at each servable's graph.
     """
     specs = specs or build_specs()
+    wait_for_downloader_jobs()
 
     if check:
         missing = [s.model_name for s in specs if not s.is_ready()]
