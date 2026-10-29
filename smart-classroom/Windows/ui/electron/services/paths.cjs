@@ -14,20 +14,12 @@ function isSmartClassroomHome(dir) {
   return !!dir && fs.existsSync(path.join(dir, 'main.py')) && fs.existsSync(path.join(dir, 'config.yaml'));
 }
 
-// Packaged builds ship the backend source under <resources>/backend (see
-// electron-builder.yml). Prefer that when present so the installed app finds
-// its source tree without a manual override; otherwise fall back to the
-// source-tree location used during development.
 function home() {
   const override = process.env.SMART_CLASSROOM_HOME;
   if (isSmartClassroomHome(override)) return path.resolve(override);
   return packagedHome() ?? BUNDLED_HOME;
 }
 
-// <install>/resources is the real on-disk resource dir (unlike __dirname,
-// which sits inside app.asar once packaged). Guard with isSmartClassroomHome so
-// dev (where process.resourcesPath is Electron's own dir, with no backend/ tree)
-// naturally falls back to the source tree.
 function packagedHome() {
   if (typeof process.resourcesPath !== 'string') return null;
   const candidate = path.join(process.resourcesPath, 'backend');
@@ -36,18 +28,15 @@ function packagedHome() {
 
 const isWindows = process.platform === 'win32';
 
-// Writable state lives under the user's app-data dir so the read-only backend
-// tree stays clean.
 function userDataDir() {
   if (!packagedHome()) return null;
   const override = process.env.SMART_CLASSROOM_USERDATA;
   if (override) return path.resolve(override);
   return process.env.LOCALAPPDATA
     ? path.join(process.env.LOCALAPPDATA, 'SmartClassroom')
-    : packagedHome(); // last resort: stay inside the packaged tree
+    : packagedHome();
 }
 
-// The backend venv is a sibling of the app root in dev.
 function venvDir() {
   const base = userDataDir() ?? path.dirname(home());
   return path.join(base, 'smartclassroom');
@@ -61,13 +50,11 @@ function layoutServiceDir() {
   return path.join(home(), 'components', 'grading', 'providers', 'layout_detection_service');
 }
 
-// A writable config.yaml under the user-data dir (seeded from the shipped default).
 function configFile() {
   const data = userDataDir();
   return data ? path.join(data, 'config.yaml') : path.join(home(), 'config.yaml');
 }
 
-// Seed the user-data dir and expose it to child processes for their state.
 let ensured = false;
 function ensureUserData() {
   if (ensured) return true;
