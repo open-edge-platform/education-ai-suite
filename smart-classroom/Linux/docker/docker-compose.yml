@@ -196,7 +196,7 @@ services:
       - MODEL_PATH=/opt/models
       - ENABLED_PLUGINS=${ENABLED_PLUGINS:-huggingface,openvino}
       - STARTUP_MODELS_CONFIG=/opt/startup-models.yaml
-      - OVMS_RELEASE_TAG=${OVMS_RELEASE_TAG:-v2026.3}
+      - OVMS_RELEASE_TAG=${OVMS_RELEASE_TAG:-v2026.4.1}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-}
@@ -234,6 +234,7 @@ services:
     environment:
       - OVMS_MODELS_ROOT=/opt/models/ovms
       - STARTUP_MODELS_CONFIG=/opt/startup-models.yaml
+      - MODEL_DOWNLOADER_URL=http://model-downloader:8000
     volumes:
       - model-cache:/opt/models
       - ../components/vlm/config/startup-models.yaml:/opt/startup-models.yaml:ro
@@ -245,7 +246,10 @@ services:
 
   ovms:               # OpenVINO Model Server (:9000, internal only)
     profiles: ["text-gen"]
-    image: openvino/model_server:2026.3-gpu
+    # 2026.3.x segfaults in Tokenizer() on the OpenVINO/Qwen3-VL-8B-Instruct-int4-ov IR
+    # (tokenizer exported with a newer openvino_tokenizers); 2026.4.1+ loads it.
+    # Keep model-downloader's OVMS_RELEASE_TAG (.env) aligned with this tag.
+    image: openvino/model_server:2026.4.1-gpu
     container_name: sc-ovms
     command: >-
       --rest_port 9000 --config_path /models/ovms/config.json
