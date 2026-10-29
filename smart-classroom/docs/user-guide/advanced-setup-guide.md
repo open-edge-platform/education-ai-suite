@@ -86,8 +86,8 @@ By default, the project uses Whisper for transcription, and summarization runs o
 
 ```yaml
 asr:
-  provider: openai            # Supported: openvino, openai, funasr
-  name: whisper-small          # Options: whisper-tiny, whisper-small, paraformer-zh etc.
+  provider: openvino            # Supported: openvino, openai, funasr
+  name: whisper-base         # Options: whisper-tiny, whisper-small, paraformer-zh etc.
   device: CPU                 # Whisper currently supports only CPU
   temperature: 0.0
 
