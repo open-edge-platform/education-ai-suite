@@ -401,3 +401,57 @@ def test_tool_choice_none_works_without_tool_support(client_for):
         "tools": TOOLS, "tool_choice": "none", "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 200 and r.json()["choices"][0]["message"]["content"] == "plain answer"
     assert handler.calls[0][1]["tools"] is None
+
+
+# --- client disconnect ---------------------------------------------------------
+class _EndlessStream:
+    def __init__(self):
+        self.closed = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.closed:
+            raise StopIteration
+        return "tok "
+
+    def close(self):
+        self.closed += 1
+
+
+@pytest.mark.parametrize("spec_version", ["2.4", "2.3"])
+@pytest.mark.parametrize("tools", [False, True])
+def test_disconnect_closes_the_token_stream_without_waiting_for_gc(spec_version, tools):
+    import asyncio
+
+    tokens = _EndlessStream()
+    if tools:
+        specs = vlm_chat.tc.normalize_tools(TOOLS)
+        parser = vlm_chat.tc.ToolStreamParser(specs, vlm_chat.tc.resolve_tool_choice("auto", specs))
+        body = vlm_chat._tool_sse_stream(tokens, parser, {}, "m")
+    else:
+        body = vlm_chat._sse_stream(tokens, "m", {})
+    response = vlm_chat._TokenStreamResponse(body, tokens, media_type="text/event-stream")
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+        if spec_version == "2.4" and len(sent) > 3:
+            raise OSError("client went away")  # what uvicorn raises after a disconnect
+
+    async def receive():
+        await asyncio.sleep(0.05)
+        return {"type": "http.disconnect"}
+
+    scope = {"type": "http", "asgi": {"spec_version": spec_version}}
+
+    async def run():
+        try:
+            await response(scope, receive, send)
+        except Exception:  # noqa: BLE001 - ClientDisconnect on the 2.4 path
+            pass
+
+    asyncio.run(run())
+    # ``body`` is still referenced here, so only the response could have closed it.
+    assert tokens.closed >= 1 and body is not None

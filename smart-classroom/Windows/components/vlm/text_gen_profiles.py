@@ -15,9 +15,9 @@ config node into a :class:`TextGenPlan`:
   method without a qualified profile becomes plain generation under
   ``mode: auto`` and an actionable failure under ``mode: "on"``.
 
-The only speculative profile is DFlash for Qwen3.6-35B-A3B INT4. ``dflash2``
-and ``mtp`` stay valid settings without a profile: plain generation under
-``auto``, an actionable failure under ``"on"``.
+Speculative profiles: DFlash for Qwen3.6-35B-A3B INT4 and Eagle3 for
+Qwen3-VL-8B-Instruct INT4. ``dflash2`` and ``mtp`` stay valid settings without a
+profile: plain generation under ``auto``, an actionable failure under ``"on"``.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from typing import Mapping, Optional
 from utils.model_paths import OPENVINO_MODELS_DIR, SC_ROOT, openvino_model_dir
 
 MODES = ("off", "auto", "on")
-METHODS = ("auto", "dflash", "dflash2", "mtp")
+METHODS = ("auto", "dflash", "dflash2", "eagle3", "mtp")
 DRAFT_SOURCES = ("huggingface", "local", "target")
 SPECULATIVE_KEYS = frozenset({
     "mode", "method", "draft_source", "draft_model", "draft_revision", "num_assistant_tokens",
@@ -74,6 +74,9 @@ class SpeculativeProfile:
     min_genai_version: str = "2026.3"
     ov_properties: Mapping = field(default_factory=dict)
     scheduler: Mapping = field(default_factory=dict)
+    # ``app.language`` values the profile is qualified for; None = any language.
+    # Under any other language the plan is plain (auto) or a startup error (on).
+    languages: Optional[tuple] = None
 
 
 @dataclass(frozen=True)
@@ -115,12 +118,44 @@ _QWEN36_DFLASH = SpeculativeProfile(
     },
 )
 
+# Eagle3 drafter (one Llama layer reading three target hidden states, 32k draft
+# vocabulary) exported to INT4: 259 MB, and faster than INT8/FP16 in the sweep.
+# Measured on the 20 EvalScope a_okvqa requests, greedy: offline on Arc 140T
+# 13.3 -> 21.7 tok/s at k=4 (k=3 1.48x, k=5 1.58x); Arc B390 23.7 -> 35.9 tok/s
+# (k=3 36.0). Through the service on Arc 140T: 13.2 -> 18.0 tok/s (1.36x).
+# The drafter predicts English only: Chinese output accepts ~1.2 tokens per step
+# (the taobao-mnn drafter ~1.4), 28-55% slower than plain on Arc 140T, and the
+# paged pipeline adds ~30% to the first token of a 10K-token Chinese classroom
+# prompt (decode speed without drafting is about the same as plain). The profile is therefore qualified
+# for app.language en only; zh deployments keep the plain pipeline.
+# The profile pins GPU_QUEUE_PRIORITY=MEDIUM over models.gpu_queue_priority: a
+# draft/verify step submits many small GPU jobs, and on a LOW queue the Arc 140T
+# decoded 72 ms/token instead of 55 at the same acceptance, no faster than plain.
+# The KV cache keeps the runtime's default precision: f16 made 6.5K-token
+# classroom prompts decode 10-25% slower and was not used in the measurements.
+_QWEN3VL8B_EAGLE3 = SpeculativeProfile(
+    method="eagle3",
+    precisions=("int4",),
+    draft_repo="AQ-MedAI/Qwen3-VL-8B-Instruct-eagle3",
+    draft_revision="29ffa460d80e1d88a015902ae0333ff87ffe3184",
+    draft_export_weight_format="int4",
+    num_assistant_tokens=4,
+    num_assistant_tokens_range=(1, 8),
+    # The VLM (inputs_embeds) Eagle3 path was qualified on 2026.4.1.
+    min_genai_version="2026.4",
+    ov_properties={"GPU_ENABLE_LARGE_ALLOCATIONS": "YES", "GPU_QUEUE_PRIORITY": "MEDIUM"},
+    scheduler={"max_num_seqs": 1, "enable_prefix_caching": False},
+    languages=("en",),
+)
+
 CATALOG: Mapping[str, TargetProfile] = {
     "qwen/qwen3-vl-8b-instruct": TargetProfile(
         name="Qwen/Qwen3-VL-8B-Instruct",
         ir_repos={"int4": "OpenVINO/Qwen3-VL-8B-Instruct-int4-ov",
                   "int8": "OpenVINO/Qwen3-VL-8B-Instruct-int8-ov"},
         tool_calls=True,
+        default_method="eagle3",
+        methods={"eagle3": _QWEN3VL8B_EAGLE3},
     ),
     "qwen/qwen3.5-9b": TargetProfile(
         name="Qwen/Qwen3.5-9B",
@@ -266,8 +301,12 @@ def _optional_str(key, value) -> Optional[str]:
     return value.strip()
 
 
-def resolve_plan(text_gen) -> TextGenPlan:
-    """Resolve ``models.text_gen`` into a validated serving plan."""
+def resolve_plan(text_gen, language: Optional[str] = None) -> TextGenPlan:
+    """Resolve ``models.text_gen`` into a validated serving plan.
+
+    ``language`` is ``app.language``; a profile qualified for other languages
+    only is not used (None skips the check).
+    """
     if text_gen is None:
         raise ValueError("models.text_gen is not configured")
     model_name = str(_get(text_gen, "vlm_name"))
@@ -365,6 +404,13 @@ def resolve_plan(text_gen) -> TextGenPlan:
         return _unqualified(base, mode, method, (
             f"{resolved_method} is not qualified for {model_name} {weight_format} "
             f"(qualified: {', '.join(profile.precisions)})"
+        ))
+    lang = str(language).strip().lower() if language is not None else None
+    if lang is not None and profile.languages is not None and lang not in profile.languages:
+        return _unqualified(base, mode, method, (
+            f"{resolved_method} is not qualified for app.language {lang} "
+            f"(qualified: {', '.join(profile.languages)}); its drafter predicts "
+            "English, and plain generation is faster for this language"
         ))
     return TextGenPlan(mode=mode, requested_method=method, speculative=settings, **base)
 

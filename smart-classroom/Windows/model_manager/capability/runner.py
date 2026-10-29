@@ -27,6 +27,9 @@ class _SlotStream:
         self._iterator = iterator
         self._release = release
         self._closed = False
+        # The response may close the stream on the event loop while the
+        # generation thread closes it at the end of iteration.
+        self._close_lock = Lock()
 
     def __iter__(self) -> "_SlotStream":
         return self
@@ -47,9 +50,10 @@ class _SlotStream:
             raise
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
         # A consumer that left early (client disconnect) closes the stream so
         # native work can stop. A stream backed by native inference may hold
         # the slot until that work has actually ended (release_when_idle).

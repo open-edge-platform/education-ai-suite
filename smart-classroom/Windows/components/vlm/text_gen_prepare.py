@@ -94,6 +94,62 @@ sys.argv = ["optimum-cli"] + sys.argv[1:]
 main()
 """
 
+# optimum-intel 2.2.0 exports a VLM Eagle3 drafter (inputs_embeds, 3D M-RoPE
+# position_ids, the target's hidden states) only under transformers <= 4.57.6, so
+# the export runs on an export-only overlay put first on sys.path here (-I ignores
+# PYTHONPATH). SpecForge checkpoints name the drafter's weights without the
+# ``model.`` prefix optimum's LlamaEagle3ForCausalLM expects; a re-keyed copy is
+# written beside the output and removed afterwards, the pinned source stays as
+# downloaded. The classes are registered for LlamaConfig as subclasses for the
+# same reasons as in _DFLASH_EXPORT: no trust_remote_code, and a class defined
+# under ``optimum.*`` would be taken for a wrapper of another model.
+_EAGLE3_EXPORT = """\
+import importlib, json, shutil, sys
+from pathlib import Path
+overlay, source, weight_format, out = sys.argv[1:5]
+sys.path.insert(0, overlay)
+try:
+    importlib.import_module("datasets")
+except ImportError as exc:
+    sys.modules["datasets"] = None
+    print(f"Optional module datasets cannot be loaded ({exc}); exporting without it.")
+from safetensors.torch import load_file, save_file
+source, keyed = Path(source), Path(out + ".src")
+shutil.rmtree(keyed, ignore_errors=True)
+keyed.mkdir(parents=True)
+rekey = lambda name: name if name.startswith("model.") else "model." + name
+for path in source.glob("*.json"):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data.get("weight_map"), dict):
+        data["weight_map"] = {rekey(k): v for k, v in data["weight_map"].items()}
+    (keyed / path.name).write_text(json.dumps(data), encoding="utf-8")
+for path in source.glob("*.safetensors"):
+    tensors = load_file(str(path))
+    save_file({rekey(k): v.contiguous() for k, v in tensors.items()}, str(keyed / path.name),
+              metadata={"format": "pt"})
+from transformers import AutoModel, AutoModelForCausalLM, LlamaConfig
+from optimum.exporters.openvino import model_patcher as mp
+class Eagle3Model(mp.LlamaEagle3Model): pass
+class Eagle3ForCausalLM(mp.LlamaEagle3ForCausalLM): pass
+AutoModel.register(LlamaConfig, Eagle3Model, exist_ok=True)
+AutoModelForCausalLM.register(LlamaConfig, Eagle3ForCausalLM, exist_ok=True)
+from optimum.commands.optimum_cli import main
+sys.argv = ["optimum-cli", "export", "openvino", "--model", str(keyed),
+            "--task", "text-generation-with-past", "--library", "transformers",
+            "--weight-format", weight_format, "--group-size", "128", "--ratio", "1.0", out]
+try:
+    main()
+finally:
+    shutil.rmtree(keyed, ignore_errors=True)
+"""
+# transformers build (and the hub client it needs) for the Eagle3 export overlay.
+_EAGLE3_EXPORT_TRANSFORMERS = "4.57.6"
+_EAGLE3_EXPORT_EXTRA = ("huggingface_hub==0.36.0",)
+# Drafter IR interface the GenAI Eagle3 runtime drives for a VLM target.
+_EAGLE3_INPUTS = ("hidden_states", "inputs_embeds", "position_ids")
+_EAGLE3_OUTPUTS = ("logits", "d2t")
+EAGLE3_DRAFT_RT_INFO_KEY = "eagle3_mode"
+
 
 class PreparationError(RuntimeError):
     """An artifact could not be acquired or produced (network, disk, export)."""
@@ -262,6 +318,12 @@ def _prepare_speculative(plan: TextGenPlan, target_dir: Path) -> PreparedSpecula
         if settings.source != "local":  # a local drafter is used exactly as given
             draft_dir = ensure_draft_head(target_dir, draft_dir)
         return PreparedSpeculative(settings, derived, draft_dir, revision)
+    if settings.method == "eagle3":
+        # The runtime taps the target's hidden states itself: the ordinary
+        # target is used as-is, and the drafter keeps its own draft-vocab head.
+        draft_dir, revision = _prepare_external_draft(plan)
+        validate_eagle3_pair(target_dir, draft_dir)
+        return PreparedSpeculative(settings, target_dir, draft_dir, revision)
     # Only reachable if the catalog grows a method without a preparation adapter.
     raise SpeculativeUnavailableError(f"no preparation adapter for {settings.method}")
 
@@ -329,27 +391,35 @@ def _export_draft(source_dir: Path, draft_dir: Path, settings: SpeculativeSettin
     """Convert a drafter checkpoint to IR through the profile's recipe.
 
     No ``--trust-remote-code``: repository code is never executed (see
-    ``_DFLASH_EXPORT``). A checkpoint the installed exporter cannot convert
-    fails here, which ``auto`` reports as a plain fallback.
+    ``_DFLASH_EXPORT`` and ``_EAGLE3_EXPORT``). A checkpoint the installed
+    exporter cannot convert fails here, which ``auto`` reports as a plain fallback.
     """
     staging = draft_dir.with_name(draft_dir.name + ".partial")
     if staging.exists():
         shutil.rmtree(staging)
     fmt = settings.profile.draft_export_weight_format or "int4"
     # The interpreter's own environment; -X utf8 keeps the exporter's progress
-    # output printable on non-UTF-8 consoles. --all-layers as the reference draft.
-    cmd = [sys.executable, "-I", "-X", "utf8", "-c", _DFLASH_EXPORT,
-           "export", "openvino", "--model", str(source_dir),
-           "--task", "text-generation-with-past", "--weight-format", fmt, "--all-layers",
-           str(staging)]
+    # output printable on non-UTF-8 consoles.
+    if settings.method == "eagle3":
+        cmd = [sys.executable, "-I", "-X", "utf8", "-c", _EAGLE3_EXPORT,
+               str(_eagle3_overlay()), str(source_dir), fmt, str(staging)]
+        needs = (f"optimum-intel>=2.2.0 and transformers {_EAGLE3_EXPORT_TRANSFORMERS} in the "
+                 "export overlay")
+    else:
+        # --all-layers as the reference DFlash drafter.
+        cmd = [sys.executable, "-I", "-X", "utf8", "-c", _DFLASH_EXPORT,
+               "export", "openvino", "--model", str(source_dir),
+               "--task", "text-generation-with-past", "--weight-format", fmt, "--all-layers",
+               str(staging)]
+        needs = "optimum-intel>=2.2.0"
     env = os.environ.copy()
     env["HF_HUB_OFFLINE"] = "1"   # convert only what was downloaded and pinned
-    logger.info("Exporting drafter %s to OpenVINO IR (%s)", repo, fmt)
+    logger.info("Exporting %s drafter %s to OpenVINO IR (%s)", settings.method, repo, fmt)
     completed = subprocess.run(cmd, env=env, check=False)
     if completed.returncode != 0:
         raise PreparationError(
             f"drafter export of {repo} failed (exit {completed.returncode}); it needs "
-            "optimum-intel>=2.2.0 (pip install -r requirements.txt)"
+            f"{needs} (pip install -r requirements.txt)"
         )
     source_cfg = _read_json(source_dir / "config.json")
     exported_cfg = _read_json(staging / "config.json")
@@ -369,6 +439,70 @@ def _export_draft(source_dir: Path, draft_dir: Path, settings: SpeculativeSettin
     if draft_dir.exists():
         _set_aside(draft_dir, "superseded")
     staging.replace(draft_dir)
+
+
+def _eagle3_overlay() -> Path:
+    """Export-only transformers build for the Eagle3 drafter, provisioned once."""
+    if str(_CONTENT_SEARCH_DIR) not in sys.path:
+        sys.path.append(str(_CONTENT_SEARCH_DIR))
+    from components.vlm.vlm_openvino_serving.utils.utils import ensure_transformers_overlay
+
+    try:
+        return ensure_transformers_overlay(_EAGLE3_EXPORT_TRANSFORMERS, _EAGLE3_EXPORT_EXTRA)
+    except RuntimeError as exc:  # pip failure: an acquisition error, not an incompatibility
+        raise PreparationError(str(exc)) from exc
+
+
+# ----------------------------------------------------------------------------
+# Eagle3 compatibility
+# ----------------------------------------------------------------------------
+def eagle3_ir_interface(xml_path: Path) -> tuple:
+    """``({input name: rank}, {output names})`` of an IR, read from its XML."""
+    inputs, outputs = {}, set()
+    with open(xml_path, "rb") as handle:
+        for _, elem in ET.iterparse(handle, events=("end",)):
+            if elem.tag != "layer":
+                continue
+            if elem.get("type") == "Parameter":
+                port = elem.find("output/port")
+                inputs[elem.get("name")] = len(port.findall("dim")) if port is not None else 0
+            elif elem.get("type") == "Result":
+                outputs.update(n for n in (elem.get("output_names") or "").split(",") if n)
+            elem.clear()
+    return inputs, outputs
+
+
+def validate_eagle3_pair(target_dir: Path, draft_dir: Path) -> None:
+    """Check an exported Eagle3 drafter against the target it will run with."""
+    draft_cfg = _read_json(draft_dir / "config.json")
+    if not any("eagle3" in str(a).lower() for a in draft_cfg.get("architectures") or []):
+        raise CompatibilityError("drafter config.json does not declare an Eagle3 architecture")
+    target_type = _read_json(target_dir / "config.json").get("model_type")
+    if draft_cfg.get("target_model_type") != target_type:
+        raise CompatibilityError(
+            f"drafter was trained for {draft_cfg.get('target_model_type')!r}, the target is "
+            f"{target_type!r}; the drafter belongs to a different model"
+        )
+    target_cfg = _model_config(target_dir)
+    for key in ("hidden_size", "vocab_size"):
+        drafted, target = draft_cfg.get(key), target_cfg.get(key)
+        if isinstance(drafted, int) and isinstance(target, int) and drafted != target:
+            raise CompatibilityError(
+                f"drafter {key} ({drafted}) does not match the target ({target})")
+    xml_path = draft_dir / "openvino_model.xml"
+    inputs, outputs = eagle3_ir_interface(xml_path)
+    missing = [n for n in _EAGLE3_INPUTS if n not in inputs]
+    missing += [n for n in _EAGLE3_OUTPUTS if n not in outputs]
+    if missing:
+        raise CompatibilityError(
+            f"drafter IR is not a VLM Eagle3 export (missing {', '.join(missing)}); "
+            "re-export it with the qualified recipe")
+    if inputs["position_ids"] != 3:
+        raise CompatibilityError(
+            f"drafter position_ids has rank {inputs['position_ids']}, not the 3D M-RoPE ids "
+            "a Qwen-VL target passes")
+    if not has_model_rt_info(xml_path, EAGLE3_DRAFT_RT_INFO_KEY):
+        raise CompatibilityError(f"drafter IR lacks the {EAGLE3_DRAFT_RT_INFO_KEY} marker")
 
 
 # ----------------------------------------------------------------------------
