@@ -2,6 +2,7 @@ import logging, os, sys
 from pathlib import Path
 import yaml
 from utils.config_loader import config
+from utils.data_dirs import models_base_path
 from utils.cli_utils import run_cli
 from utils.convert_classification_models import convert_classification_models
 from utils.convert_yolo_models import convert_yolo_models
@@ -275,14 +276,14 @@ def ensure_model():
 
 
 def get_asr_model_path() -> str:
-    return os.path.join(config.models.asr.models_base_path, config.models.asr.provider, f"{config.models.asr.name.replace('/', '_')}")
+    return os.path.join(models_base_path(), config.models.asr.provider, f"{config.models.asr.name.replace('/', '_')}")
 
 def get_va_model_path() -> str:
-    return os.path.join(config.models.va.models_base_path, "va")
+    return os.path.join(models_base_path(), "va")
 
 def get_diarization_model_path() -> str:
     return os.path.join(
-        config.models.diarization.models_base_path,
+        models_base_path(),
         config.models.diarization.provider,
         config.models.diarization.name.replace('/', '_')
     )

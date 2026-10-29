@@ -9,9 +9,6 @@ files:
   - electron/**/*
   - package.json
 
-# The installer ships the whole Windows source root as an `extraResource`, so
-# the in-app Setup flow can lay down the Python env / models on the client from
-# `resources/backend` (which becomes the backend `home` via SMART_CLASSROOM_HOME).
 win:
   target:
     - nsis
@@ -27,7 +24,6 @@ extraResources:
     to: backend
     filter:
       - '**/*'
-      # build/dependency/monitoring artifacts never belong in the shipped source:
       - '!**/node_modules/**'
       - '!**/dist/**'
       - '!**/release/**'
@@ -38,5 +34,4 @@ extraResources:
       - '!**/.env'
       - '!**/venv_convert/**'
       - '!**/.pytest_cache/**'
-      # vendor telemetry toolchain is too large and not needed at runtime:
       - '!**/monitoring/tools/socwatch_windows_v2026.0/**'

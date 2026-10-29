@@ -18,3 +18,7 @@ def user_data_dir():
 def models_root():
     data = user_data_dir()
     return data / "models" if data else None
+
+def models_base_path() -> str:
+    root = models_root()
+    return str(root) if root else "models"

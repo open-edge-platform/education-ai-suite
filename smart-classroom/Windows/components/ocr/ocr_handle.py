@@ -151,12 +151,13 @@ class OcrHandler:
             )
         elif provider == "openvino":
             self._ensure_openvino_models(config)
+            from utils.data_dirs import models_base_path
             from components.ocr.openvino.openvino_ocr_processor import OpenVINOOCRProcessor
             processor = OpenVINOOCRProcessor(
                 lang=config.app.language,
                 use_angle_cls=True,
                 device=config.models.ocr.device,
-                ir_models_dir=config.models.ocr.model_dir,
+                ir_models_dir=f"{models_base_path()}/ocr",
             )
             if getattr(processor, "cls_compiled", None) is not None:
                 models.append(ocr.cls_model)
@@ -177,8 +178,9 @@ class OcrHandler:
         from pathlib import Path
         import openvino as ov
         from paddlex.inference.utils.official_models import official_models
+        from utils.data_dirs import models_base_path
 
-        model_dir = Path(config.models.ocr.model_dir)
+        model_dir = Path(models_base_path()) / "ocr"
         models = [
             ("det", config.models.ocr.det_model),
             ("rec", config.models.ocr.rec_model),

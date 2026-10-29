@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from utils.data_dirs import user_data_dir
 from utils.runtime_config_loader import RuntimeConfig
 from utils.session_manager import is_path_safe_session_id
 
@@ -7,8 +8,11 @@ from utils.session_manager import is_path_safe_session_id
 class SessionPaths:
     @staticmethod
     def base_dir() -> Path:
-        """<location>/<name> - project base, where global files (e.g. sessions.db) live."""
+        """Where global files (e.g. sessions.db) and per-session artifacts live."""
         proj = RuntimeConfig.get_section("Project")
+        data = user_data_dir()
+        if data:
+            return data / "storage" / proj.get("name")
         return Path(proj.get("location")) / proj.get("name")
 
     @staticmethod
