@@ -1,0 +1,13 @@
+.env
+models/*
+!models/.gitkeep
+outputs/*
+!outputs/.gitkeep
+sample-videos/*
+!sample-videos/.gitkeep
+storage/
+runs/
+datasets/
+__pycache__/
+*.pyc
+.venv-models/

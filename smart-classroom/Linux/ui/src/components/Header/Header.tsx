@@ -126,8 +126,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({ projectName, featureGuard }) => {
   const hasAudioFeatures = featureGuard.hasFeature('asr') ||
                            featureGuard.hasFeature('summary') ||
                            featureGuard.hasFeature('mindmap') ||
-                           featureGuard.hasFeature('topic_segmentation') ||
-                           featureGuard.hasFeature('report');
+                           featureGuard.hasFeature('topic_segmentation');
 
   useEffect(() => {
     dispatch(loadCameraSettingsFromStorage());

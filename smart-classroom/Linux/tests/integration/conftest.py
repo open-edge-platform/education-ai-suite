@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.mocks.pipeline import make_pipeline_mock
-from tests.mocks.board_ocr import make_board_ocr_mocks
 
 
 @pytest.fixture(scope="session")
@@ -27,16 +26,11 @@ def _mock_orchestrator():
     reach into utils.orchestrator to tune a specific mock's side effect.
     """
     pipeline = make_pipeline_mock()
-    start_ocr, stop_ocr = make_board_ocr_mocks()
 
     with patch("utils.orchestrator.Pipeline", return_value=pipeline), \
-         patch("utils.orchestrator.StorageManager.wait_idle"), \
-         patch("components.board_ocr.board_ocr_pipeline.start_board_ocr", start_ocr), \
-         patch("components.board_ocr.board_ocr_pipeline.stop_board_ocr", stop_ocr):
+         patch("utils.orchestrator.StorageManager.wait_idle"):
         yield {
             "pipeline": pipeline,
-            "start_ocr": start_ocr,
-            "stop_ocr": stop_ocr,
         }
 
 

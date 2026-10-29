@@ -24,7 +24,6 @@ import {
   appendSummary,
   finishSummary,
   setSummaryProgress,
-  setBoardOcrPartial,
 } from './slices/summarySlice';
 import {
   startMindmap,
@@ -297,8 +296,6 @@ function useSummaryStage() {
               sentFirst = true;
             }
             dispatch(appendSummary(ev.token));
-          } else if (ev.type === 'board_ocr_partial') {
-            dispatch(setBoardOcrPartial(true));
           } else if (ev.type === 'summary_progress') {
             dispatch(setSummaryProgress({ stage: ev.stage, chunk: ev.chunk, chunks: ev.chunks }));
           } else if (ev.type === 'error') {

@@ -14,6 +14,11 @@ def make_va_service_mock(launch_results=True, launch_raises=None,
     """
     service = MagicMock(name="VideoAnalyticsPipelineService")
     service.pipeline_final_status = {}
+    service.get_pose_stats.return_value = (
+        {"student_count": 30, "stand_count": 2, "raise_up_count": 5,
+         "stand_reid": [], "raise_reid": []},
+        {},
+    )
     final_status = final_status or {}
 
     def _launch(name, source, options):

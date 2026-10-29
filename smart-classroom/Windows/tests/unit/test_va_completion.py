@@ -1,6 +1,11 @@
+import json
 import threading
 
-from utils.va_completion import wait_for_va_completion
+import pytest
+
+from utils.session_paths import SessionPaths
+from utils.session_state_manager import SessionState
+from utils.va_completion import save_va_outputs, wait_for_va_completion
 
 
 class FakeService:
@@ -80,3 +85,54 @@ def test_brief_dip_does_not_complete_prematurely():
     # grace_polls=3 -> the single down tick never accumulates to 3, so it times out
     ok, _ = _wait(service, ["front"], timeout=0.3, interval=0.01, grace_polls=3)
     assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# save_va_outputs
+# ---------------------------------------------------------------------------
+SESSION = "20260101-000000-beef"
+
+
+class StatsService:
+    """Stand-in exposing get_pose_stats only."""
+
+    def __init__(self, stats=None, raises=None):
+        self.stats = stats if stats is not None else {"student_count": 30, "raise_up_count": 5}
+        self.raises = raises
+        self.posture_files = []
+
+    def get_pose_stats(self, front_posture_file, previous_state=None):
+        self.posture_files.append(front_posture_file)
+        if self.raises:
+            raise self.raises
+        return dict(self.stats), {}
+
+
+@pytest.fixture(autouse=True)
+def _no_senders(monkeypatch):
+    monkeypatch.setattr("utils.scp_sender.get_scp_sender", lambda: None)
+    monkeypatch.setattr("utils.telegram_sender.get_sender", lambda: None)
+
+
+def test_save_va_outputs_writes_class_statistics():
+    service = StatsService()
+    stats = save_va_outputs(service, SESSION)
+
+    assert stats == {"student_count": 30, "raise_up_count": 5}
+    path = SessionPaths.class_statistics_path(SESSION)
+    assert json.loads(path.read_text(encoding="utf-8")) == stats
+    assert service.posture_files == [str(SessionPaths.va_dir(SESSION) / "front_posture.txt")]
+
+
+def test_save_va_outputs_records_known_video_duration(monkeypatch):
+    monkeypatch.setattr(SessionState, "get_video_duration", classmethod(lambda cls, sid: 3312.46))
+    stats = save_va_outputs(StatsService(), SESSION)
+
+    assert stats["duration_sec"] == 3312.5
+    saved = json.loads(SessionPaths.class_statistics_path(SESSION).read_text(encoding="utf-8"))
+    assert saved["duration_sec"] == 3312.5
+
+
+def test_save_va_outputs_never_raises():
+    assert save_va_outputs(StatsService(raises=RuntimeError("bad posture file")), SESSION) is None
+    assert not SessionPaths.class_statistics_path(SESSION).exists()

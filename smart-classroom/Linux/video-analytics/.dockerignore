@@ -1,0 +1,16 @@
+# Keep build contexts lean. Only large/runtime data is excluded here; which
+# source files land in each image is controlled by explicit COPY in the
+# Dockerfiles (docker/Dockerfile.va-pipeline, docker/Dockerfile.va-provision),
+# so dev-only files like requirements-models.txt simply aren't copied into the
+# runtime image.
+datasets/
+runs/
+outputs/
+models/
+sample-videos/
+storage/
+.venv-models/
+__pycache__/
+*.pyc
+.env
+.git

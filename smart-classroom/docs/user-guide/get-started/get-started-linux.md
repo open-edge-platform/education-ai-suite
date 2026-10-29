@@ -1,5 +1,8 @@
 # Get Started on Linux
 
+> [!IMPORTANT]
+> **Feature availability disclaimer:** The Linux version of Smart Classroom is still under development and does not yet include all features available in the Windows version.The current Linux feature scope is speech-to-text transcription (ASR), summary generation, mind map generation, and video analytics (VA). Do not assume that other Windows features or all Windows workflows are supported on Linux.
+
 This guide walks you through cloning the repository, configuring defaults, and running the application on Linux using the `setup.sh` script.
 
 ## Step 1: Prerequisites
@@ -36,11 +39,7 @@ features:
   asr:                { enabled: true }   # Speech-to-text transcription
   summary:            { enabled: true }   # AI class summary / report
   mindmap:            { enabled: true }   # Mind map generation
-  topic_segmentation: { enabled: true }
-  video_analytics:    { enabled: true }   # Video ingestion / analytics
-  board_ocr:          { enabled: true }   # OCR of the teacher's display (IFPD)
-  content_search:     { enabled: true }   # Multimodal search + RAG service
-  qa:                 { enabled: true }   # RAG-based Q&A over uploaded materials
+  video_analytics:    { enabled: true }   # Video analytics
 ```
 
 ### B. Default Configuration

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+import os
 import urllib.parse
 import mimetypes
 import json
@@ -17,6 +18,7 @@ from utils.task_service import task_service
 from utils.storage_service import storage_service
 from utils.asset_service import asset_service
 from utils.search_service import search_service
+from utils.schemas_task import TaskStatus
 from utils.core_responses import resp_200, fail_task_not_found, fail_process_failed, fail_processing
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
@@ -131,8 +133,14 @@ class IngestPathRequest(BaseModel):
     chunk_duration: Optional[int] = None
 
 
-# Loopback addresses allowed to use server-side path ingest.
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"}
+# Opt-in for a local client that runs alongside the backend (inherited by
+# content_search through main.py -> start_services.py). The Linux setup never
+# sets it, so path ingest does not exist in browser deployments.
+_PATH_INGEST_ENV = "CS_ENABLE_PATH_INGEST"
+
+
+def _path_ingest_enabled() -> bool:
+    return os.environ.get(_PATH_INGEST_ENV, "").strip().lower() in {"1", "true", "yes"}
 
 
 @router.post("/ingest-path")
@@ -149,15 +157,16 @@ async def ingest_local_path(
     localhost HTTP. The file is copied into the object store, so the user's original
     is never touched by later cleanup/delete operations.
 
-    Restricted to loopback callers: the UI is often served on 0.0.0.0, and reading
-    arbitrary server-side paths must not be reachable from other devices.
+    Only enabled when ``_PATH_INGEST_ENV`` is set. A peer-address check cannot gate
+    this: every request arrives through the UI's reverse proxy, so the peer is
+    always 127.0.0.1.
     """
-    client_host = request.client.host if request.client else None
-    if client_host not in _LOOPBACK_HOSTS:
-        logger.warning(f"Rejected /ingest-path from non-loopback client: {client_host}")
+    if not _path_ingest_enabled():
+        client_host = request.client.host if request.client else None
+        logger.warning(f"Rejected /ingest-path (disabled; set {_PATH_INGEST_ENV}) from {client_host}")
         return resp_200(
             code=40300,
-            message="Path-based ingest is only available to local clients."
+            message="Path-based ingest is not enabled on this server."
         )
 
     if not payload.path or not payload.path.strip():
@@ -287,13 +296,13 @@ async def delete_specific_task(
     task_id: str,
     db: Session = Depends(get_db)
 ):
-    task_sql = text("SELECT id, payload, result FROM edu_ai_tasks WHERE id = :tid")
+    task_sql = text("SELECT id, payload, result, status FROM edu_ai_tasks WHERE id = :tid")
     task_row = db.execute(task_sql, {"tid": task_id}).fetchone()
     if not task_row:
         return resp_200(**fail_task_not_found())
     record = dict(task_row._mapping)
     current_status = record.get("status")
-    if current_status == "processing":
+    if current_status == TaskStatus.PROCESSING.value:
         return resp_200(**fail_processing())
     try:
         raw_payload = record.get('payload')
@@ -324,7 +333,7 @@ async def delete_specific_task(
         # Strategy: Delete entire run_id directory (includes raw + derived + OCR)
         if run_id:
             import shutil
-            run_dir = storage_service._store._bucket_path(f_bucket) / "runs" / run_id
+            run_dir = storage_service.get_run_directory(run_id, bucket_name=f_bucket)
             if run_dir.exists():
                 shutil.rmtree(run_dir)
                 logger.info(f"Deleted entire run directory: {run_dir} (raw + derived + OCR)")
@@ -333,7 +342,7 @@ async def delete_specific_task(
         else:
             # Fallback: delete files individually if run_id cannot be determined
             logger.warning(f"No run_id found for task {task_id}, falling back to file-by-file deletion")
-            if storage_service.file_exists(f_path):
+            if f_path and storage_service.file_exists(f_path):
                 storage_service.delete_file(f_path)
 
             # Delete OCR text file if exists
@@ -342,7 +351,7 @@ async def delete_specific_task(
 
         # If OCR was done, the index is under the .ocr.txt path
         index_path = ocr_text_key or f_path
-        if await search_service.check_file_exists(index_path, bucket_name=f_bucket):
+        if index_path and await search_service.check_file_exists(index_path, bucket_name=f_bucket):
             await search_service.delete_file_index(index_path, bucket_name=f_bucket)
 
         if f_hash:
@@ -465,7 +474,7 @@ async def delete_file_by_hash(
         # Strategy: Delete entire run_id directory (includes raw + derived + OCR)
         if run_id:
             import shutil
-            run_dir = storage_service._store._bucket_path(f_bucket) / "runs" / run_id
+            run_dir = storage_service.get_run_directory(run_id, bucket_name=f_bucket)
             if run_dir.exists():
                 shutil.rmtree(run_dir)
                 deletion_results["storage_deleted"] = True
@@ -475,7 +484,7 @@ async def delete_file_by_hash(
                 deletion_results["storage_deleted"] = True
         else:
             # Fallback: delete files individually if run_id cannot be determined
-            if storage_service.file_exists(f_path):
+            if f_path and storage_service.file_exists(f_path):
                 storage_service.delete_file(f_path)
                 deletion_results["storage_deleted"] = True
                 logger.info(f"Deleted file from storage: {f_path}")

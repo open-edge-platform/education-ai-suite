@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 _STAGE_METHODS = ("run_transcription", "run_summarizer", "run_mindmap",
-                  "run_content_segmentation", "run_report_generator")
+                  "run_content_segmentation")
 
 
 def make_pipeline_mock(fail_at=None, fail_with=None, fail_mode="immediate",
