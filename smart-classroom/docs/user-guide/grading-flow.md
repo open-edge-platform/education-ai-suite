@@ -57,6 +57,64 @@ When a task completes, open it to see the graded result:
 
 ![Grading Result](./_assets/grading-result.png)
 
+## Try a Built-in Sample
+
+The repository ships with a set of ready-to-grade sample exams under
+`components/grading/samples/` (a copy is provided for both the Linux and
+Windows layouts). Use them to try the Grading feature end-to-end before you
+prepare your own material.
+
+### Included samples
+
+| Subject | Layout | Paper | Rubric |
+| :--- | :--- | :--- | :--- |
+| Chinese | Single column | `exam/zh_5th_grade_chinese_single_column/scan_single_column.pdf` | `rubrics/zh_sample_5th_grade_chinese.txt` |
+| Math | Double column | `exam/zh_8th_grade_math_double_column/student_1/scan_double_column.pdf` | `rubrics/zh_sample_8th_grade_math.txt` |
+| English | Double column | `exam/zh_9th_grade_english_double_column/student_1/scan_double_column.pdf` | `rubrics/zh_sample_english_exam.txt` |
+| Physics | Single column | `exam/zh_9th_grade_physics_single_column/student_1/scan_single_column.pdf` | `rubrics/zh_sample_physics_exam.txt` |
+
+For example, to try the 5th-grade Chinese sample:
+
+1. **Copy the rubric into the grading directory.** The rubric list is loaded
+   only from the grading component's own `components/grading/rubrics/`
+   directory (its root, not a subfolder). Copy the sample rubric there:
+
+   ```bash
+   cp components/grading/samples/rubrics/zh_sample_5th_grade_chinese.txt \
+      components/grading/rubrics/
+   ```
+
+   It now appears in the **Upload Rubric** list.
+2. **Create a task as described above**, and select:
+   - **Rubric**: `zh_sample_5th_grade_chinese.txt` (from the rubric list)
+   - **Paper**: `components/grading/samples/exam/zh_5th_grade_chinese_single_column/scan_single_column.pdf`
+
+The page layout (single vs double column) is detected automatically — the
+**Page Columns** setting defaults to **Auto**, so there is nothing to choose.
+Leave it at **Auto**.
+
+The paper is picked through the file picker, so navigate to the corresponding
+PDF under `samples/exam/` when selecting it.
+
+### Add your own sample
+
+To run a rubric against your own material, follow the same convention:
+
+1. **Copy the rubric file into `components/grading/rubrics/`** — the only
+   location the system loads rubrics from *at its root*, not nested in a
+   subfolder. Only `.txt` and `.json` files in that root directory are listed
+   (`.json` files must be valid JSON). Follow the same sectioned rubric
+   structure as the bundled samples: each question section carries a title
+   header, an answer-key block, and a scoring-criteria block. The exact block
+   labels are localized, so copy one of the bundled rubric files and edit it as
+   a starting point rather than inventing new labels.
+2. Select your scanned paper through the file picker when creating the task.
+
+Page layout (single vs double column) is detected automatically by default
+(`page_columns: auto` in `components/grading/config.yaml`). You only need to
+override it if automatic detection is wrong for a particular paper — set
+**Page Columns** to **1** or **2** in the grading panel.
+
 ## Models
 
 | Model | Role | Device |
