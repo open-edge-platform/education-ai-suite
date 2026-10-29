@@ -11,19 +11,16 @@ _HERE = Path(__file__).resolve().parent          # layout_detection_service/
 
 
 def _user_data_dir():
-    """Writable app-state root injected by the Electron shell for packaged installs."""
     v = os.environ.get("SMART_CLASSROOM_USERDATA")
     return Path(v) if v and v.strip() else None
 
 
 def _convert_venv_dir() -> Path:
-    """Where the paddle->onnx conversion venv lives (user-data dir when packaged)."""
     data = _user_data_dir()
     return data / "venv_convert" if data else _HERE / "venv_convert"
 
 
 def _remap_to_userdata(p: Path) -> Path:
-    """Relocate a resolved models/ tree path under the user-data dir when packaged."""
     data = _user_data_dir()
     if not data:
         return p

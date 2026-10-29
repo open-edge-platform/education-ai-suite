@@ -36,11 +36,8 @@ function packagedHome() {
 
 const isWindows = process.platform === 'win32';
 
-// Writable state lives under the user's app-data dir in packaged installs so
-// the read-only backend tree under <resources>/backend stays clean (venvs are
-// created, logs written, config copied/edited at runtime). Returns the user-data
-// root in a packaged app, and null in dev so everything stays with the source
-// tree, preserving current behaviour.
+// Writable state lives under the user's app-data dir so the read-only backend
+// tree stays clean.
 function userDataDir() {
   if (!packagedHome()) return null;
   const override = process.env.SMART_CLASSROOM_USERDATA;
@@ -50,9 +47,7 @@ function userDataDir() {
     : packagedHome(); // last resort: stay inside the packaged tree
 }
 
-// The backend venv is a sibling of the app root in dev
-// (smart-classroom/smartclassroom); in a packaged install it sits under the
-// user-data dir.
+// The backend venv is a sibling of the app root in dev.
 function venvDir() {
   const base = userDataDir() ?? path.dirname(home());
   return path.join(base, 'smartclassroom');
@@ -62,22 +57,17 @@ function venvPython(dir = venvDir()) {
   return isWindows ? path.join(dir, 'Scripts', 'python.exe') : path.join(dir, 'bin', 'python');
 }
 
-// Read-only source locations, always under the backend tree.
 function layoutServiceDir() {
   return path.join(home(), 'components', 'grading', 'providers', 'layout_detection_service');
 }
 
-// A writable copy of config.yaml under the user-data dir (seeded once from the
-// shipped default) so Setup can edit it; in dev it points at the source tree.
+// A writable config.yaml under the user-data dir (seeded from the shipped default).
 function configFile() {
   const data = userDataDir();
   return data ? path.join(data, 'config.yaml') : path.join(home(), 'config.yaml');
 }
 
-// Seed the user-data dir: create it and copy the default config on first run.
-// Also expose the user-data root to child processes so the Python backend and
-// every service it spawns write their state there instead of the read-only
-// backend tree. No-op in dev (where there is nothing to seed).
+// Seed the user-data dir and expose it to child processes for their state.
 let ensured = false;
 function ensureUserData() {
   if (ensured) return true;
