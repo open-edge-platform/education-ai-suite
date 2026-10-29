@@ -65,6 +65,12 @@ function ensureUserData() {
     if (typeof process.env.SMART_CLASSROOM_USERDATA !== 'string') {
       process.env.SMART_CLASSROOM_USERDATA = data;
     }
+    if (typeof process.env.PADDLE_PDX_CACHE_HOME !== 'string') {
+      process.env.PADDLE_PDX_CACHE_HOME = path.join(data, 'paddlex');
+    }
+    if (typeof process.env.PIP_CACHE_DIR !== 'string') {
+      process.env.PIP_CACHE_DIR = path.join(data, 'pip-cache');
+    }
     const target = path.join(data, 'config.yaml');
     if (!fs.existsSync(target)) {
       const src = path.join(home(), 'config.yaml');
