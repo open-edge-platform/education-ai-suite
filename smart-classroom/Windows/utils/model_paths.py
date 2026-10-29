@@ -6,8 +6,17 @@
 from pathlib import Path
 from typing import Optional
 
+from utils.data_dirs import models_root
+
 SC_ROOT = Path(__file__).resolve().parents[1]
-OPENVINO_MODELS_DIR = SC_ROOT / "models" / "openvino"
+
+
+def _openvino_models_root() -> Path:
+    root = models_root()
+    return root / "openvino" if root else SC_ROOT / "models" / "openvino"
+
+
+OPENVINO_MODELS_DIR = _openvino_models_root()
 
 
 def openvino_model_dir(model_name: str, weight_format: str) -> Path:

@@ -20,6 +20,10 @@ const { ServiceManager } = require('./services/process-manager.cjs');
 const { SetupRunner } = require('./services/setup-runner.cjs');
 const winEnv = require('./services/win-env.cjs');
 
+// In a packaged install, seed the writable user-data dir (venvs, logs, a config
+// copy) before any service or config read touches it; this is a no-op in dev.
+servicePaths.ensureUserData();
+
 // Height (px) of the custom title bar strip. Matches the TopPanel so the
 // native Window Controls Overlay buttons align with the app header.
 const TITLE_BAR_HEIGHT = 63;

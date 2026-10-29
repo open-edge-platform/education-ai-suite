@@ -13,6 +13,7 @@ import openvino_genai as ov_genai
 
 from providers.file_ingest_and_retrieve.utils import extract_bucket_name, file_key_to_path
 from providers.utils.model_utils import is_model_ready, resolve_model_max_length
+from utils.data_dirs import models_root
 from utils.ov_runtime import gpu_plugin_config
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class PostProcessor:
         self.chroma_client = chroma_client
         self.document_collection_name = document_collection_name
 
-        local_path = Path(os.getcwd()).parent / "models" / "openvino" / reranker_model
+        local_path = (models_root() or Path(os.getcwd()).parent / "models") / "openvino" / reranker_model
         if not is_model_ready(local_path):
             from components.vlm.vlm_openvino_serving.utils.utils import convert_model
 

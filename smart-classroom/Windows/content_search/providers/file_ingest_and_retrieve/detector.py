@@ -11,11 +11,12 @@ import numpy as np
 import openvino as ov
 
 from providers.file_ingest_and_retrieve.yolox_utils import preproc, multiclass_nms, demo_postprocess
+from utils.data_dirs import models_root
 from utils.ov_runtime import gpu_plugin_config
 
 class Detector:
     def __init__(self, device="CPU", conf=0.85, nms=0.45, input_size=(640, 640)):
-        self.model_path = Path(os.getcwd()).parent / "models" / "detection_model"
+        self.model_path = (models_root() or Path(os.getcwd()).parent / "models") / "detection_model"
         self.model_file = os.path.join(self.model_path, "yolox_s.xml")
         self.download_model()
         self.device = device
