@@ -70,8 +70,7 @@ const StartRecordingModal: React.FC<StartRecordingModalProps> = ({
     featureGuard.hasFeature('asr') ||
     featureGuard.hasFeature('summary') ||
     featureGuard.hasFeature('mindmap') ||
-    featureGuard.hasFeature('topic_segmentation') ||
-    featureGuard.hasFeature('report');
+    featureGuard.hasFeature('topic_segmentation');
   const hasVideoAnalyticsFeature = featureGuard.hasFeature('video_analytics');
 
   // Reloaded on every open: the microphone list changes when hardware is

@@ -172,10 +172,11 @@ def get_platform_and_model_info():
     except Exception:
         info['asr_model'] = "--"
 
+    # The summarizer/text-gen model is the configured vlm_name for both the
+    # in-process ('vlm') and served ('ovms') providers — surface it either way.
     try:
         text_gen = config.models.text_gen
-        if getattr(text_gen, 'provider', None) == 'vlm':
-            info['summarizer_model'] = getattr(text_gen, 'vlm_name', '--')
+        info['summarizer_model'] = getattr(text_gen, 'vlm_name', '--') or '--'
     except Exception:
         info['summarizer_model'] = "--"
 

@@ -53,15 +53,14 @@ _FEATURE_PROFILES: Dict[str, FrozenSet[str]] = {
     "summary":             frozenset({"asr", "text-gen"}),
     "mindmap":             frozenset({"asr", "text-gen"}),
     "topic_segmentation":  frozenset({"asr", "text-gen"}),
-    "board_ocr":           frozenset(),
     "content_search":      frozenset({"text-gen", "content-search"}),
     "qa":                  frozenset({"text-gen", "content-search"}),
     "grading":             frozenset({"text-gen"}),
-    "report":              frozenset({"asr", "text-gen"}),
+    "video_analytics":     frozenset({"va"}),
 }
 
 # Known profile names, for validating/ordering output deterministically.
-_ALL_PROFILES: List[str] = ["asr", "text-gen", "content-search"]
+_ALL_PROFILES: List[str] = ["asr", "text-gen", "content-search", "va"]
 
 # The `content-search` Compose service has no Dockerfile/build context yet
 # (still commented out in docker/docker-compose.yml) — until it's implemented, never

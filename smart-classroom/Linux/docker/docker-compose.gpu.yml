@@ -53,6 +53,16 @@ services:
     group_add:
       - "${RENDER_GID}"
 
+  # Video Analytics engine: GPU (/dev/dri, VA-API encode/decode) + NPU
+  # (/dev/accel) so pose/ReID/classification run on GPU or NPU per the
+  # VA_*_DEVICE settings.
+  video-analytics:
+    devices:
+      - "/dev/dri:/dev/dri"
+      - "/dev/accel:/dev/accel"
+    group_add:
+      - "${RENDER_GID}"
+
   # Placeholder so this override file is valid on its own during the skeleton
   # phase. Remove once a real service above is uncommented.
   app:

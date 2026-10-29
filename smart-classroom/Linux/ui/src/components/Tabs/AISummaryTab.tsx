@@ -9,7 +9,7 @@ import { useAppSelector } from "../../redux/hooks";
 // whenever another tab is selected.
 const AISummaryTab: React.FC = () => {
   const { t } = useTranslation();
-  const { streamingText, finalText, progress, boardOcrPartial } = useAppSelector(s => s.summary);
+  const { streamingText, finalText, progress } = useAppSelector(s => s.summary);
   const typed = finalText ?? streamingText;
 
   // Each stage counts its own units, so they cannot share one label: a fold
@@ -32,11 +32,6 @@ const AISummaryTab: React.FC = () => {
 
   return (
     <div className="summary-tab">
-      {boardOcrPartial && (
-        <div className="summary-board-warning" role="status">
-          {t("summary.boardOcrPartial")}
-        </div>
-      )}
       {progress && !typed && (
         <div className="summary-progress">
           {progressLabel(progress).replace(/(?:\u2026|\.{3})\s*$/, "")}

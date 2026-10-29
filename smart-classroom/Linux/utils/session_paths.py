@@ -72,11 +72,17 @@ class SessionPaths:
 
     @staticmethod
     def class_statistics_path(session_id: str) -> Path:
-        return SessionPaths.raw_dir(session_id) / "va" / "class_statistics.json"
+        return SessionPaths.va_dir(session_id) / "class_statistics.json"
 
     @staticmethod
-    def board_ocr_dir(session_id: str) -> Path:
-        return SessionPaths.raw_dir(session_id) / "board_ocr"
+    def va_dir(session_id: str) -> Path:
+        """<session>/raw/va - Video Analytics metadata, stats, and recordings.
+
+        The video-analytics side-car writes its JSON-Lines metadata
+        (front_posture.txt, back_posture.txt, content_results.txt, ...) and the
+        app aggregates class_statistics.json here.
+        """
+        return SessionPaths.raw_dir(session_id) / "va"
 
     @staticmethod
     def summary_path(session_id: str) -> Path:
@@ -89,23 +95,3 @@ class SessionPaths:
     @staticmethod
     def topics_path(session_id: str) -> Path:
         return SessionPaths.result_dir(session_id) / "topics.json"
-
-    @staticmethod
-    def report_md_path(session_id: str) -> Path:
-        return SessionPaths.result_dir(session_id) / "class_report.md"
-
-    @staticmethod
-    def report_docx_path(session_id: str) -> Path:
-        return SessionPaths.result_dir(session_id) / "class_report.docx"
-
-    @staticmethod
-    def report_pdf_path(session_id: str) -> Path:
-        return SessionPaths.result_dir(session_id) / "class_report.pdf"
-
-    @staticmethod
-    def report_fields_path(session_id: str) -> Path:
-        return SessionPaths.result_dir(session_id) / "class_report_fields.json"
-
-    @staticmethod
-    def mindmap_png_path(session_id: str) -> Path:
-        return SessionPaths.result_dir(session_id) / "mindmap_report.png"
