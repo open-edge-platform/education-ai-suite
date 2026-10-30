@@ -64,7 +64,7 @@ but quoting avoids surprises).
 | `draft_source: target` | MTP only: use the target repository's `openvino_mtp_model.xml` and `.bin`; `draft_model` and `draft_revision` must be null. |
 | `draft_source: local` | `draft_model` names an existing OpenVINO IR directory (relative paths resolve from `smart-classroom/Windows/`). It is validated, never downloaded or replaced. |
 | `draft_revision` | A full 40-character commit. `null` uses the catalog pin (`29ffa460d80e…` for the Eagle3 drafter, `f181eece646a…` for the Qwen3.6 drafter). |
-| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default. Eagle3: 4, range 1–8. DFlash: 5 (best for classroom summaries and chat; 7 suits code/math), range 1–15. Qwen3.5 MTP: 3, range 1–15. |
+| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default. Eagle3: 4, range 1–8. DFlash: 5 (best for classroom summaries and chat; 7 suits code/math), range 1–15. Qwen3.5 MTP: 2, range 1–15. |
 
 Invalid settings (unknown method or key, contradictory source, cross-model
 drafter, out-of-range `k`) fail validation at startup under `auto` and `"on"`;
@@ -109,33 +109,42 @@ ordinary target directory into the same `VLMPipeline` used for plain
 generation, so no derived model directory is created and image requests keep
 working.
 
-* **Profile defaults.** `num_assistant_tokens: 3` (range 1–15), a scheduler
+* **Profile defaults.** `num_assistant_tokens: 2` (range 1–15), a scheduler
   with `max_num_seqs: 1` and prefix caching off, and `GPU_QUEUE_PRIORITY`
   `MEDIUM` for the text-generation pipeline. As with Eagle3, the queue priority
-  overrides `models.gpu_queue_priority` for text generation only: on a LOW
-  queue, MTP decoded no faster than plain (the table below).
+  overrides `models.gpu_queue_priority` for text generation only.
 * **Measured through the service** (Arc 140T, Arrow Lake 285H, INT4, English,
-  greedy, one replayed lesson per configuration; decode rate in tokens/s from
-  the runtime's TPOT, MTP acceptance in brackets):
+  greedy, one replayed lesson per configuration, all text generation on a
+  MEDIUM GPU queue; decode rate in tokens/s from the runtime's TPOT, MTP draft
+  acceptance in brackets):
 
-  | Stage (input tokens) | Plain | MTP k=5, LOW | MTP k=5, MEDIUM | MTP k=3, MEDIUM |
+  | Stage (input tokens) | Plain | MTP k=2 (default) | MTP k=3 | MTP k=5 |
   | --- | --- | --- | --- | --- |
-  | Summary (16.8K) | 9.46 | 9.46 (32%) | 11.79 (32%) | 12.13 (49%) |
-  | Mind map (1.5–1.8K) | 10.53 | 10.18 (38%) | 13.76 (38%) | 12.80 (51%) |
-  | Topic segmentation (12.4K) | 10.08–10.14 | 7.02–7.39 (24–25%) | 9.51–9.78 (24–25%) | 7.40 (17%) |
-  | Report (5.3–6.9K) | 10.54 | 10.18 (33%) | 12.93 (32%) | not run |
+  | Summary (16.8K) | 13.45 | 13.44 (64%) | 12.13 (49%) | 11.79 (32%) |
+  | Mind map (1.5–1.8K) | 13.96 | 15.39 (69%) | 12.80 (51%) | 13.76 (38%) |
+  | Topic segmentation, call 1 (12.4K) | 13.19 | 14.04 (78%) | 7.40 (17%) | 9.51 (24%) |
+  | Topic segmentation, call 2 (12.4K) | 13.12 | 6.83 (8%) | not run | 9.78 (25%) |
+  | Report (5.3–6.9K) | 14.02 | 16.09 (59%) | not run | 12.93 (32%) |
+  | Summary time to first token | 22.3 s | 26.4 s | 30.9 s | 27.5 s |
+  | Lesson text generation (stage total) | 393 s | 436 s | – | – |
 
-  With MEDIUM priority, summary, mind map and report decode about 1.2–1.3x
-  faster than plain (summary 1.28x at k=3). Topic segmentation is
-  slower than plain in every MTP configuration: its drafts are rarely accepted,
-  so verification costs more than it saves. Time to first token is not
-  improved (summary: 26.4 s plain, 26.5–30.9 s with MTP). Each column is a
-  single run; the mind-map and report prompts differ slightly between runs; and
-  `k = 3` is not clearly better than `k = 5` across stages.
+  k=2 is the only setting that keeps up with plain: it decodes 1.06–1.15x
+  faster on mind map, report and the first segmentation call, and matches plain
+  on the summary. It is still not a net gain. The second segmentation call's
+  acceptance collapsed to 8% (6.83 tok/s, about half of plain), and the paged
+  pipeline adds about 4 s to the summary's time to first token. Text generation
+  for the whole lesson therefore took 11% longer than plain. Larger windows
+  are slower, because most of the extra drafts are rejected.
+
+  Each column is a single run, and the mind-map and report prompts differ
+  slightly between runs. With both on a LOW queue, MTP at k=5 decoded no faster
+    than plain (summary 9.46 tok/s for both). Compare MTP and plain at the
+  same `models.gpu_queue_priority`: the profile's MEDIUM priority alone speeds
+  up decoding.
 * **Not yet qualified.** The profile has not been performance- or
   accuracy-qualified on the Arrow Lake/Panther Lake matrix or on Chinese
-  lessons, and `context_bench` does not yet benchmark MTP. Measure your own
-  workload before enabling it by default.
+  lessons, and `context_bench` does not yet benchmark MTP. Keep `mode: "off"`
+  unless your own workload shows a gain over plain at the same queue priority.
 
 Each model call's `decoding`, `draft_tokens`, `accepted_tokens` and
 `acceptance_rate` are recorded in `<session>/logs/model_calls.jsonl`. The draft

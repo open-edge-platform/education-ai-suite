@@ -53,7 +53,7 @@ A source checkpoint is not runtime-ready IR. Each accelerated profile must provi
 
 **Implemented:** the Qwen3-VL-8B Eagle3 profile pins drafter `AQ-MedAI/Qwen3-VL-8B-Instruct-eagle3` at commit `29ffa460d80e1d88a015902ae0333ff87ffe3184` (MIT), downloads only its configuration and weight files, and exports it to INT4 IR (259 MB) with optimum-intel 2.2.0's Eagle3 classes under an export-only transformers 4.57.6 (no repository code). The ordinary target IR is used unchanged. The tested defaults are `num_assistant_tokens: 4` (range 1–8), OpenVINO GenAI 2026.4 or later, the runtime's default KV-cache precision, `GPU_QUEUE_PRIORITY: MEDIUM` for this pipeline (a LOW queue cancels the speedup), and a scheduler with `max_num_seqs: 1` and prefix caching off. The drafter predicts English only, so the profile is qualified for `app.language: en` only; with `zh`, `auto` keeps the plain pipeline and `"on"` fails at startup.
 
-**Implemented:** the Qwen3.5-9B MTP profile (INT4 and INT8) uses the target repository's bundled `openvino_mtp_model.xml`/`.bin`; there is no separate drafter download or revision. OpenVINO GenAI 2026.4.1 or later loads the head into the same `VLMPipeline` as the target, so image requests keep working. The defaults are `num_assistant_tokens: 3` (range 1–15), `GPU_QUEUE_PRIORITY: MEDIUM` for this pipeline (on a LOW queue MTP decoded no faster than plain), the runtime's default KV-cache precision, and a scheduler with `max_num_seqs: 1` and prefix caching off. These values come from single replayed English lessons, not from qualification; see the [serving guide](../vlm-llm-serving/serving-guide.md#mtp-for-qwen35-9b) for the measurements.
+**Implemented:** the Qwen3.5-9B MTP profile (INT4 and INT8) uses the target repository's bundled `openvino_mtp_model.xml`/`.bin`; there is no separate drafter download or revision. OpenVINO GenAI 2026.4.1 or later loads the head into the same `VLMPipeline` as the target, so image requests keep working. The defaults are `num_assistant_tokens: 2` (range 1–15), `GPU_QUEUE_PRIORITY: MEDIUM` for this pipeline, the runtime's default KV-cache precision, and a scheduler with `max_num_seqs: 1` and prefix caching off. In single replayed English lessons at equal queue priority, k=2 was the only window that kept up with plain generation, and the lesson's text generation still took 11% longer than plain; see the [serving guide](../vlm-llm-serving/serving-guide.md#mtp-for-qwen35-9b) for the measurements.
 
 ## 3. Architecture
 
@@ -173,7 +173,7 @@ models:
 | `draft_source` | `null` (profile default), `huggingface`, `local`, `target` | Distinguish a Hub repository, an explicit local IR directory, and target-bundled MTP artifacts. Other sources require a supported adapter and profile. |
 | `draft_model` | Repository ID or local directory; `null` selects the profile default | Identify the external drafter for DFlash or DFlash2. For MTP, set to null: use the target's prediction head, not a second model. |
 | `draft_revision` | Immutable repository commit (a full 40-character hash); `null` selects the profile's pinned revision | Reproduce a Hub download. Reject non-null values for `local` or `target`; bundled MTP inherits the target revision. |
-| `num_assistant_tokens` | Positive integer; `null` selects the profile default (Eagle3: 4, range 1–8; DFlash: 5, range 1–15, and at most the drafter's block size minus one; Qwen3.5 MTP: 3, range 1–15) | Control the draft block size within the selected runtime's supported range. MTP's default comes from single-lesson measurements, not full qualification. |
+| `num_assistant_tokens` | Positive integer; `null` selects the profile default (Eagle3: 4, range 1–8; DFlash: 5, range 1–15, and at most the drafter's block size minus one; Qwen3.5 MTP: 2, range 1–15) | Control the draft block size within the selected runtime's supported range. MTP's default is the best of k=2, 3 and 5 in single-lesson measurements, not a qualified setting. |
 
 A profile may also be qualified for some `app.language` values only (Eagle3: `en`). Under another language it counts as unqualified: plain generation under `auto`, a startup failure under `"on"`.
 
@@ -414,8 +414,9 @@ Record the exact hardware, artifacts, runtime and driver versions, and workload 
   - Chinese classroom summaries gained nothing (offline, 10K-token prompt: plain 13.4 tok/s; AQ drafter 6.1, taobao-mnn drafter 7.2, both accepting under 1.4 tokens per step; the paged pipeline without drafting decodes like plain but takes ~30% longer to the first token), hence the `en`-only qualification.
 - **Qwen3.5-9B MTP, end to end on Arc 140T** (INT4, GenAI 2026.4.1, `mode: "on"`, one replayed English lesson per setting):
   - `/health` reported `effective_method: mtp`; streamed text and an image question both worked;
-  - k=5 with a LOW queue: no decode gain (summary 9.46 tok/s, same as plain; 32% of drafts accepted);
-  - MEDIUM queue: summary 12.13 tok/s at k=3 (49% accepted) vs 9.46 plain; mind map and report about 1.2–1.3x faster;
-  - topic segmentation (12.4K-token prompts) was slower than plain at every setting (7.0–9.8 vs about 10.1 tok/s; 17–25% accepted), and time to first token did not improve.
+  - k=5 with a LOW queue: summary 9.46 tok/s, the same as plain at LOW (32% of drafts accepted);
+  - MEDIUM queue, summary decode: plain 13.45 tok/s; MTP k=2 13.44 (64% accepted), k=3 12.13 (49%), k=5 11.79 (32%);
+  - k=2 decoded 1.06–1.15x faster than plain on mind map, report and one topic-segmentation call, but the other segmentation call's acceptance fell to 8% (6.83 vs 13.12 tok/s);
+  - MTP added about 4 s to the summary's time to first token (26.4 vs 22.3 s), and the lesson's text generation took 436 s vs 393 s plain.
 
 The Arrow Lake and Panther Lake matrix above remains planned.

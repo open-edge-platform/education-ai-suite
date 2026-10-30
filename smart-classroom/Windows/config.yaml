@@ -100,7 +100,7 @@ models:
       draft_source: null    # null = profile default | huggingface | local | target (bundled MTP)
       draft_model: null     # null = profile default; MTP always uses the target's bundled head
       draft_revision: null  # null = the tested pinned commit; a full 40-char commit overrides it
-      num_assistant_tokens: null  # null = profile default: eagle3 4, dflash 5, mtp 3
+      num_assistant_tokens: null  # null = profile default: eagle3 4, dflash 5, mtp 2
 
     chunking:
       enabled: true                  # false = summarize the whole transcript in one pass

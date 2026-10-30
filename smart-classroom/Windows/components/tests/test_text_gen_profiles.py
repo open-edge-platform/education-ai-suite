@@ -94,7 +94,7 @@ def test_auto_method_selects_target_bundled_mtp_for_qwen35(weight):
     assert spec.source == "target" and spec.draft_model is None
     assert spec.draft_dir() is None
     assert spec.describe() == "target-bundled MTP"
-    assert spec.num_assistant_tokens == 3
+    assert spec.num_assistant_tokens == 2
     assert spec.profile.min_genai_version == "2026.4.1"
     assert spec.profile.scheduler["max_num_seqs"] == 1
 

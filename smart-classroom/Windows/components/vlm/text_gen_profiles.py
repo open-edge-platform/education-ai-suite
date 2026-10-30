@@ -151,15 +151,16 @@ _QWEN3VL8B_EAGLE3 = SpeculativeProfile(
 
 # Qwen3.5's pre-converted target repositories ship openvino_mtp_model.xml/bin.
 # GenAI 2026.4.1 loads the bundled head through the same VLMPipeline as the
-# target, so image requests keep working. On Arc 140T a LOW GPU queue cancelled
-# the decode gain (summary 9.46 tok/s, same as plain); MEDIUM gave 12.1 at k=3.
-# Topic segmentation stayed slower than plain. Single-lesson measurements, not
-# a qualification.
+# target, so image requests keep working. Arc 140T, one replayed English lesson
+# per setting, MEDIUM queue for both: summary decode 13.44 tok/s at k=2 vs 13.45
+# plain (k=3 12.1, k=5 11.8). k=2 was 1.06-1.15x faster on mind map and report,
+# but one topic-segmentation call fell to 8% acceptance and the lesson's text
+# generation took 11% longer overall. Not a qualification.
 _QWEN35_MTP = SpeculativeProfile(
     method="mtp",
     precisions=("int4", "int8"),
     default_source="target",
-    num_assistant_tokens=3,
+    num_assistant_tokens=2,
     num_assistant_tokens_range=(1, 15),
     min_genai_version="2026.4.1",
     ov_properties={"GPU_ENABLE_LARGE_ALLOCATIONS": "YES", "GPU_QUEUE_PRIORITY": "MEDIUM"},
