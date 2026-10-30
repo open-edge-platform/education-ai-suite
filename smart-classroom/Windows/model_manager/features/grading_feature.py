@@ -1,4 +1,5 @@
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -20,7 +21,8 @@ _GRADING_DIR = _SC_ROOT / "components" / "grading"
 _GRADING_SERVICE = _GRADING_DIR / "grading_service.py"
 _LAYOUT_DIR = _GRADING_DIR / "providers" / "layout_detection_service"
 _LAYOUT_SERVICE = _LAYOUT_DIR / "layout_detection_server.py"
-_LOGS_DIR = _GRADING_DIR / "outputs" / "service_logs"
+_UD = os.environ.get("SMART_CLASSROOM_USERDATA")
+_LOGS_DIR = (Path(_UD) / "grading" / "outputs" / "service_logs") if _UD and _UD.strip() else (_GRADING_DIR / "outputs" / "service_logs")
 
 
 class GradingFeature:
@@ -67,9 +69,14 @@ class GradingFeature:
         log_file = log_path.open("w", encoding="utf-8", buffering=1)
         self._log_files.append(log_file)
 
+        env = os.environ.copy()
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{_SC_ROOT}{os.pathsep}{existing}" if existing else str(_SC_ROOT)
+
         proc = subprocess.Popen(
             [sys.executable, str(script)],
             cwd=str(cwd),
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
