@@ -10,6 +10,15 @@ import type { GradingRubricInfo } from '../../services/api';
 import DirectoryPicker from './DirectoryPicker';
 import RubricEditor from './RubricEditor';
 
+const LAST_DIR_KEY = 'grading.lastPaperDir';
+
+const getLastDir = (): string | undefined =>
+  localStorage.getItem(LAST_DIR_KEY) || undefined;
+
+const rememberDir = (path: string): void => {
+  localStorage.setItem(LAST_DIR_KEY, path);
+};
+
 interface NewTaskFormProps {
   onTaskCreated: () => void;
 }
@@ -82,8 +91,11 @@ const NewTaskForm: React.FC<NewTaskFormProps> = ({ onTaskCreated }) => {
       return;
     }
     try {
-      const picked = await window.electronAPI.pickDirectory(paperPath || undefined);
-      if (picked) setPaperPath(picked);
+      const picked = await window.electronAPI.pickDirectory(paperPath || getLastDir());
+      if (picked) {
+        setPaperPath(picked);
+        rememberDir(picked);
+      }
     } catch (e) {
       setError(toErrorMessage(e));
     }
@@ -195,9 +207,10 @@ const NewTaskForm: React.FC<NewTaskFormProps> = ({ onTaskCreated }) => {
 
       {pickerOpen && (
         <DirectoryPicker
-          initialPath={paperPath || undefined}
+          initialPath={paperPath || getLastDir()}
           onSelect={(p) => {
             setPaperPath(p);
+            rememberDir(p);
             setPickerOpen(false);
           }}
           onClose={() => setPickerOpen(false)}

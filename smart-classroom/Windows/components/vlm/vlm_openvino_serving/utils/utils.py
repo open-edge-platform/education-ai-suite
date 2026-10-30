@@ -64,6 +64,11 @@ _EXPORT_TRANSFORMERS_MODEL_MARKERS = ("qwen3.5", "qwen3.6")
 _SC_ROOT = Path(__file__).resolve().parents[4]
 
 
+def _models_base() -> Path:
+    ud = os.environ.get("SMART_CLASSROOM_USERDATA")
+    return Path(ud) / "models" if ud and ud.strip() else (_SC_ROOT / "models")
+
+
 def _export_overlay_dir() -> Path:
     """Directory holding the export-only transformers build.
 
@@ -75,7 +80,7 @@ def _export_overlay_dir() -> Path:
     if override:
         return Path(override)
     return (
-        _SC_ROOT / "models" / ".export-deps" /
+        _models_base() / ".export-deps" /
         f"transformers-{_EXPORT_TRANSFORMERS_VERSION}"
     )
 

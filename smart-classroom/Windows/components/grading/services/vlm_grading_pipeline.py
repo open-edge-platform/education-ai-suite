@@ -119,7 +119,7 @@ def run_vlm_grading_pipeline(
         raise FileNotFoundError(f"grading prompt not found: {prompt_path}")
 
     user_prompt = prompt_path.read_text(encoding="utf-8")
-    shared_rubrics_dir = _data_root() / "rubrics"
+    shared_rubrics_dir = _component_root() / "rubrics"
     prompt_with_prefix = prepend_common_prefix_if_missing(
         full_prompt=user_prompt,
         cfg=cfg.get("section_split", {}),

@@ -32,8 +32,17 @@ def _remap_to_userdata(p: Path) -> Path:
 _COMPONENT_ROOT = _HERE.parents[1]
 _SC_ROOT = _HERE.parents[3]                      # smart-classroom/
 _LAYOUT_CONFIG = _HERE / "config.yaml"
-_COMPONENT_CONFIG = _COMPONENT_ROOT / "config.yaml"
-_MAIN_CONFIG = _SC_ROOT / "config.yaml"
+_SC_CONFIG = os.environ.get("SC_CONFIG_PATH")
+_MAIN_CONFIG = Path(_SC_CONFIG) if _SC_CONFIG and _SC_CONFIG.strip() else (_SC_ROOT / "config.yaml")
+
+
+def _component_config_path() -> Path:
+    ud = os.environ.get("SMART_CLASSROOM_USERDATA")
+    if ud and ud.strip():
+        candidate = Path(ud) / "grading" / "config.yaml"
+        if candidate.exists():
+            return candidate
+    return _COMPONENT_ROOT / "config.yaml"
 
 INPUT_SIZE = 800
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
@@ -52,12 +61,12 @@ def _read_yaml(path: Path) -> dict:
 
 
 def _config_source() -> str:
-    raw = _read_yaml(_COMPONENT_CONFIG)
+    raw = _read_yaml(_component_config_path())
     return str(raw.get("config_source", "parent-override")).strip().lower()
 
 
 def _load_main_hub() -> str:
-    component = _read_yaml(_COMPONENT_CONFIG)
+    component = _read_yaml(_component_config_path())
     hub = str(((component.get("models") or {}).get("model_hub")) or "huggingface")
     if _config_source() == "parent-override":
         parent_hub = (_read_yaml(_MAIN_CONFIG).get("models") or {}).get("model_hub")

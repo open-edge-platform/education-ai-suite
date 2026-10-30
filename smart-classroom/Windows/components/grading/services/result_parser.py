@@ -100,7 +100,8 @@ _HEADER_ALIASES_DEFAULT = {
 
 def _load_header_aliases() -> dict[str, tuple[str, ...]]:
     try:
-        cfg_path = Path(__file__).resolve().parents[1] / "config.yaml"
+        from services.config import component_config_dir
+        cfg_path = component_config_dir() / "config.yaml"
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
         aliases = (raw.get("section_split") or {}).get("header_aliases") or {}
         if isinstance(aliases, dict):

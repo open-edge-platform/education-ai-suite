@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any
 
+from services.config import component_config_dir
 from services.job_store import JsonJobStore
 from services.vlm_grading_pipeline import run_vlm_grading_pipeline
 
@@ -519,7 +520,7 @@ def _config_force_regrade() -> bool:
     try:
         import yaml
 
-        raw = yaml.safe_load((_COMPONENT_ROOT / "config.yaml").read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load((component_config_dir() / "config.yaml").read_text(encoding="utf-8")) or {}
         return bool(((raw.get("grading") or {}).get("force_regrade", False)))
     except Exception:
         return False
@@ -530,7 +531,7 @@ def _config_debug_mode() -> bool:
     try:
         import yaml
 
-        raw = yaml.safe_load((_COMPONENT_ROOT / "config.yaml").read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load((component_config_dir() / "config.yaml").read_text(encoding="utf-8")) or {}
         return bool((raw.get("grading") or {}).get("debug_mode", False))
     except Exception:
         return False
@@ -598,7 +599,7 @@ def create_directory_grading_task(
             f"Wait for the task to finish or cancel it before submitting again."
         )
 
-    defaults = load_dir_defaults(_COMPONENT_ROOT)
+    defaults = load_dir_defaults(component_config_dir())
     payload = {
         "paper_path": str(resolved),
         "papers_dir": str(resolved),
@@ -747,15 +748,19 @@ def _run_directory_grading_task(task_id: str, lock_path: Path | None = None) -> 
             if not pending and idle > idle_timeout:
                 completed = sum(1 for it in items if it["status"] == "completed")
                 failed = sum(1 for it in items if it["status"] == "failed")
+                all_failed = completed == 0 and failed > 0
                 _JOB_STORE.update_job(
-                    task_id, status="COMPLETED", current_step="completed", progress=100,
+                    task_id,
+                    status="FAILED" if all_failed else "COMPLETED",
+                    current_step="failed" if all_failed else "completed",
+                    progress=100,
                     result={
                         "total": len(items),
                         "completed": completed,
                         "failed": failed,
                         "log_path": str(_task_log_path(task_id, "grading.run")),
                     },
-                    error_message=None,
+                    error_message=(f"All {failed} item(s) failed" if all_failed else None),
                 )
                 _append_task_log(
                     task_id, "grading.run",
@@ -892,8 +897,7 @@ def update_grading_config(
     iou_threshold: float | None = None,
 ) -> dict[str, Any]:
     import re
-    from services.vlm_grading_pipeline import _component_root
-    path = _component_root() / "config.yaml"
+    path = component_config_dir() / "config.yaml"
     text = path.read_text(encoding="utf-8")
 
     def replace_scalar(t: str, key: str, value: str) -> str:

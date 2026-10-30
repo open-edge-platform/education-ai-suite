@@ -54,7 +54,8 @@ from utils.model_paths import OPENVINO_MODELS_DIR, SC_ROOT
 logger = logging.getLogger(__name__)
 
 _CONTENT_SEARCH_DIR = SC_ROOT / "content_search"
-HF_SOURCES_DIR = SC_ROOT / "models" / "hf"
+_UD = os.environ.get("SMART_CLASSROOM_USERDATA")
+HF_SOURCES_DIR = (Path(_UD) / "models" / "hf") if _UD and _UD.strip() else (SC_ROOT / "models" / "hf")
 MANIFEST_DIR = OPENVINO_MODELS_DIR / ".manifests"
 
 DOWNLOAD_ATTEMPTS = 3

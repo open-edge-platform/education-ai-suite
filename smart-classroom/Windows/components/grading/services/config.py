@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,31 @@ import yaml
 
 _COMPONENT_ROOT = Path(__file__).resolve().parents[1]
 _PARENT_ROOT = _COMPONENT_ROOT.parents[1]
+
+
+def _data_root() -> Path:
+    v = os.environ.get("SMART_CLASSROOM_USERDATA")
+    return Path(v) / "grading" if v and v.strip() else _COMPONENT_ROOT
+
+
+def component_config_dir() -> Path:
+    default = _COMPONENT_ROOT / "config.yaml"
+    data = _data_root()
+    if data == _COMPONENT_ROOT:
+        return _COMPONENT_ROOT
+    target = data / "config.yaml"
+    if not target.exists():
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(default.read_bytes())
+        except Exception:
+            return _COMPONENT_ROOT
+    return data
+
+
+def _parent_config_path() -> Path:
+    override = os.environ.get("SC_CONFIG_PATH")
+    return Path(override) if override and override.strip() else (_PARENT_ROOT / "config.yaml")
 
 SELF_ONLY = "self-only"
 PARENT_OVERRIDE = "parent-override"
@@ -35,13 +61,13 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def load_config() -> dict[str, Any]:
-    cfg = _read_yaml(_COMPONENT_ROOT / "config.yaml")
+    cfg = _read_yaml(component_config_dir() / "config.yaml")
     source = str(cfg.get("config_source", PARENT_OVERRIDE)).strip().lower()
 
     if source == SELF_ONLY:
         return cfg
 
-    parent = _read_yaml(_PARENT_ROOT / "config.yaml")
+    parent = _read_yaml(_parent_config_path())
     if not parent:
         return cfg
 
