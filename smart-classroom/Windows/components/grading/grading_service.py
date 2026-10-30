@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,9 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def _resolve_root_config(path_value: str | None) -> Path:
     if path_value:
         return Path(path_value).resolve()
+    override = os.environ.get("SC_CONFIG_PATH")
+    if override and override.strip():
+        return Path(override).resolve()
     # components/grading/grading_service.py -> smart-classroom/config.yaml
     return (Path(__file__).resolve().parents[2] / "config.yaml").resolve()
 

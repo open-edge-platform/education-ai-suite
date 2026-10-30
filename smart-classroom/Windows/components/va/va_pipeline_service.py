@@ -11,6 +11,7 @@ import atexit
 import json
 import threading
 from utils.config_loader import config
+from utils.data_dirs import models_base_path
 from utils.rtsp_recorder import (
     start_rtsp_recording,
     stop_rtsp_recording,
@@ -77,7 +78,7 @@ class VideoAnalyticsPipelineService:
         self.plugin_path = Path(config.va_pipeline.plugin_path).resolve()
 
         # Set model paths
-        self.model_base_dir = Path(config.models.va.models_base_path).resolve() / "va"
+        self.model_base_dir = Path(models_base_path()).resolve() / "va"
         self.models = {
             "front-pose": f"{config.models.va.front_pose_model}.xml",
             "back-pose": f"{config.models.va.back_pose_model}.xml",

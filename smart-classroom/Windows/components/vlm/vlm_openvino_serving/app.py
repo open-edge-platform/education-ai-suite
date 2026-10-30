@@ -186,7 +186,8 @@ def initialize_model():
     global pipe, processor, model_dir
     model_name = settings.VLM_MODEL_NAME
     model_dir = Path(model_name.split("/")[-1])
-    model_dir = Path(os.getcwd()).parent / "models" / "openvino" / model_dir
+    from utils.data_dirs import models_root
+    model_dir = (models_root() or Path(os.getcwd()).parent / "models") / "openvino" / model_dir
     model_dir.mkdir(parents=True, exist_ok=True)
     weight = settings.VLM_COMPRESSION_WEIGHT_FORMAT.lower()
     model_dir = model_dir / weight

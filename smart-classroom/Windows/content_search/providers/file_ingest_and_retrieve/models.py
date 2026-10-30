@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from providers.utils.model_utils import is_model_ready
+from utils.data_dirs import models_root
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def get_document_embedding_model():
         doc_model_path = os.getenv("DOC_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
         run_device = os.getenv("INGEST_DEVICE", "CPU")
 
-        local_path = Path(os.getcwd()).parent / "models" / "openvino" / doc_model_path
+        local_path = (models_root() or Path(os.getcwd()).parent / "models") / "openvino" / doc_model_path
         if not is_model_ready(local_path):
             from components.vlm.vlm_openvino_serving.utils.utils import convert_model
 

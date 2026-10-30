@@ -2,7 +2,7 @@
 This folder contains the React UI for the Smart Classroom Application.
 
 ## Quick start
-1. Install **Node 18+**
+1. Install **Node 20.19+**
 2. `npm install`
 3. `npm run dev` 
 4. `npm run build` → static files in `dist/`
@@ -27,7 +27,7 @@ That script bootstraps Node (installing it via `winget` when missing), rebuilds
 | Screen | Backed by |
 |--------|-----------|
 | **Setup** | [`electron/services/setup-runner.cjs`](electron/services/setup-runner.cjs) — prerequisite checks, Python environment, model preparation |
-| **Configuration** | [`electron/services/config-store.cjs`](electron/services/config-store.cjs) — comment-preserving writes to `config.yaml`, `.proxy-config` |
+| **Configuration** | [`electron/services/config-store.cjs`](electron/services/config-store.cjs) — comment-preserving writes to `config.yaml`, `.proxy-config` in the user data dir |
 | **Services** | [`electron/services/process-manager.cjs`](electron/services/process-manager.cjs) — spawns `main.py`, health-polls it and every service it starts, stops the tree |
 
 How it reaches the backends: the main API (8000) is CORS-enabled, so calls go to
@@ -35,11 +35,21 @@ it directly. Content-search (9011) has no CORS, so like the Vite dev proxy,
 the packaged app serves the UI from a local origin and proxies `/api/v1` to
 `127.0.0.1:9011` via a small embedded server ([`electron/server.cjs`](electron/server.cjs)).
 
+### Data locations
+
+In the packaged app, writable state lives under `%LOCALAPPDATA%\SmartClassroom\`
+(the config copy, `.proxy-config`, models, venvs, `storage/` sessions, logs,
+grading and content-search data, and third-party caches for PaddleX, pip and
+HuggingFace), so the installed `resources/backend` tree stays read-only and
+survives updates.
+The backend loads the user's config copy from there via `SC_CONFIG_PATH`; in dev
+these paths stay in the source tree.
+
 | Command | What it does |
 |---------|--------------|
 | `npm run electron:dev` | Runs the Vite dev server + Electron pointed at it (hot reload). |
 | `npm run electron:preview` | Builds `dist/` and runs Electron through the production path (embedded static + proxy server) without packaging. |
-| `npm run electron:build` | Builds `dist/` and packages a Windows portable executable to `release/SmartClassroom-<version>-portable.exe`. |
+| `npm run electron:build` | Builds `dist/` and packages a Windows NSIS installer to `release/SmartClassroom-<version>-setup.exe`. |
 
 ### Main-process architecture
 

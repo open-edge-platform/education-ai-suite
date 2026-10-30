@@ -9,6 +9,7 @@ from typing import List, Union
 import numpy as np
 from PIL import Image
 
+from utils.data_dirs import models_root
 from utils.ov_runtime import gpu_plugin_config
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ class CLIPHandler:
         import openvino as ov
         from transformers import AutoTokenizer
 
-        model_dir = Path(os.getcwd()).parent / "models" / "openvino" / "clip"
+        model_dir = (models_root() or Path(os.getcwd()).parent / "models") / "openvino" / "clip"
 
         visual_path = model_dir / "visual.xml"
         text_path = model_dir / "text.xml"

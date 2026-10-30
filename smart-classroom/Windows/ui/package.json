@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "2026.2.1",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:localhost:5173 && cross-env ELECTRON_START_URL=http://localhost:5173 electron electron/main.cjs\"",
     "electron:preview": "npm run build && electron electron/main.cjs",
-    "electron:build": "npm run build && electron-builder --win portable"
+    "electron:build": "npm run build && electron-builder --win nsis"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

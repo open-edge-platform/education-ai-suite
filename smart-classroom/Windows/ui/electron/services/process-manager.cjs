@@ -14,6 +14,7 @@ const { EventEmitter } = require('events');
 
 const registry = require('./registry.cjs');
 const config = require('./config-store.cjs');
+const paths = require('./paths.cjs');
 const proc = require('./win-proc.cjs');
 
 const HEALTH_INTERVAL_MS = 2000;
@@ -271,6 +272,7 @@ class ServiceManager extends EventEmitter {
       env: {
         ...process.env,
         ...config.proxyEnv(),
+        SC_CONFIG_PATH: paths.configFile(),
         // Lets content_search accept /ingest-path (real file paths from the
         // desktop UI). Browser launches never set it, so the endpoint stays off.
         CS_ENABLE_PATH_INGEST: '1',
