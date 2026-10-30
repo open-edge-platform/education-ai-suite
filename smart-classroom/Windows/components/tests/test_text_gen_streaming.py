@@ -232,9 +232,66 @@ def test_request_sampling_reaches_the_generation_config():
     assert config.top_p == pytest.approx(0.8) and config.top_k == 20
 
 
+class _ConfigPipe(_Pipe):
+    def __init__(self):
+        super().__init__()
+        self.configs = []
+
+    def generate(self, prompt, generation_config=None, streamer=None, images=None):
+        self.configs.append(generation_config)
+        return super().generate(prompt, generation_config, streamer, images)
+
+
+@pytest.mark.parametrize("text", [
+    "What is in the motorcyclist's mouth? Answer A, B, C or D.",
+    "请总结这节课的主要内容，列出关键词和重难点。",
+])
+def test_speculative_requests_always_draft(stats, text):
+    pipe = _ConfigPipe()
+    vlm = _vlm(pipe, speculative=SimpleNamespace(method="eagle3", num_assistant_tokens=4))
+    call = ps.ModelCall("text_gen", recorder=stats)
+    vlm.generate(text, stream=False, max_new_tokens=2, call=call)
+    assert pipe.configs[0].num_assistant_tokens == 4
+    (record,) = stats.records()[1]
+    assert record["decoding"] == "eagle3"
+
+
+def test_language_selects_the_plan_at_load(monkeypatch):
+    from utils import config_loader
+
+    seen = {}
+    monkeypatch.setattr(config_loader, "config", SimpleNamespace(
+        app=SimpleNamespace(language="zh"),
+        models=SimpleNamespace(text_gen=SimpleNamespace(
+            vlm_name="Qwen/Qwen3-VL-8B-Instruct", device="GPU", weight_format="int4",
+            speculative={"mode": "auto"}))))
+    monkeypatch.setattr(text_gen_vlm, "resolve_plan",
+                        lambda node, language=None: seen.setdefault("language", language))
+    vlm = text_gen_vlm.VLMTextGen.__new__(text_gen_vlm.VLMTextGen)
+    vlm._load_config()
+    assert seen["language"] == "zh"
+
+
 def test_unknown_sampling_keys_are_rejected():
     with pytest.raises(ValueError, match="length_penalty"):
         _vlm(_Pipe()).generate("hi", stream=False, sampling={"length_penalty": 2.0})
+
+
+@pytest.mark.parametrize("model, priority", [
+    ("Qwen/Qwen3-VL-8B-Instruct", "MEDIUM"),  # eagle3 pins its queue priority
+    ("Qwen/Qwen3.6-35B-A3B", "LOW"),          # dflash follows models.gpu_queue_priority
+])
+def test_speculative_pipeline_queue_priority(monkeypatch, model, priority):
+    from components.vlm.text_gen_profiles import resolve_plan
+    from utils import ov_runtime
+
+    monkeypatch.setattr(ov_runtime, "gpu_queue_priority", lambda: "LOW")
+    monkeypatch.setattr(text_gen_vlm.ov_genai, "draft_model", lambda path, device: ("draft", path))
+    settings = resolve_plan(SimpleNamespace(
+        vlm_name=model, weight_format="int4", speculative={"mode": "auto"})).speculative
+    kwargs = _vlm(_Pipe())._speculative_kwargs(settings, "draft-dir")
+    assert kwargs["GPU_QUEUE_PRIORITY"] == priority
+    assert kwargs["draft_model"] == ("draft", "draft-dir")
 
 
 def test_speculative_pipeline_rejects_penalties():
