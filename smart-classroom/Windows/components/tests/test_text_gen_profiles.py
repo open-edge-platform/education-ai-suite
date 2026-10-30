@@ -86,6 +86,19 @@ def test_auto_method_selects_catalog_eagle3_for_qwen3_vl_8b():
     assert "KV_CACHE_PRECISION" not in spec.profile.ov_properties
 
 
+@pytest.mark.parametrize("weight", ["int4", "int8"])
+def test_auto_method_selects_target_bundled_mtp_for_qwen35(weight):
+    plan = resolve_plan(_text_gen("Qwen/Qwen3.5-9B", weight, {"mode": "auto"}))
+    spec = plan.speculative
+    assert spec.method == "mtp"
+    assert spec.source == "target" and spec.draft_model is None
+    assert spec.draft_dir() is None
+    assert spec.describe() == "target-bundled MTP"
+    assert spec.num_assistant_tokens == 2
+    assert spec.profile.min_genai_version == "2026.4.1"
+    assert spec.profile.scheduler["max_num_seqs"] == 1
+
+
 def test_eagle3_rejects_another_drafter_and_out_of_range_windows():
     with pytest.raises(SpeculativeConfigError, match="not the qualified eagle3"):
         resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int4", {
@@ -135,11 +148,13 @@ def test_unsupported_methods_are_plain_in_auto_and_fail_in_on(method):
         resolve_plan(_text_gen("Qwen/Qwen3.8-27B", "int4", {"mode": "on", "method": method}))
 
 
-def test_qwen35_has_no_qualified_method():
-    plan = resolve_plan(_text_gen("Qwen/Qwen3.5-9B", "int4", {"mode": "auto", "method": "dflash"}))
+def test_qwen35_explicit_dflash_remains_unqualified():
+    plan = resolve_plan(_text_gen(
+        "Qwen/Qwen3.5-9B", "int4", {"mode": "auto", "method": "dflash"}))
     assert plan.speculative is None and "no qualified dflash" in plan.plain_reason
-    with pytest.raises(SpeculativeUnavailableError):
-        resolve_plan(_text_gen("Qwen/Qwen3.5-9B", "int4", {"mode": "on"}))
+    with pytest.raises(SpeculativeUnavailableError, match="no qualified dflash"):
+        resolve_plan(_text_gen(
+            "Qwen/Qwen3.5-9B", "int4", {"mode": "on", "method": "dflash"}))
 
 
 def test_unqualified_precision_falls_back_in_auto():

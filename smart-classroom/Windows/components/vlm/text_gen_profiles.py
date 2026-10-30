@@ -15,9 +15,10 @@ config node into a :class:`TextGenPlan`:
   method without a qualified profile becomes plain generation under
   ``mode: auto`` and an actionable failure under ``mode: "on"``.
 
-Speculative profiles: DFlash for Qwen3.6-35B-A3B INT4 and Eagle3 for
-Qwen3-VL-8B-Instruct INT4. ``dflash2`` and ``mtp`` stay valid settings without a
-profile: plain generation under ``auto``, an actionable failure under ``"on"``.
+Speculative profiles: DFlash for Qwen3.6-35B-A3B INT4, Eagle3 for
+Qwen3-VL-8B-Instruct INT4, and target-bundled MTP for Qwen3.5-9B INT4/INT8.
+``dflash2`` stays a valid setting without a profile: plain generation under
+``auto``, an actionable failure under ``"on"``.
 """
 
 from __future__ import annotations
@@ -148,6 +149,24 @@ _QWEN3VL8B_EAGLE3 = SpeculativeProfile(
     languages=("en",),
 )
 
+# Qwen3.5's pre-converted target repositories ship openvino_mtp_model.xml/bin.
+# GenAI 2026.4.1 loads the bundled head through the same VLMPipeline as the
+# target, so image requests keep working. Arc 140T, one replayed English lesson
+# per setting, MEDIUM queue for both: summary decode 13.44 tok/s at k=2 vs 13.45
+# plain (k=3 12.1, k=5 11.8). k=2 was 1.06-1.15x faster on mind map and report,
+# but one topic-segmentation call fell to 8% acceptance and the lesson's text
+# generation took 11% longer overall. Not a qualification.
+_QWEN35_MTP = SpeculativeProfile(
+    method="mtp",
+    precisions=("int4", "int8"),
+    default_source="target",
+    num_assistant_tokens=2,
+    num_assistant_tokens_range=(1, 15),
+    min_genai_version="2026.4.1",
+    ov_properties={"GPU_ENABLE_LARGE_ALLOCATIONS": "YES", "GPU_QUEUE_PRIORITY": "MEDIUM"},
+    scheduler={"max_num_seqs": 1, "enable_prefix_caching": False},
+)
+
 CATALOG: Mapping[str, TargetProfile] = {
     "qwen/qwen3-vl-8b-instruct": TargetProfile(
         name="Qwen/Qwen3-VL-8B-Instruct",
@@ -162,6 +181,8 @@ CATALOG: Mapping[str, TargetProfile] = {
         ir_repos={"int4": "OpenVINO/Qwen3.5-9B-int4-ov",
                   "int8": "OpenVINO/Qwen3.5-9B-int8-ov"},
         tool_calls=True,
+        default_method="mtp",
+        methods={"mtp": _QWEN35_MTP},
     ),
     "qwen/qwen3.6-35b-a3b": TargetProfile(
         name="Qwen/Qwen3.6-35B-A3B",
@@ -214,6 +235,8 @@ class SpeculativeSettings:
         """Identity safe for health/logs: no local paths."""
         if self.source == "local":
             return f"local IR ({Path(str(self.draft_model)).name})"
+        if self.source == "target":
+            return "target-bundled MTP"
         rev = f"@{self.draft_revision[:12]}" if self.draft_revision else ""
         return f"{self.draft_model}{rev}"
 
