@@ -163,7 +163,7 @@ class CompatibilityError(PreparationError):
 class PreparedSpeculative:
     settings: SpeculativeSettings
     target_dir: Path              # derived DFlash target, or the ordinary one
-    draft_dir: Path               # external drafter IR
+    draft_dir: Path               # external drafter IR or target directory for bundled MTP
     draft_revision: Optional[str]
 
 
@@ -311,6 +311,19 @@ def check_tokenizer_runtime(model_dir: Path, installed: Optional[str]) -> None:
 # ----------------------------------------------------------------------------
 def _prepare_speculative(plan: TextGenPlan, target_dir: Path) -> PreparedSpeculative:
     settings = plan.speculative
+    if settings.method == "mtp":
+        mtp_files = ("openvino_mtp_model.xml", "openvino_mtp_model.bin")
+        _require_files(target_dir, mtp_files, "target-bundled MTP drafter IR")
+        if any((target_dir / name).is_symlink() for name in mtp_files):
+            raise CompatibilityError("target-bundled MTP artifacts must not be symlinks")
+        try:
+            ET.parse(str(target_dir / "openvino_mtp_model.xml"))
+        except ET.ParseError as exc:
+            raise CompatibilityError(
+                f"target-bundled MTP IR in {_rel(target_dir)} is invalid"
+            ) from exc
+        # The runtime reads the bundled head from the ordinary target directory.
+        return PreparedSpeculative(settings, target_dir, target_dir, None)
     if settings.method == "dflash":
         draft_dir, revision = _prepare_external_draft(plan)
         validate_dflash_pair(target_dir, draft_dir, settings.num_assistant_tokens)
