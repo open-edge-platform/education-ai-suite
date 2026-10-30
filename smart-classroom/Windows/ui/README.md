@@ -38,8 +38,10 @@ the packaged app serves the UI from a local origin and proxies `/api/v1` to
 ### Data locations
 
 In the packaged app, writable state lives under `%LOCALAPPDATA%\SmartClassroom\`
-(the config copy, `.proxy-config`, models, venvs, `storage/` sessions and logs),
-so the installed `resources/backend` tree stays read-only and survives updates.
+(the config copy, `.proxy-config`, models, venvs, `storage/` sessions, logs,
+grading and content-search data, and third-party caches for PaddleX, pip and
+HuggingFace), so the installed `resources/backend` tree stays read-only and
+survives updates.
 The backend loads the user's config copy from there via `SC_CONFIG_PATH`; in dev
 these paths stay in the source tree.
 

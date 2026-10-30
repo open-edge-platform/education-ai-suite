@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -28,6 +29,11 @@ def _component_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _data_root() -> Path:
+    v = os.environ.get("SMART_CLASSROOM_USERDATA")
+    return Path(v) / "grading" if v and v.strip() else _component_root()
+
+
 def _load_component_config() -> dict[str, Any]:
     from services.config import load_config, get_language
 
@@ -43,7 +49,7 @@ def _load_provider_url(key: str, default: str) -> str:
 
 
 def _outputs_dir(task_id: str, student_id: str | None) -> Path:
-    return _component_root() / "outputs" / task_id / (student_id or "paper")
+    return _data_root() / "outputs" / task_id / (student_id or "paper")
 
 
 def run_vlm_grading_pipeline(
@@ -113,7 +119,7 @@ def run_vlm_grading_pipeline(
         raise FileNotFoundError(f"grading prompt not found: {prompt_path}")
 
     user_prompt = prompt_path.read_text(encoding="utf-8")
-    shared_rubrics_dir = _component_root() / "rubrics"
+    shared_rubrics_dir = _data_root() / "rubrics"
     prompt_with_prefix = prepend_common_prefix_if_missing(
         full_prompt=user_prompt,
         cfg=cfg.get("section_split", {}),

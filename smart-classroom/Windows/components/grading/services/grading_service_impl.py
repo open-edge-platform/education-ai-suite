@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import traceback
 import yaml
@@ -50,7 +51,14 @@ def get_health(language: str) -> dict[str, Any]:
 
 
 _COMPONENT_ROOT = Path(__file__).resolve().parents[1]
-_JOB_STORE = JsonJobStore(_COMPONENT_ROOT / "outputs" / "jobs" / "job_store.json")
+
+
+def _data_root() -> Path:
+    v = os.environ.get("SMART_CLASSROOM_USERDATA")
+    return Path(v) / "grading" if v and v.strip() else _COMPONENT_ROOT
+
+
+_JOB_STORE = JsonJobStore(_data_root() / "outputs" / "jobs" / "job_store.json")
 
 _ACTIVE_TASK_STATUSES = {"PENDING", "RUNNING", "PAUSING", "PAUSED", "CANCELLING"}
 _TERMINAL_TASK_STATUSES = {"COMPLETED", "FAILED", "CANCELLED"}
@@ -62,7 +70,7 @@ def _now_utc_iso() -> str:
 
 
 def _task_logs_dir() -> Path:
-    logs_dir = _COMPONENT_ROOT / "outputs" / "jobs" / "logs"
+    logs_dir = _data_root() / "outputs" / "jobs" / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     return logs_dir
 
@@ -84,7 +92,7 @@ def _append_task_exception(task_id: str, task_type: str, exc: Exception) -> None
 
 
 def _rubrics_upload_dir() -> Path:
-    upload_dir = _COMPONENT_ROOT / "rubrics"
+    upload_dir = _data_root() / "rubrics"
     upload_dir.mkdir(parents=True, exist_ok=True)
     return upload_dir
 
@@ -434,7 +442,7 @@ def _update_summary(task_id: str, student_id: str, result_path: str) -> None:
 
 
 def _outputs_root() -> Path:
-    return _COMPONENT_ROOT / "outputs"
+    return _data_root() / "outputs"
 
 
 def _validate_task_id(task_id: str) -> str:

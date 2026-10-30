@@ -84,8 +84,11 @@ def _ensure_nltk_data() -> None:
 
     os.environ.setdefault("NLTK_ALLOW_PROXIED_URLOPEN", "1")
 
-    data_dir = os.environ.get("NLTK_DATA") or str(
-        Path(__file__).resolve().parents[2] / "data" / "nltk_data"
+    _ud = os.environ.get("SMART_CLASSROOM_USERDATA")
+    data_dir = os.environ.get("NLTK_DATA") or (
+        str(Path(_ud) / "content_search" / "nltk_data")
+        if _ud and _ud.strip()
+        else str(Path(__file__).resolve().parents[2] / "data" / "nltk_data")
     )
     try:
         ensure_directory(data_dir)
@@ -193,7 +196,12 @@ class DocumentParser:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.extract_images = extract_images
-        _default_img_dir = os.path.join(os.getcwd(), "logs", "extracted_images")
+        _ud = os.environ.get("SMART_CLASSROOM_USERDATA")
+        _default_img_dir = (
+            os.path.join(_ud, "content_search", "logs", "extracted_images")
+            if _ud and _ud.strip()
+            else os.path.join(os.getcwd(), "logs", "extracted_images")
+        )
         self.image_output_dir = image_output_dir or _default_img_dir
         if extract_images:
             ensure_directory(self.image_output_dir)

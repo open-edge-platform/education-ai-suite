@@ -71,6 +71,9 @@ function ensureUserData() {
     if (typeof process.env.PIP_CACHE_DIR !== 'string') {
       process.env.PIP_CACHE_DIR = path.join(data, 'pip-cache');
     }
+    if (typeof process.env.HF_HOME !== 'string') {
+      process.env.HF_HOME = path.join(data, 'huggingface');
+    }
     const target = path.join(data, 'config.yaml');
     if (!fs.existsSync(target)) {
       const src = path.join(home(), 'config.yaml');
