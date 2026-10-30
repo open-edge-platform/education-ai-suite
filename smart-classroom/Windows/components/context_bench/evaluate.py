@@ -457,7 +457,11 @@ def _dflash_section(loaded: list) -> list:
                     case = entry["case"]
                     plain = report._matched_baseline(case, report._leaderboard(at_context)) or {}
                     acceptance = metrics.finite_number(case.get("mtp_acceptance_rate"))
-                    same = case.get("output_sha256") and case.get("output_sha256") == plain.get("output_sha256")
+                    # A missing hash (repeated outputs disagreed, or no baseline) is unknown,
+                    # not a mismatch.
+                    ours, theirs = case.get("output_sha256"), plain.get("output_sha256")
+                    output = ("--" if not (ours and theirs)
+                              else "identical" if ours == theirs else "differs")
                     rows.append([
                         model, suite, context_label(context), report.task_label(case),
                         case.get("num_assistant_tokens"),
@@ -472,7 +476,7 @@ def _dflash_section(loaded: list) -> list:
                         _ratio_cell(entry["pass_cost"]),
                         f"{_seconds(plain.get('first_token_latency'))} / "
                         f"{_seconds(case.get('first_token_latency'))}",
-                        "identical" if same else "differs",
+                        output,
                     ])
     if not rows:
         return []
@@ -483,7 +487,8 @@ def _dflash_section(loaded: list) -> list:
         "Speedup ~= AL / pass cost: AL (acceptance length) is tokens committed per verification "
         "pass, pass cost is one verification pass relative to one plain decode step. Greedy "
         "speculative decoding should reproduce the plain output; `differs` is worth inspecting "
-        "in the run's report.txt.", "",
+        "in the run's report.txt, and `--` means a side's repeated outputs disagreed, so no "
+        "comparison was made.", "",
         *_table(["Model", "Suite", "Context", "Task", "k", "Plain TPOT ms", "DFlash TPOT ms",
                  "Decode speedup", "Total-call speedup", "AL", "Accepted", "Pass cost",
                  "TTFT s off / on", "Output"], rows),
