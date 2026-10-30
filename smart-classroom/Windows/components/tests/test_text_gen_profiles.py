@@ -71,6 +71,62 @@ def test_auto_method_selects_catalog_dflash_for_qwen36():
     assert spec.profile.scheduler["enable_prefix_caching"] is False
 
 
+def test_auto_method_selects_catalog_eagle3_for_qwen3_vl_8b():
+    plan = resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int4", {"mode": "auto"}))
+    spec = plan.speculative
+    assert spec.method == "eagle3" and spec.source == "huggingface"
+    assert spec.draft_model == "AQ-MedAI/Qwen3-VL-8B-Instruct-eagle3"
+    assert spec.draft_revision and len(spec.draft_revision) == 40  # pinned commit
+    assert spec.num_assistant_tokens == 4
+    assert spec.draft_dir() == OPENVINO_MODELS_DIR / "Qwen3-VL-8B-Instruct-eagle3" / "int4"
+    assert spec.profile.min_genai_version == "2026.4"
+    # LOW queue priority erases the speedup; the profile pins MEDIUM.
+    assert spec.profile.ov_properties["GPU_QUEUE_PRIORITY"] == "MEDIUM"
+    # f16 KV slowed long classroom prompts; the runtime default is kept.
+    assert "KV_CACHE_PRECISION" not in spec.profile.ov_properties
+
+
+def test_eagle3_rejects_another_drafter_and_out_of_range_windows():
+    with pytest.raises(SpeculativeConfigError, match="not the qualified eagle3"):
+        resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int4", {
+            "mode": "auto", "method": "eagle3", "draft_model": "someone/other-eagle3"}))
+    with pytest.raises(SpeculativeConfigError, match="1..8"):
+        resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int4", {
+            "mode": "auto", "num_assistant_tokens": 9}))
+
+
+def test_eagle3_is_qualified_for_english_only():
+    node = _text_gen("Qwen/Qwen3-VL-8B-Instruct", "int4", {"mode": "auto"})
+    assert resolve_plan(node, "en").speculative.method == "eagle3"
+    assert resolve_plan(node, "EN ").speculative.method == "eagle3"
+    plan = resolve_plan(node, "zh")
+    # Plain pipeline, no drafter prepared, the reason reported in /health.
+    assert plan.speculative is None and not plan.wants_speculative
+    assert "app.language zh" in plan.plain_reason
+    with pytest.raises(SpeculativeUnavailableError, match="app.language zh"):
+        resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int4", {"mode": "on"}), "zh")
+    # DFlash has no language restriction.
+    assert resolve_plan(_text_gen(speculative={"mode": "auto"}), "zh").speculative.method == "dflash"
+
+
+def test_removed_cjk_setting_is_an_unknown_key():
+    with pytest.raises(SpeculativeConfigError, match="max_cjk_ratio"):
+        resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int4", {
+            "mode": "auto", "max_cjk_ratio": 0.1}))
+
+
+def test_eagle3_int8_is_plain_in_auto_and_fails_in_on():
+    plan = resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int8", {"mode": "auto"}))
+    assert plan.speculative is None and "int8" in plan.plain_reason
+    with pytest.raises(SpeculativeUnavailableError):
+        resolve_plan(_text_gen("Qwen/Qwen3-VL-8B-Instruct", "int8", {"mode": "on"}))
+
+
+def test_eagle3_is_not_offered_for_other_targets():
+    plan = resolve_plan(_text_gen(speculative={"mode": "auto", "method": "eagle3"}))
+    assert plan.speculative is None and "no qualified eagle3" in plan.plain_reason
+
+
 @pytest.mark.parametrize("method", ["auto", "dflash2", "mtp"])
 def test_unsupported_methods_are_plain_in_auto_and_fail_in_on(method):
     plan = resolve_plan(_text_gen("Qwen/Qwen3.8-27B", "int8", {"mode": "auto", "method": method}))

@@ -69,20 +69,17 @@ def _models_base() -> Path:
     return Path(ud) / "models" if ud and ud.strip() else (_SC_ROOT / "models")
 
 
-def _export_overlay_dir() -> Path:
-    """Directory holding the export-only transformers build.
+def _export_overlay_dir(version: str = _EXPORT_TRANSFORMERS_VERSION) -> Path:
+    """Directory holding an export-only transformers build.
 
     Lives under the gitignored ``models/`` tree. ``SC_EXPORT_DEPS_DIR`` overrides
-    it so a setup script can provision the overlay ahead of time (e.g. for an
-    offline install).
+    the default version's directory so a setup script can provision the overlay
+    ahead of time (e.g. for an offline install).
     """
     override = os.environ.get("SC_EXPORT_DEPS_DIR")
-    if override:
+    if override and version == _EXPORT_TRANSFORMERS_VERSION:
         return Path(override)
-    return (
-        _models_base() / ".export-deps" /
-        f"transformers-{_EXPORT_TRANSFORMERS_VERSION}"
-    )
+    return _models_base() / ".export-deps" / f"transformers-{version}"
 
 
 def _needs_transformers_overlay(model_id: str) -> bool:
@@ -90,28 +87,34 @@ def _needs_transformers_overlay(model_id: str) -> bool:
     return any(marker in name for marker in _EXPORT_TRANSFORMERS_MODEL_MARKERS)
 
 
-def _ensure_transformers_overlay() -> Path:
-    """Return the overlay dir, installing the pinned transformers with --no-deps if missing."""
-    overlay = _export_overlay_dir()
-    marker = overlay / "transformers" / "__init__.py"
-    if marker.exists():
+def ensure_transformers_overlay(version: str = _EXPORT_TRANSFORMERS_VERSION,
+                                extra_specs: tuple = ()) -> Path:
+    """Return the overlay dir, installing the pinned packages with --no-deps if missing.
+
+    ``extra_specs`` (``"name==version"``) are installed beside transformers, for a
+    build whose own requirements differ from the main venv's.
+    """
+    overlay = _export_overlay_dir(version)
+    specs = [f"transformers=={version}", *extra_specs]
+    markers = [overlay / spec.split("==")[0].replace("-", "_") / "__init__.py" for spec in specs]
+    if all(marker.exists() for marker in markers):
         logger.info(f"Using export-only transformers overlay at {overlay}")
         return overlay
 
-    spec = f"transformers=={_EXPORT_TRANSFORMERS_VERSION}"
-    logger.info(f"Provisioning {spec} for the export subprocess in {overlay}...")
+    logger.info(f"Provisioning {' '.join(specs)} for the export subprocess in {overlay}...")
     overlay.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--no-deps",
-         "--target", str(overlay), spec]
+        [sys.executable, "-m", "pip", "install", "--no-deps", "--upgrade",
+         "--target", str(overlay), *specs]
     )
-    if completed.returncode != 0 or not marker.exists():
+    if completed.returncode != 0 or not all(marker.exists() for marker in markers):
         raise RuntimeError(
-            f"Could not provision {spec}, required to export this model. "
+            f"Could not provision {' '.join(specs)}, required to export this model. "
             f"Install it manually and retry:\n"
-            f'  python -m pip install --no-deps --target "{overlay}" {spec}'
+            f'  python -m pip install --no-deps --target "{overlay}" {" ".join(specs)}'
         )
     return overlay
+
 
 
 def convert_model(
@@ -153,7 +156,7 @@ def convert_model(
             search_path = [p for p in sys.path if p]
             if _needs_transformers_overlay(model_id):
                 # Must come first: PYTHONPATH entries are searched in order.
-                search_path.insert(0, str(_ensure_transformers_overlay()))
+                search_path.insert(0, str(ensure_transformers_overlay()))
             env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(search_path))
             completed = subprocess.run(
                 [

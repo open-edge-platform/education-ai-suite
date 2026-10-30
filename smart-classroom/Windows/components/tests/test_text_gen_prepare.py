@@ -278,6 +278,158 @@ def test_local_drafter_is_validated_never_downloaded(env, tmp_path):
     assert result.speculative.draft_dir == local and env.downloads == []
 
 
+# --- Eagle3 ----------------------------------------------------------------------
+VL8B = "Qwen/Qwen3-VL-8B-Instruct"
+EAGLE3_COMMIT = text_gen_profiles.target_profile(VL8B).methods["eagle3"].draft_revision
+
+
+def _eagle3_xml(inputs=None, outputs=("logits", "d2t"), rt_info=True) -> str:
+    inputs = inputs or {"hidden_states": 3, "attention_mask": 2, "position_ids": 3,
+                        "inputs_embeds": 3, "beam_idx": 1}
+    layers = [
+        f'<layer id="{i}" name="{name}" type="Parameter" version="opset1"><output>'
+        f'<port id="0" precision="FP32" names="{name}">{"<dim>-1</dim>" * rank}</port>'
+        f"</output></layer>"
+        for i, (name, rank) in enumerate(inputs.items())
+    ]
+    layers += [
+        f'<layer id="{100 + i}" name="Result_{i}" type="Result" version="opset1" '
+        f'output_names="{name}"><input><port id="0" /></input></layer>'
+        for i, name in enumerate(outputs)
+    ]
+    marker = f'<{prep.EAGLE3_DRAFT_RT_INFO_KEY} value="True" />' if rt_info else ""
+    return (f'<?xml version="1.0"?><net name="d" version="11"><layers>{"".join(layers)}</layers>'
+            f"<edges /><rt_info><other value=\"1\" />{marker}</rt_info></net>")
+
+
+def _write_eagle3_draft(path: Path, prepared=None, xml=None, **cfg) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "openvino_model.xml").write_text(xml or _eagle3_xml(), encoding="utf-8")
+    (path / "openvino_model.bin").write_bytes(b"\0")
+    config = {"architectures": ["LlamaForCausalLMEagle3"], "target_model_type": "qwen3_vl",
+              "hidden_size": 16, "vocab_size": 100, "draft_vocab_size": 32}
+    config.update(cfg)
+    (path / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    if prepared:
+        (path / ".prepared.json").write_text(json.dumps({"revision": prepared}), encoding="utf-8")
+    return path
+
+
+def _write_vl_target(path: Path) -> Path:
+    _write_target(path)
+    (path / "config.json").write_text(json.dumps({
+        "model_type": "qwen3_vl",
+        "text_config": {"num_hidden_layers": 3, "hidden_size": 16, "vocab_size": 100}}),
+        encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def eagle3_env(env, monkeypatch):
+    _write_vl_target(env.models / "Qwen3-VL-8B-Instruct" / "int4")
+
+    def export(source_dir, draft_dir, settings, repo, revision):
+        env.exports.append((repo, revision))
+        _write_eagle3_draft(draft_dir, prepared=revision)
+
+    monkeypatch.setattr(prep, "_export_draft", export)
+    return env
+
+
+def test_auto_eagle3_downloads_pinned_source_exports_and_uses_the_target_as_is(eagle3_env):
+    plan = _plan(eagle3_env, VL8B, mode="auto")
+    result = prep.prepare(plan, genai_version=GENAI)
+    spec = result.speculative
+    assert spec is not None and spec.settings.method == "eagle3"
+    assert spec.draft_revision == EAGLE3_COMMIT and eagle3_env.resolved == []
+    assert eagle3_env.downloads == [("AQ-MedAI/Qwen3-VL-8B-Instruct-eagle3", EAGLE3_COMMIT,
+                                     ["*.json", "*.safetensors"])]
+    # No derived target or grafted head: the ordinary directories are loaded.
+    assert spec.target_dir == plan.target_dir
+    assert spec.draft_dir == plan.speculative.draft_dir()
+    manifest = json.loads(result.manifest.read_text(encoding="utf-8"))
+    assert manifest["speculative"]["method"] == "eagle3"
+    assert manifest["speculative"]["status"] == "ready"
+
+
+def test_eagle3_needs_genai_2026_4(eagle3_env):
+    result = prep.prepare(_plan(eagle3_env, VL8B, mode="auto"), genai_version=lambda: "2026.3.0")
+    assert result.speculative is None and "openvino-genai >= 2026.4" in result.speculative_error
+
+
+def test_eagle3_export_runs_on_the_overlay_without_repository_code(tmp_path, monkeypatch):
+    seen = {}
+
+    def run(cmd, env=None, check=False):
+        seen.update(cmd=cmd, env=env)
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(prep.subprocess, "run", run)
+    monkeypatch.setattr(prep, "_eagle3_overlay", lambda: tmp_path / "overlay")
+    settings = resolve_plan(SimpleNamespace(
+        vlm_name=VL8B, weight_format="int4", device="GPU", speculative={"mode": "auto"})).speculative
+    with pytest.raises(prep.PreparationError, match="transformers 4.57.6"):
+        prep._export_draft(tmp_path / "src", tmp_path / "int4", settings, "a/b", EAGLE3_COMMIT)
+    cmd = seen["cmd"]
+    script = cmd[cmd.index("-c") + 1]
+    assert script == prep._EAGLE3_EXPORT and "-I" in cmd
+    assert cmd[cmd.index("-c") + 2:] == [str(tmp_path / "overlay"), str(tmp_path / "src"),
+                                          "int4", str(tmp_path / "int4.partial")]
+    assert "trust_remote_code" not in script and "trust-remote-code" not in script
+    assert '"--task", "text-generation-with-past"' in script
+    assert seen["env"]["HF_HUB_OFFLINE"] == "1"
+
+
+def test_eagle3_overlay_failure_is_an_acquisition_error(tmp_path, monkeypatch):
+    def no_overlay():
+        raise prep.PreparationError("Could not provision transformers==4.57.6")
+
+    def run(*args, **kwargs):
+        pytest.fail("the export must not start without its overlay")
+
+    monkeypatch.setattr(prep, "_eagle3_overlay", no_overlay)
+    monkeypatch.setattr(prep.subprocess, "run", run)
+    settings = resolve_plan(SimpleNamespace(
+        vlm_name=VL8B, weight_format="int4", device="GPU", speculative={"mode": "auto"})).speculative
+    # A PreparationError: under mode auto, prepare() reports it and serves plain.
+    with pytest.raises(prep.PreparationError, match="provision"):
+        prep._export_draft(tmp_path / "src", tmp_path / "int4", settings, "a/b", EAGLE3_COMMIT)
+
+
+def test_validate_eagle3_pair_rules(tmp_path):
+    target = _write_vl_target(tmp_path / "t")
+    prep.validate_eagle3_pair(target, _write_eagle3_draft(tmp_path / "ok"))
+    cases = [
+        ("arch", {"architectures": ["LlamaForCausalLM"]}, None, "Eagle3 architecture"),
+        ("type", {"target_model_type": "qwen2_vl"}, None, "different model"),
+        ("hidden", {"hidden_size": 8}, None, "hidden_size"),
+        ("vocab", {"vocab_size": 99}, None, "vocab_size"),
+        ("text", {}, _eagle3_xml(inputs={"input_ids": 2, "position_ids": 2}), "not a VLM Eagle3"),
+        ("rank", {}, _eagle3_xml(inputs={"hidden_states": 3, "inputs_embeds": 3,
+                                         "position_ids": 2}), "rank 2"),
+        ("d2t", {}, _eagle3_xml(outputs=("logits",)), "d2t"),
+        ("mark", {}, _eagle3_xml(rt_info=False), "eagle3_mode"),
+    ]
+    for name, cfg, xml, message in cases:
+        with pytest.raises(prep.CompatibilityError, match=message):
+            prep.validate_eagle3_pair(target, _write_eagle3_draft(tmp_path / name, xml=xml, **cfg))
+
+
+def test_mismatched_eagle3_drafter_fails_even_in_auto(eagle3_env):
+    plan = _plan(eagle3_env, VL8B, mode="auto")
+    _write_eagle3_draft(plan.speculative.draft_dir(), prepared=EAGLE3_COMMIT, hidden_size=8)
+    with pytest.raises(prep.CompatibilityError, match="hidden_size"):
+        prep.prepare(plan, genai_version=GENAI)
+
+
+def test_local_eagle3_drafter_is_validated_never_downloaded(eagle3_env, tmp_path):
+    local = _write_eagle3_draft(tmp_path / "my-eagle3")
+    plan = _plan(eagle3_env, VL8B, mode="on", method="eagle3", draft_source="local",
+                 draft_model=str(local))
+    result = prep.prepare(plan, genai_version=GENAI)
+    assert result.speculative.draft_dir == local and eagle3_env.downloads == []
+
+
 # --- DFlash compatibility and derivation ----------------------------------------
 def test_validate_dflash_pair_rules(tmp_path):
     target = _write_target(tmp_path / "t")
