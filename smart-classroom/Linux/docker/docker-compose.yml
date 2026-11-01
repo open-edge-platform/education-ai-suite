@@ -42,6 +42,11 @@ services:
         HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
         HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
         NO_PROXY: "${NO_PROXY:-${no_proxy:-}}"
+      # Optional corporate TLS-inspection CA, see app.Dockerfile and the
+      # `secrets.corporate_ca` entry below. No-op unless CORPORATE_CA_FILE
+      # points at a real PEM file.
+      secrets:
+        - corporate_ca
     image: smart-classroom-app:local
     container_name: smart-classroom-app
     ports:
@@ -389,3 +394,11 @@ volumes:
   audio-analyzer-chunks:
   audio-analyzer-storage:
   audio-analyzer-cache:
+
+secrets:
+  # Optional corporate TLS-inspection root CA (PEM) used only by the `app`
+  # build's GPU/NPU-runtime step, see docker/app.Dockerfile. Defaults to a
+  # tracked empty placeholder (0 bytes), which keeps this a verified no-op
+  # for everyone who doesn't need it.
+  corporate_ca:
+    file: "${CORPORATE_CA_FILE:-./corporate-ca.placeholder.pem}"

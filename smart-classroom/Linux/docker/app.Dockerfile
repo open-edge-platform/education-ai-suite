@@ -36,10 +36,36 @@ RUN HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" NO_PROXY="$NO_PROXY" \
         $(grep -v '^#' system_requirements.txt | xargs) \
     && rm -rf /var/lib/apt/lists/*
 
-RUN export http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY" no_proxy="$NO_PROXY" \
+# Optional corporate TLS-inspection CA (NOT baked into the repo or the image
+# by default -- this RUN step is a no-op unless a build invoker explicitly
+# supplies one). Some corporate networks terminate/re-sign outbound HTTPS
+# through an SSL-inspecting proxy; the CA that re-signs that traffic is not
+# in Debian's default trust store, which can make the curl calls below fail
+# with "unable to get local issuer certificate". For such environments, pass
+# the environment's own approved root CA (PEM) at build time via a BuildKit
+# secret -- it is never written into the Dockerfile, never committed to the
+# repo, and only read for the duration of this RUN step:
+#   docker build --secret id=corporate_ca,src=/path/to/corporate-ca.pem ...
+# TLS verification is never disabled (no curl -k/--insecure); if no secret
+# is supplied, this is a pure no-op and behaves exactly as before.
+#
+# IMPORTANT: the CA is installed and the driver downloads below both happen
+# in this SAME RUN step, and the CA file + its trust-store entry are removed
+# again (via `update-ca-certificates --fresh`) before this step/layer
+# completes. A later `RUN rm` in a subsequent layer would still leave the
+# certificate's bytes recoverable in image history, so cleanup must happen
+# within this one layer for the CA to be genuinely build-only.
+RUN --mount=type=secret,id=corporate_ca,required=false \
+    export http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY" no_proxy="$NO_PROXY" \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl libnuma1 libtbb12 ocl-icd-libopencl1 \
+    && CORPORATE_CA_INSTALLED=0 \
+    && if [ -s /run/secrets/corporate_ca ]; then \
+        cp /run/secrets/corporate_ca /usr/local/share/ca-certificates/corporate-ca.crt \
+        && update-ca-certificates \
+        && CORPORATE_CA_INSTALLED=1; \
+    fi \
     && mkdir -p /tmp/intel-gpu-runtime \
     && cd /tmp/intel-gpu-runtime \
     && curl -fL --retry 5 --retry-delay 5 --retry-all-errors -O \
@@ -70,6 +96,10 @@ RUN export http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY" no_proxy="$NO_PRO
     && rm -rf /tmp/intel-gpu-runtime \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
+    && if [ "$CORPORATE_CA_INSTALLED" = "1" ]; then \
+        rm -f /usr/local/share/ca-certificates/corporate-ca.crt \
+        && update-ca-certificates --fresh; \
+    fi \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./requirements.txt
