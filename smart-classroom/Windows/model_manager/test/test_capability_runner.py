@@ -120,6 +120,29 @@ def test_abandoned_stream_releases_slot():
     assert list(runner.submit(1)) == [0]
 
 
+def test_concurrent_close_releases_the_slot_once():
+    """The response and the generation thread may both close a stream."""
+    def stream(n):
+        yield from range(n)
+
+    runner = CapabilityRunner(stream, max_concurrency=1, queue_max=4)
+    it = runner.submit(3)
+    assert next(it) == 0
+    barrier = threading.Barrier(8)
+
+    def close():
+        barrier.wait()
+        it.close()
+
+    threads = [threading.Thread(target=close) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # A double release would let two calls hold the single slot at once.
+    assert runner._semaphore._value == 1
+
+
 def test_oom_fails_one_request_runner_stays_ready():
     """RuntimeError (simulated GPU OOM) wraps to OomError; runner stays READY."""
     call_count = [0]

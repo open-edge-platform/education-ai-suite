@@ -8,12 +8,30 @@ files:
   - dist/**/*
   - electron/**/*
   - package.json
-# If express.static fails to read assets from inside the asar at runtime,
-# uncomment the next two lines to unpack the built UI.
-# asarUnpack:
-#   - dist/**
+
 win:
   target:
-    - portable
-portable:
-  artifactName: SmartClassroom-${version}-portable.exe
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Smart Classroom
+  artifactName: SmartClassroom-${version}-setup.exe
+extraResources:
+  - from: ..
+    to: backend
+    filter:
+      - '**/*'
+      - '!**/node_modules/**'
+      - '!**/dist/**'
+      - '!**/release/**'
+      - '!**/logs/**'
+      - '!**/.git/**'
+      - '!**/__pycache__/**'
+      - '!**/*.py[cod]'
+      - '!**/.env'
+      - '!**/venv_convert/**'
+      - '!**/.pytest_cache/**'
+      - '!**/monitoring/tools/socwatch_windows_v2026.0/**'

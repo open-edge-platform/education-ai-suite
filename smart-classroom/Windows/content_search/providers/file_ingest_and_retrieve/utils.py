@@ -113,7 +113,11 @@ class DocxParagraphPicturePartitioner:
     Custom partitioner to extract images from DOCX paragraphs.
     This preserves images that might be lost with standard parsing.
     """
-    output_dir: str = os.path.join(os.getcwd(), "logs", "extracted_images")
+    output_dir: str = (
+        os.path.join(os.environ["SMART_CLASSROOM_USERDATA"], "content_search", "logs", "extracted_images")
+        if os.environ.get("SMART_CLASSROOM_USERDATA", "").strip()
+        else os.path.join(os.getcwd(), "logs", "extracted_images")
+    )
 
     @classmethod
     def iter_elements(cls, paragraph: Paragraph, opts: DocxPartitionerOptions) -> Iterator[Image]:

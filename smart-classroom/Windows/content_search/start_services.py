@@ -284,6 +284,13 @@ def main() -> None:
     
     _load_config_to_env(config_path)
 
+    _ud = os.environ.get("SMART_CLASSROOM_USERDATA")
+    if _ud and _ud.strip():
+        _cs_base = Path(_ud) / "content_search"
+        os.environ["CHROMA_DATA_DIR"] = str(_cs_base / "chroma")
+        os.environ["STORAGE_DATA_DIR"] = str(_cs_base / "storage")
+        os.environ.setdefault("NLTK_DATA", str(_cs_base / "nltk_data"))
+
     requested = []
     for v in args.services:
         requested.extend(p.strip().lower() for p in v.split(",") if p.strip())
@@ -297,7 +304,7 @@ def main() -> None:
             print(f"[launcher] VIDEO_SUMMARIZATION_ENABLED=false, skipping: {', '.join(skipped)}")
             requested = [s for s in requested if s not in ("preprocess",)]
 
-    logs_dir = CONTENT_SEARCH_DIR / "logs"
+    logs_dir = Path(_ud) / "content_search" / "logs" if _ud and _ud.strip() else CONTENT_SEARCH_DIR / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     chroma_exe = _env("CHROMA_EXE", "")

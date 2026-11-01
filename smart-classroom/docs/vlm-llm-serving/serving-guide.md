@@ -18,7 +18,7 @@ The target is selected as before, under `models.text_gen` in
 
 | `vlm_name` | `weight_format` | Optional accelerator |
 | --- | --- | --- |
-| `Qwen/Qwen3-VL-8B-Instruct` (default) | `int4`, `int8` | none (plain) |
+| `Qwen/Qwen3-VL-8B-Instruct` (default) | `int4`, `int8` | `eagle3` (`int4` only) |
 | `Qwen/Qwen3.5-9B` | `int4`, `int8` | none (plain) |
 | `Qwen/Qwen3.6-35B-A3B` | `int4` | `dflash` |
 | `Qwen/Qwen3.8-27B` | `int4`, `int8` | none (plain) |
@@ -42,12 +42,16 @@ models:
     weight_format: int4
     speculative:
       mode: auto          # "off" | auto | "on"
-      method: dflash      # auto | dflash | dflash2 | mtp
+      method: auto        # auto | eagle3 | dflash | dflash2 | mtp
       draft_source: null  # null | huggingface | local
       draft_model: null
       draft_revision: null
       num_assistant_tokens: null
 ```
+
+With `method: auto` the catalog picks the profile of `vlm_name`: `eagle3` for
+Qwen3-VL-8B-Instruct INT4 (only with `app.language: en`), `dflash` for
+Qwen3.6-35B-A3B INT4.
 
 Quote `"off"` and `"on"`: bare `off`/`on` are YAML booleans (they are accepted,
 but quoting avoids surprises).
@@ -56,10 +60,10 @@ but quoting avoids surprises).
 | --- | --- |
 | `mode: auto` | Accelerate when the profile is qualified and its artifacts prepare and warm up; otherwise plain generation, with the reason in `/health`. |
 | `mode: "on"` | Acceleration is required at startup; any reason it cannot run is a startup failure with guidance. |
-| `method` | `dflash` is the only method with a profile, for Qwen3.6 INT4; `auto` selects it there. `dflash2` and `mtp` are valid settings without a profile yet: plain generation under `auto`, a startup failure under `"on"`. |
+| `method` | `eagle3` (Qwen3-VL-8B INT4) and `dflash` (Qwen3.6 INT4) have profiles; `auto` selects the one for `vlm_name`. `dflash2` and `mtp` are valid settings without a profile yet: plain generation under `auto`, a startup failure under `"on"`. |
 | `draft_source: local` | `draft_model` names an existing OpenVINO IR directory (relative paths resolve from `smart-classroom/Windows/`). It is validated, never downloaded or replaced. |
-| `draft_revision` | A full 40-character commit. `null` uses the catalog pin (`f181eece646a…` for the Qwen3.6 drafter). |
-| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default, 5 (best for classroom summaries and chat; 7 suits code/math). Range 1–15. |
+| `draft_revision` | A full 40-character commit. `null` uses the catalog pin (`29ffa460d80e…` for the Eagle3 drafter, `f181eece646a…` for the Qwen3.6 drafter). |
+| `num_assistant_tokens` | Draft window `k`; `null` uses the profile default. Eagle3: 4, range 1–8. DFlash: 5 (best for classroom summaries and chat; 7 suits code/math), range 1–15. |
 
 Invalid settings (unknown method or key, contradictory source, cross-model
 drafter, out-of-range `k`) fail validation at startup under `auto` and `"on"`;
@@ -71,11 +75,62 @@ While a speculative pipeline is active:
   instead of being changed. Classroom stages already generate greedily; grading
   does not (`vlm.temperature: 0.2` in
   [components/grading/config.yaml](../../Windows/components/grading/config.yaml)), so set
-  that to 0 before using grading with DFlash.
+  that to 0 before using grading with speculative decoding. Sampling penalties
+  are rejected the same way.
 * Image requests run on the same pipeline; image-encoding speedups are not
   claimed.
+* Generation runs on the paged (continuous-batching) backend instead of the
+  stateful one. Greedy outputs therefore differ in places from plain
+  generation, with no consistent accuracy effect.
 * If activation fails under `auto`, the server warms a plain pipeline once and
   keeps that decision until the process restarts.
+
+### Eagle3 for Qwen3-VL-8B-Instruct
+
+The drafter is
+[AQ-MedAI/Qwen3-VL-8B-Instruct-eagle3](https://huggingface.co/AQ-MedAI/Qwen3-VL-8B-Instruct-eagle3)
+(MIT) at a pinned commit, exported to INT4 (259 MB). The target model, its
+precision and its IR are unchanged. Enable it with:
+
+```yaml
+    vlm_name: Qwen/Qwen3-VL-8B-Instruct
+    weight_format: int4
+    speculative:
+      mode: auto
+      method: auto
+```
+
+* **English deployments only (`app.language: en`).** The drafter was trained
+  on English data. On Chinese classroom summaries it accepts about 1.2 tokens
+  per step and is 28-55% slower than plain on Arc 140T (the
+  `taobao-mnn/Qwen3-VL-8B-Instruct-Eagle3` drafter, at ~1.4 tokens per step,
+  was also ~47% slower): the drafts are rejected too often to pay for
+  themselves. The paged pipeline that speculative decoding requires also adds
+  ~30% to the time to first token of a 10K-token Chinese summary prompt
+  (decode speed without drafting is about the same as plain). With `app.language: zh` the profile is
+  therefore not used: `mode: auto` loads the ordinary plain pipeline (no
+  drafter is downloaded or loaded; `/health` gives the reason) and
+  `mode: "on"` fails at startup.
+* **GPU queue priority.** Each draft/verify step submits many small GPU jobs,
+  and on a LOW-priority queue they wait long enough to cancel the gain
+  (Arc 140T: 72 ms/token instead of 55 at the same acceptance, no faster than
+  plain). The profile therefore runs its pipeline at `GPU_QUEUE_PRIORITY`
+  `MEDIUM`, overriding `models.gpu_queue_priority` for text generation only;
+  other services keep the configured priority. The KV cache keeps the
+  runtime's default precision (f16 made long classroom prompts 10-25% slower).
+* **Measured speedup** (greedy, single stream, the 20 EvalScope A-OKVQA
+  requests, English; decode rate over the 19 requests that stop before
+  `max_new_tokens`):
+
+  | GPU | Plain decode | Eagle3 decode (k=4) |
+  | --- | --- | --- |
+  | Arc 140T (Arrow Lake 285H), through the service | 13.2 tok/s (76 ms/token) | 18.1 tok/s (53 ms/token), 1.37x |
+  | Arc B390 (Panther Lake), offline script | 23.7 tok/s | 35.9 tok/s (not yet measured through the service) |
+
+  Accuracy on these 20 requests was 18/20 with Eagle3 and 20/20 plain. The
+  two differing answers are borderline reasoning calls that also flip on the
+  paged backend without a drafter, i.e. a backend effect rather than a
+  drafter error.
 
 To roll back, remove the block (or set `mode: "off"`) and restart. Prepared
 drafter files are kept for later use; superseded ones are moved aside, never
@@ -101,20 +156,35 @@ and [text_gen_vlm.py](../../Windows/components/vlm/text_gen_vlm.py) (load and wa
    stopped and is retried 3 times. Any other model is exported locally with
    optimum-intel, as before. A target that cannot be prepared fails startup in
    every mode.
-3. **DFlash drafter** (only when speculative decoding is requested and
-   qualified):
+3. **Drafter** (only when speculative decoding is requested and qualified):
    1. Its source checkpoint is downloaded at the catalog's pinned commit:
       configuration and weight files only, never repository code. Free disk
       space is checked first (2.2x the checkpoint).
-   2. It is exported to int4 IR in a separate process. The exporter uses the
-      DFlash classes built into optimum-intel 2.2.0 (installed by
-      `requirements.txt`), works offline from the downloaded files and does not
-      use `--trust-remote-code`.
-   3. The pair is checked: drafter metadata, vocabulary size, the target layers
-      it reads, and `k` against its block size.
-   4. The target's lm_head is attached to a copy of the drafter (below).
+   2. It is exported to int4 IR in a separate process that works offline from
+      the downloaded files and does not use `--trust-remote-code`.
+      * DFlash uses the DFlash classes built into optimum-intel 2.2.0
+        (installed by `requirements.txt`).
+      * Eagle3 uses optimum-intel's Eagle3 classes, whose VLM export path
+        needs transformers 4.57.6. That version (with huggingface_hub 0.36.0)
+        is installed once with `pip --no-deps --target` into
+        `models/.export-deps/transformers-4.57.6` (about 110 MB) and used only
+        by the export process. The
+        checkpoint's weights are re-keyed in a temporary copy; the downloaded
+        snapshot is not modified.
+   3. The pair is checked.
+      * DFlash: drafter metadata, vocabulary size, the target layers it reads,
+        and `k` against its block size.
+      * Eagle3: the drafter is an Eagle3 model for a `qwen3_vl` target, its
+        hidden and vocabulary sizes match the target, and the IR has the
+        Eagle3 inputs and outputs (`hidden_states`, `inputs_embeds`, 3-D
+        `position_ids`, `logits`, `d2t`, `eagle3_mode`).
+   4. DFlash only: the target's lm_head is attached to a copy of the drafter
+      (below). Eagle3 keeps its own draft-vocabulary head and uses the
+      ordinary target IR.
 
-   The export and head take a few minutes on the first start.
+   The first accelerated start takes a few minutes. For Eagle3 on Arc 140T:
+   a 0.76 GB download, the export dependencies and a 1-2 minute export
+   (`prepare_s` about 110 s).
 4. **Manifest.** `models/openvino/.manifests/<model>-<weight_format>.json`
    records what was prepared, the drafter commit, the decision and timings.
 5. **Load and warm up.** The pipeline (with the drafter, if any) is compiled on
@@ -125,8 +195,9 @@ and [text_gen_vlm.py](../../Windows/components/vlm/text_gen_vlm.py) (load and wa
 | Artifact | Location |
 | --- | --- |
 | Target IR | `models/openvino/<model>/<weight_format>` |
-| DFlash drafter source (pinned commit) | `models/hf/<org>__<repo>/<commit>` |
-| DFlash drafter IR | `models/openvino/<drafter>/int4` (`.prepared.json` records the commit) |
+| Drafter source (pinned commit) | `models/hf/<org>__<repo>/<commit>` |
+| Drafter IR | `models/openvino/<drafter>/int4` (`.prepared.json` records the commit), e.g. `Qwen3-VL-8B-Instruct-eagle3/int4` |
+| Eagle3 export dependencies | `models/.export-deps/transformers-4.57.6` (export only; never imported by the server) |
 | DFlash drafter with its own lm_head (the one loaded) | `models/openvino/<drafter>/int4-lmhead`. The target's int8 lm_head is requantized to int4 and attached to the drafter, so the runtime stops reading the full int8 head on every draft pass (2-7% cheaper verification passes). Not built for `draft_source: local`. |
 | DFlash target with hidden-state metadata | `models/openvino/<model>/<weight_format>-dflash`. Only when the stock export lacks `hidden_states_decoder_layers`; weights are hard-linked and the ordinary target is untouched. |
 | Manifest | `models/openvino/.manifests/<model>-<weight_format>.json` |
@@ -163,7 +234,7 @@ crash.
 | Drafter lm_head cannot be built | Stock drafter is loaded (warning) | Stock drafter is loaded (warning) |
 
 To run offline, start once with network access, or copy the prepared
-`models/` directories (and `models/hf/` for DFlash) to the machine.
+`models/` directories (and `models/hf/` for a drafter) to the machine.
 
 `/health` reports where startup time went (`startup.prepare_s`, `load_s`,
 `warmup_s`). Warm-up covers text generation only: the first request with an
@@ -229,7 +300,7 @@ How the model's output is returned:
 Unsupported input is rejected with HTTP 400 before generation. That covers
 malformed definitions or history, a choice naming an absent tool, a model
 whose template does not render tools (`"tool_calls": false` in `/health`),
-and `temperature > 0` while DFlash is active. Images given by URL or file path
+and `temperature > 0` while speculative decoding is active. Images given by URL or file path
 are also rejected: tool conversations carry untrusted content, so the server
 neither fetches URLs nor reads local files for them.
 
@@ -244,6 +315,7 @@ Verified end to end on Arc 140T (Arrow Lake) with the `openai` client:
 | Qwen3.5-9B INT4 | 10/10 |
 | Qwen3.6-35B-A3B INT4 + DFlash | 10/10 |
 | Qwen3.8-27B INT4 | 10/10 |
+| Qwen3-VL-8B INT4 + Eagle3 | 3/3 (call and result round trip, streaming call, `required` choice; without reasoning) |
 
 Each run covered, with and without reasoning:
 - a call followed by a tool result and the final answer;
@@ -277,7 +349,7 @@ Local paths are never reported; a local drafter appears as `local IR (<dir name>
 ## Processing-Time Statistics
 
 `GET /processing-stats` reports workflow-stage and per-model-call timing:
-queue wait, latency, TTFT, decode throughput and DFlash acceptance, attributed
+queue wait, latency, TTFT, decode throughput and speculative (Eagle3/DFlash) acceptance, attributed
 to the stage that made each call. Each session's records are also written to
 its `logs/` folder, and `Scripts/processing_stats_report.py` turns them into a
 Markdown report with a timeline. See
