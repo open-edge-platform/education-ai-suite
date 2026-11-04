@@ -116,6 +116,12 @@ class TextGenHandler:
         self._get_runner()
         return self._vlm.tokenizer
 
+    @property
+    def last_usage(self) -> Optional[dict]:
+        """Token usage the backend reported for its latest streamed request, if
+        it reports one (OVMS does; the in-process pipeline does not)."""
+        return getattr(self._vlm, "last_usage", None)
+
     def memory_stats(self) -> dict:
         stats: dict = {}
         rss = _process_memory_mb()

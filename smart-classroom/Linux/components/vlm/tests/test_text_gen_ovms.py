@@ -123,6 +123,65 @@ def test_generate_stream_ignores_malformed_sse_lines(monkeypatch):
     assert chunks == ["ok"]
 
 
+def test_generate_stream_requests_and_records_token_usage(monkeypatch):
+    captured = {}
+    sse_body = (
+        'data: {"choices": [{"delta": {"content": "Hel"}}], "usage": null}\n\n'
+        'data: {"choices": [{"delta": {"content": "lo"}}], "usage": null}\n\n'
+        # OVMS closes the stream with the counts in a chunk that has no choices.
+        'data: {"choices": [], "usage": {"prompt_tokens": 15, "completion_tokens": 4, "total_tokens": 19}}\n\n'
+        "data: [DONE]\n\n"
+    ).encode("utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, content=sse_body)
+
+    backend = _make_backend(monkeypatch, httpx.MockTransport(handler))
+    assert backend.last_usage is None
+
+    chunks = list(backend.generate(prompt="hi", stream=True))
+
+    assert chunks == ["Hel", "lo"]
+    assert captured["body"]["stream_options"] == {"include_usage": True}
+    assert backend.last_usage["completion_tokens"] == 4
+
+
+def test_generate_once_does_not_send_stream_options(monkeypatch):
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "x"}}]})
+
+    backend = _make_backend(monkeypatch, httpx.MockTransport(handler))
+    backend.generate(prompt="hi", stream=False)
+
+    assert "stream_options" not in captured["body"]
+
+
+def test_last_usage_is_cleared_when_the_next_stream_reports_none(monkeypatch):
+    bodies = iter([
+        'data: {"choices": [{"delta": {"content": "a"}}]}\n\n'
+        'data: {"choices": [], "usage": {"completion_tokens": 7}}\n\n'
+        "data: [DONE]\n\n",
+        # An older OVMS that ignores stream_options: no usage chunk at all.
+        'data: {"choices": [{"delta": {"content": "b"}}]}\n\n'
+        "data: [DONE]\n\n",
+    ])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=next(bodies).encode("utf-8"))
+
+    backend = _make_backend(monkeypatch, httpx.MockTransport(handler))
+
+    list(backend.generate(prompt="hi", stream=True))
+    assert backend.last_usage["completion_tokens"] == 7
+
+    list(backend.generate(prompt="hi", stream=True))
+    assert backend.last_usage is None, "a stale count must not outlive its request"
+
+
 # --------------------------------------------------------------------------
 # Error mapping (Phase 4 task 15, re-verified here per task 19)
 # --------------------------------------------------------------------------

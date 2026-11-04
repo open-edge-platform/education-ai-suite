@@ -3,6 +3,8 @@
   cleanup_on_exit: true
   language: en # en or zh
 
+REGISTRY: true
+
 features:
   asr:                { enabled: true }
   summary:            { enabled: true }

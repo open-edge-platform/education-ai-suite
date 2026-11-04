@@ -13,10 +13,8 @@ interface ResourceMetrics {
 interface ResourceState {
   metrics: ResourceMetrics;
   lastUpdated: number | null;
-  // Epoch ms of the first session created in this browser tab's lifetime.
-  // Set once and kept across later sessions in the same tab so the chart
-  // keeps accumulating instead of restarting; a page refresh clears it.
   sessionStartAt: number | null;
+  pendingSessionStartMs: number | null;
 }
 
 const initialState: ResourceState = {
@@ -28,7 +26,8 @@ const initialState: ResourceState = {
     power: []
   },
   lastUpdated: null,
-  sessionStartAt: null
+  sessionStartAt: null,
+  pendingSessionStartMs: null
 };
 
 // Safety cap so an indefinitely long tab session can't grow the buffer
@@ -47,12 +46,32 @@ function mergeSeries(existing: any[], incoming: any[] | undefined, sessionStartA
   return merged.length > MAX_POINTS ? merged.slice(merged.length - MAX_POINTS) : merged;
 }
 
+// Newest sample timestamp (server clock, epoch ms) across all series, i.e. the
+// collector's "now" as of this response; null if every series is empty.
+function newestServerTime(metrics: ResourceMetrics): number | null {
+  let newest: number | null = null;
+  (Object.keys(metrics) as (keyof ResourceMetrics)[]).forEach((key) => {
+    const series = metrics[key];
+    if (!series || series.length === 0) return;
+    const ts = parseServerTimestamp(series[series.length - 1][0]).getTime();
+    if (!Number.isNaN(ts) && (newest === null || ts > newest)) newest = ts;
+  });
+  return newest;
+}
+
 const resourceSlice = createSlice({
   name: 'resource',
   initialState,
   reducers: {
     setMetrics: (state, action: PayloadAction<ResourceMetrics>) => {
       const incoming = action.payload;
+      if (state.pendingSessionStartMs != null) {
+        const serverNow = newestServerTime(incoming);
+        if (serverNow !== null) {
+          state.sessionStartAt = serverNow - (Date.now() - state.pendingSessionStartMs);
+          state.pendingSessionStartMs = null;
+        }
+      }
       (Object.keys(state.metrics) as (keyof ResourceMetrics)[]).forEach((key) => {
         state.metrics[key] = mergeSeries(state.metrics[key], incoming[key], state.sessionStartAt);
       });
@@ -61,14 +80,15 @@ const resourceSlice = createSlice({
     // Marks when this tab's first session started; a no-op on later
     // sessions so the accumulated chart isn't reset until a page refresh.
     markSessionStart: (state) => {
-      if (state.sessionStartAt == null) {
-        state.sessionStartAt = Date.now();
+      if (state.sessionStartAt == null && state.pendingSessionStartMs == null) {
+        state.pendingSessionStartMs = Date.now();
       }
     },
     clearMetrics: (state) => {
       state.metrics = initialState.metrics;
       state.lastUpdated = null;
       state.sessionStartAt = null;
+      state.pendingSessionStartMs = null;
     }
   }
 });
