@@ -42,6 +42,13 @@ find_free_port() {
   return 1
 }
 
+# Prints the TCP port a PID is listening on; returns 1 if it cannot be determined.
+pid_listen_port() {
+  local port
+  port="$(ss -ltnpH 2>/dev/null | awk -v p="pid=$1," 'index($0, p) { n = split($4, a, ":"); print a[n]; exit }')"
+  [[ -n "$port" ]] && echo "$port"
+}
+
 
 if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   log "Initializing git submodules (edge-ai-libraries, performance-tools)…"
@@ -247,6 +254,12 @@ if [[ -d "$UI_DIR" ]]; then
 
   if [[ -f "$UI_PID_FILE" ]] && kill -0 "$(cat "$UI_PID_FILE")" 2>/dev/null; then
     log "UI dev server already running (PID $(cat "$UI_PID_FILE")) — leaving it as is."
+    if RUNNING_UI_PORT="$(pid_listen_port "$(cat "$UI_PID_FILE")")"; then
+      log "✅ UI: http://localhost:${RUNNING_UI_PORT}/  (logs: ${UI_LOG})"
+    else
+      log "⚠️  Could not determine the UI port; check ${UI_LOG}."
+    fi
+    log "   Stop with: kill \$(cat \"${UI_PID_FILE}\")"
   else
     UI_PORT_REQUESTED="$UI_PORT"
     UI_PORT="$(find_free_port "$UI_PORT_REQUESTED")" \

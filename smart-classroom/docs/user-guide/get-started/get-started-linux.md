@@ -9,7 +9,7 @@ Make sure the following are installed. See [System Requirements](./system-requir
 - Docker Engine and the Docker Compose plugin (your user must be able to run `docker` without `sudo`)
 - Git
 - Python 3 (`python3`) with `pyyaml` available (used by `setup.sh` helper scripts)
-- Intel GPU drivers (optional, for GPU acceleration). When `/dev/dri` is present, `setup.sh` automatically enables the GPU compose overlay and sets `RENDER_GID` in `.env`.
+- An Intel GPU and its Linux driver, available at `/dev/dri`. The Content Search reranker requires GPU access; `setup.sh` stops with an error if the GPU device or host `render` group is missing.
 
 > [!NOTE]
 > Node.js for the UI build is provisioned by `setup.sh` through `scripts/node-setup.sh`.
