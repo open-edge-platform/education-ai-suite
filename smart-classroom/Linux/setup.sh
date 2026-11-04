@@ -255,11 +255,10 @@ if [[ -d "$UI_DIR" ]]; then
   if [[ -f "$UI_PID_FILE" ]] && kill -0 "$(cat "$UI_PID_FILE")" 2>/dev/null; then
     log "UI dev server already running (PID $(cat "$UI_PID_FILE")) — leaving it as is."
     if RUNNING_UI_PORT="$(pid_listen_port "$(cat "$UI_PID_FILE")")"; then
-      log "✅ UI: http://localhost:${RUNNING_UI_PORT}/  (logs: ${UI_LOG})"
+      log "✅ UI: http://localhost:${RUNNING_UI_PORT}/"
     else
-      log "⚠️  Could not determine the UI port; check ${UI_LOG}."
+      log "⚠️  Could not determine the UI port."
     fi
-    log "   Stop with: kill \$(cat \"${UI_PID_FILE}\")"
   else
     UI_PORT_REQUESTED="$UI_PORT"
     UI_PORT="$(find_free_port "$UI_PORT_REQUESTED")" \
@@ -269,8 +268,7 @@ if [[ -d "$UI_DIR" ]]; then
     fi
     log "Starting UI dev server in the background (vite --port ${UI_PORT})…"
     (cd "$UI_DIR" && { nohup ./node_modules/.bin/vite --host 127.0.0.1 --port "$UI_PORT" --strictPort >"$UI_LOG" 2>&1 & echo $! >"$UI_PID_FILE"; })
-    log "✅ UI: http://localhost:${UI_PORT}/  (logs: ${UI_LOG})"
-    log "   Stop with: kill \$(cat \"${UI_PID_FILE}\")"
+    log "✅ UI: http://localhost:${UI_PORT}/"
   fi
 else
   log "⚠️  ${UI_DIR} not found — skipping UI startup."
