@@ -1,6 +1,28 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+"""``text_gen`` backend that talks to an OVMS-served OpenAI-compatible VLM
+endpoint over HTTP instead of loading ``ov_genai.VLMPipeline`` in-process.
+
+Implements the same ``TextGen`` protocol as ``components/vlm/text_gen_vlm.py``
+(``VLMTextGen``) -- ``generate(prompt|messages, *, images, stream,
+max_new_tokens, temperature, json_schema)`` returning either an
+``Iterator[str]`` of decoded text chunks (streaming) or a ``str`` (full
+response) -- so ``TextGenHandler``/``CapabilityRunner`` and everything above
+them (``api/vlm_chat.py``) are completely backend-agnostic; see
+``docs/ovms-integration-hld.md`` §3 key design point 4.
+
+Note on sync vs async: ``CapabilityRunner.submit`` (``model_manager/capability/
+runner.py``) calls ``self._fn(*args, **kwargs)`` directly on the caller's
+thread -- it is not an event loop and never awaits a coroutine. ``VLMTextGen.
+generate`` is therefore a *blocking* call, and this class must match that
+contract exactly to drop in as a replacement. We use ``httpx.Client`` (sync),
+not ``httpx.AsyncClient`` -- the ``ata_ui_server.py`` reference is for the
+request/response *shape* (OpenAI-compatible JSON over HTTP, SSE for
+streaming), not for async vs sync; this module's blocking streaming iterator
+mirrors ``VLMTextGen._generate_stream``'s one (runs the HTTP call on a worker
+thread, yields decoded tokens to the consumer).
+"""
 
 from __future__ import annotations
 
@@ -18,10 +40,34 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_NEW_TOKENS = 5120
 _DEFAULT_TIMEOUT_S = 120.0
 _DEFAULT_API_PATH = "/v3/chat/completions"
+
+# HTTP statuses OVMS/an upstream proxy returns when it is temporarily unable
+# to accept more work (its own queue/batch is full, or it is mid-restart) --
+# raised as OomError directly (same 503 + Retry-After semantics main.py
+# already gives real memory-pressure errors) rather than a generic
+# RuntimeError, since CapabilityRunner only maps (RuntimeError, MemoryError)
+# -> OomError and would otherwise lose this distinction in the log message.
 _RETRYABLE_STATUS_CODES = {429, 503}
 
 
 def _map_ovms_error(exc: httpx.HTTPError, context: str) -> Exception:
+    """Classify an OVMS HTTP failure into an exception ``CapabilityRunner``
+    (``model_manager/capability/runner.py``) already knows how to handle,
+    so ``main.py``'s existing ``OomError``/``QueueFullError`` exception
+    handlers need no changes (Phase 4 task 15):
+
+    - timeout (connect/read/write/pool)      -> OomError ("ovms_timeout")
+    - connection refused / DNS / network     -> OomError ("ovms_unreachable")
+    - 429/503 (server temporarily overloaded) -> OomError ("ovms_overloaded")
+    - any other HTTP status (4xx/5xx)        -> RuntimeError, which
+      ``CapabilityRunner.submit``/``_wrap_stream`` still catches and
+      re-raises as ``OomError`` -- so every path here ends up 503'd via the
+      same existing handler, just with a more useful logged reason.
+    """
+    # Deferred import: ``model_manager`` package __init__ pulls in
+    # ``ModelManager`` -> ``TextGenHandler`` -> (lazily) this module, so a
+    # module-level import here would be circular; ``text_gen_handle.py``
+    # defers the same import for the same reason.
     try:
         from model_manager.capability.runner import OomError
     except ImportError:
@@ -40,6 +86,18 @@ def _map_ovms_error(exc: httpx.HTTPError, context: str) -> Exception:
 
 
 def _tensor_to_data_url(tensor) -> str:
+    """Re-encode an already-decoded ``ov.Tensor`` frame (HWC uint8) as a PNG
+    data URL for OVMS's OpenAI-compatible ``image_url`` content part.
+
+    The ``images`` argument to ``TextGen.generate`` is a list of frames the
+    *caller* already decoded from base64/file sources (see
+    ``components/vlm/vlm_openvino_serving/utils/utils.py::load_images``) for
+    the in-process ``VLMPipeline``, which accepts raw tensors directly. OVMS's
+    HTTP API has no equivalent -- it only accepts images embedded in the chat
+    ``messages`` as base64 data URLs -- so this is the unavoidable round trip
+    to keep the ``TextGen`` protocol (and thus ``images: list[ov.Tensor]``)
+    unchanged across both backends.
+    """
     from PIL import Image
 
     array = tensor.data if hasattr(tensor, "data") else tensor
@@ -61,16 +119,14 @@ class TextGenOVMS:
         self._timeout_s: float = _DEFAULT_TIMEOUT_S
         self._max_new_tokens: int = _DEFAULT_MAX_NEW_TOKENS
         self._device: Optional[str] = None
-        self._last_usage: Optional[dict] = None
         self._load_config()
         self._client = httpx.Client(timeout=self._timeout_s, trust_env=False)
 
     @property
-    def last_usage(self) -> Optional[dict]:
-        return self._last_usage
-
-    @property
     def device(self) -> Optional[str]:
+        # Reported for ModelManager.health()/memory_stats() parity with
+        # VLMTextGen; the model actually runs on whatever device OVMS loaded
+        # it with (config.yaml models.text_gen.device), not in this process.
         return self._device
 
     @property
@@ -81,6 +137,16 @@ class TextGenOVMS:
     # Readiness / health (Phase 4 task 17)
     # ------------------------------------------------------------------
     def check_ready(self) -> dict:
+        """Query OVMS's own readiness/model-state endpoints (no local model
+        load happens in this process -- OVMS owns that). Returns::
+
+            {"reachable": bool, "ready": bool, "model_state": str|None, "detail": str|None}
+
+        ``reachable`` is False only on a network-level failure (OVMS down /
+        unreachable); ``ready`` reflects ``/v2/health/ready``'s HTTP status;
+        ``model_state`` is the servable's state from ``/v1/config``
+        (``"AVAILABLE"`` once fully loaded), when it can be determined.
+        """
         try:
             resp = self._client.get(f"{self._endpoint}/v2/health/ready", timeout=5.0)
             ready = resp.status_code == 200
@@ -99,6 +165,11 @@ class TextGenOVMS:
         }
 
     def _fetch_model_state(self) -> Optional[str]:
+        """Best-effort lookup of the VLM servable's state via OVMS's
+        ``GET /v1/config`` (per-model ``model_version_status``). Returns
+        ``None`` if the endpoint is unreachable or the shape is unexpected --
+        this is diagnostic information, not required for readiness.
+        """
         try:
             resp = self._client.get(f"{self._endpoint}/v1/config", timeout=5.0)
             resp.raise_for_status()
@@ -114,6 +185,13 @@ class TextGenOVMS:
         return None
 
     def wait_ready(self, timeout_s: float = 120.0, poll_interval_s: float = 2.0) -> None:
+        """Block until OVMS reports the servable ready, or raise.
+
+        Used by ``TextGenHandler.warmup()`` in place of a blocking in-process
+        model load -- OVMS loads/serves the model in its own container, so
+        "warming up" here means polling until it's done, not loading
+        anything locally.
+        """
         import time
 
         deadline = time.monotonic() + timeout_s
@@ -177,6 +255,14 @@ class TextGenOVMS:
         enable_thinking: Optional[bool] = None,
         json_schema: Optional[str] = None,
     ) -> Union[Iterator[str], str]:
+        """Generate from a chat history against the OVMS endpoint.
+
+        Same contract as ``VLMTextGen.generate``: pass ``messages`` or
+        ``prompt`` (never both); streaming yields decoded text chunks,
+        non-streaming returns the full string. ``enable_thinking`` is not
+        applied client-side here (OVMS/the served model handles its own
+        chat-template defaults) -- left as a no-op flag for interface parity.
+        """
         if (messages is None) == (prompt is None):
             raise ValueError("Provide exactly one of prompt or messages.")
         if messages is None:
@@ -226,10 +312,6 @@ class TextGenOVMS:
                 int(max_new_tokens) if max_new_tokens is not None else self._max_new_tokens
             ),
         }
-        if stream:
-            # Streamed replies carry no token counts unless asked for; they
-            # arrive in a final chunk whose "choices" list is empty.
-            payload["stream_options"] = {"include_usage": True}
         if temperature is not None:
             payload["temperature"] = float(temperature)
         if json_schema:
@@ -249,6 +331,11 @@ class TextGenOVMS:
         return data["choices"][0]["message"]["content"]
 
     def _generate_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
+        """Run the SSE request on a worker thread, yielding text chunks as
+        they arrive -- mirrors ``VLMTextGen._generate_stream``'s shape so the
+        consumer (``CapabilityRunner``/``api/vlm_chat.py::_sse_stream``) sees
+        an identical plain-text token iterator regardless of backend.
+        """
         import queue
 
         chunks: "queue.Queue" = queue.Queue()
@@ -256,7 +343,6 @@ class TextGenOVMS:
         error: list[Exception] = []
 
         def run_request() -> None:
-            self._last_usage = None
             try:
                 with self._client.stream(
                     "POST", url, headers=headers, json=payload
@@ -270,9 +356,6 @@ class TextGenOVMS:
                             break
                         try:
                             event = json.loads(data)
-                            usage = event.get("usage")
-                            if isinstance(usage, dict) and usage.get("completion_tokens") is not None:
-                                self._last_usage = usage
                             delta = event["choices"][0].get("delta", {})
                             text = delta.get("content")
                         except (ValueError, KeyError, IndexError):

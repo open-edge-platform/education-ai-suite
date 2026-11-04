@@ -413,26 +413,15 @@ class SummarizerComponent(PipelineComponent):
                 raw_tokens.append(token)
                 StorageManager.save_async(summary_path, token, append=True)
                 yield token
-            # Read straight after the final stream: an earlier map-stage call
-            # must not be mistaken for it if the stream above never ran.
-            run.output_tokens = self._reported_output_tokens()
 
         finally:
             raw_text = "".join(raw_tokens)
-            if run.output_tokens < 0:
-                run.output_tokens = self._count_output(raw_text)
+            run.output_tokens = self._count_output(raw_text)
             self._warn_about_missing_sections(raw_text, board_text, run.strategy)
             StorageManager.update_csv(
                 path=str(SessionPaths.metrics_path(self.session_id)),
                 new_data=run.metrics(f"{self.provider}/{self.model_name}"),
             )
-
-    def _reported_output_tokens(self):
-        usage = getattr(self.summarizer, "last_usage", None)
-        tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
-        if isinstance(tokens, (int, float)) and not isinstance(tokens, bool) and tokens >= 0:
-            return int(tokens)
-        return -1
 
     def _count_output(self, raw_text):
         try:
