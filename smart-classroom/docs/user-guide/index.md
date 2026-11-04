@@ -50,7 +50,8 @@ The main features are as follows:
 ./get-started
 ./advanced-setup-guide
 ./how-it-works
-VLM and LLM Serving Design <./vlm-llm-serving-design>
+Linux Docker Architecture <./linux-docker-architecture>
+VLM and LLM Serving Guide <./vlm-llm-serving/serving-guide>
 ./application-flow
 ./content-search-flow
 ./class-report-flow
