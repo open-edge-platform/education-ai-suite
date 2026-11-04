@@ -99,7 +99,8 @@ class VLMTextGen:
             getattr(text_gen, "max_new_tokens", _DEFAULT_MAX_NEW_TOKENS)
         )
         # Invalid speculative settings fail here, before any model work.
-        self._plan = resolve_plan(text_gen)
+        app = getattr(config, "app", None)
+        self._plan = resolve_plan(text_gen, getattr(app, "language", None))
 
     def _ov_config(self) -> dict:
         """Runtime config for the pipeline; large allocations help on GPU."""
@@ -120,7 +121,8 @@ class VLMTextGen:
         }
         from utils.ov_runtime import gpu_plugin_config
 
-        kwargs = gpu_plugin_config(self._device, kwargs)
+        # A queue priority pinned by the profile wins over models.gpu_queue_priority.
+        kwargs = {**gpu_plugin_config(self._device, kwargs), **kwargs}
         scheduler = ov_genai.SchedulerConfig()
         for key, value in profile.scheduler.items():
             if not hasattr(scheduler, key):

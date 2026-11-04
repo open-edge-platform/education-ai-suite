@@ -167,6 +167,26 @@ def _close(token_iter) -> None:
         close()
 
 
+class _TokenStreamResponse(StreamingResponse):
+    """SSE response that closes its token stream however the response ends.
+
+    A client disconnect ends the response without closing the body iterator:
+    the generator wrapping the tokens would only be finalized by the garbage
+    collector, so generation ran on and the model slot stayed held (queued
+    requests waited) until a collection happened to run.
+    """
+
+    def __init__(self, content, token_iter, **kwargs) -> None:
+        super().__init__(content, **kwargs)
+        self._token_iter = token_iter
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            _close(self._token_iter)
+
+
 def _error_event(message: str, kind: str) -> str:
     error = {"error": {"message": message, "type": kind, "code": None}}
     return f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
@@ -258,8 +278,9 @@ async def _chat_completions(request: Request):
                 finish_info=info,
                 sampling=_sampling(chat_req),
             )
-            return StreamingResponse(
+            return _TokenStreamResponse(
                 _sse_stream(token_iter, model_name, info, _include_usage(chat_req)),
+                token_iter,
                 media_type="text/event-stream",
             )
 
@@ -357,9 +378,10 @@ async def _tool_chat_completions(chat_req, messages: list, mods: SimpleNamespace
             parser = tc.ToolStreamParser(tools, choice, parallel=parallel,
                                          reasoning_open=bool(info.get("reasoning_open")),
                                          prefill=info.get("prefill") or "")
-            return StreamingResponse(
+            return _TokenStreamResponse(
                 _tool_sse_stream(token_iter, parser, info, model_name,
                                  _include_usage(chat_req)),
+                token_iter,
                 media_type="text/event-stream",
             )
         output = await run_in_threadpool(handler.generate, stream=False, **kwargs)

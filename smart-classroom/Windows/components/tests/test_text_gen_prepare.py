@@ -37,13 +37,16 @@ def _ir_xml(layers=3, rt_info=None) -> str:
             f'<edges /><rt_info><other value="1" />{extra}</rt_info></net>')
 
 
-def _write_target(path: Path, rt_info=None, vocab=100) -> Path:
+def _write_target(path: Path, rt_info=None, vocab=100, mtp=False) -> Path:
     path.mkdir(parents=True)
     (path / "openvino_language_model.xml").write_text(_ir_xml(rt_info=rt_info), encoding="utf-8")
     (path / "openvino_language_model.bin").write_bytes(b"\0" * 64)
     (path / "openvino_tokenizer.xml").write_text("<net/>", encoding="utf-8")
     (path / "config.json").write_text(json.dumps(
         {"text_config": {"num_hidden_layers": 3, "vocab_size": vocab}}), encoding="utf-8")
+    if mtp:
+        (path / "openvino_mtp_model.xml").write_text(_ir_xml(), encoding="utf-8")
+        (path / "openvino_mtp_model.bin").write_bytes(b"\0" * 16)
     return path
 
 
@@ -92,13 +95,14 @@ def env(tmp_path, monkeypatch):
     return hub
 
 
-def _plan(env, name="Qwen/Qwen3.6-35B-A3B", weight="int4", rt_info=None, **speculative):
+def _plan(env, name="Qwen/Qwen3.6-35B-A3B", weight="int4", rt_info=None, mtp=False,
+          **speculative):
     node = SimpleNamespace(vlm_name=name, weight_format=weight, device="GPU",
                            speculative=speculative or None)
     plan = resolve_plan(node)
     target = env.models / name.split("/")[-1] / weight
     if not target.exists():
-        _write_target(target, rt_info=rt_info)
+        _write_target(target, rt_info=rt_info, mtp=mtp)
     return dataclasses.replace(plan, target_dir=target)
 
 
@@ -113,6 +117,40 @@ def test_plain_plan_prepares_only_the_target(env):
     manifest = json.loads(result.manifest.read_text(encoding="utf-8"))
     assert manifest["speculative"]["status"] == "off"
     assert manifest["target"]["revision"] is None  # legacy provenance is not claimed
+
+
+def test_auto_mtp_uses_the_target_and_its_bundled_head(env):
+    plan = _plan(env, name="Qwen/Qwen3.5-9B", mode="auto", method="mtp", mtp=True)
+    result = prep.prepare(plan, genai_version=GENAI)
+    spec = result.speculative
+    assert spec is not None
+    assert spec.settings.method == "mtp" and spec.settings.source == "target"
+    # No derived target and no download: the ordinary directory holds both.
+    assert spec.target_dir == plan.target_dir and spec.draft_dir == plan.target_dir
+    assert env.downloads == [] and env.exports == []
+    manifest = json.loads(result.manifest.read_text(encoding="utf-8"))
+    assert manifest["speculative"]["method"] == "mtp"
+    assert manifest["speculative"]["draft_model"] == "target-bundled MTP"
+    assert manifest["speculative"]["status"] == "ready"
+
+
+def test_mtp_needs_a_runtime_with_mtp_support(env):
+    plan = _plan(env, name="Qwen/Qwen3.5-9B", mode="auto", method="mtp", mtp=True)
+    result = prep.prepare(plan, genai_version=lambda: "2026.3.0.0")
+    assert result.speculative is None
+    assert "2026.4.1" in result.speculative_error
+
+
+def test_missing_mtp_bundle_falls_back_in_auto_and_fails_in_on(env):
+    plan = _plan(env, name="Qwen/Qwen3.5-9B", mode="auto", method="mtp", mtp=True)
+    (plan.target_dir / "openvino_mtp_model.bin").unlink()
+    result = prep.prepare(plan, genai_version=GENAI)
+    assert result.speculative is None
+    assert "openvino_mtp_model.bin" in result.speculative_error
+
+    strict = dataclasses.replace(plan, mode="on")
+    with pytest.raises(prep.PreparationError, match="openvino_mtp_model.bin"):
+        prep.prepare(strict, genai_version=GENAI)
 
 
 def test_auto_dflash_downloads_pinned_source_exports_and_derives_target(env):
@@ -132,6 +170,20 @@ def test_auto_dflash_downloads_pinned_source_exports_and_derives_target(env):
     manifest = json.loads(result.manifest.read_text(encoding="utf-8"))
     assert manifest["speculative"]["draft_revision"] == COMMIT
     assert manifest["speculative"]["status"] == "ready"
+
+
+def test_qwen35_dflash_uses_its_own_drafter_and_the_annotated_target_as_is(env):
+    pin = text_gen_profiles.target_profile("Qwen/Qwen3.5-9B").methods["dflash"].draft_revision
+    plan = _plan(env, name="Qwen/Qwen3.5-9B", rt_info=prep.DFLASH_TARGET_RT_INFO_KEY,
+                 mode="on", method="dflash")
+    result = prep.prepare(plan, genai_version=GENAI)
+    spec = result.speculative
+    assert spec.settings.method == "dflash" and spec.draft_revision == pin
+    assert env.resolved == []
+    assert env.downloads == [("z-lab/Qwen3.5-9B-DFlash", pin, ["*.json", "*.safetensors"])]
+    # The OpenVINO target IR already names every layer's hidden state: no derived copy.
+    assert spec.target_dir == plan.target_dir
+    assert not (plan.target_dir.parent / "int4-dflash").exists()
 
 
 def test_pinned_revision_needs_no_hub_lookup(env):
@@ -276,6 +328,158 @@ def test_local_drafter_is_validated_never_downloaded(env, tmp_path):
     plan = _plan(env, mode="on", draft_source="local", draft_model=str(local))
     result = prep.prepare(plan, genai_version=GENAI)
     assert result.speculative.draft_dir == local and env.downloads == []
+
+
+# --- Eagle3 ----------------------------------------------------------------------
+VL8B = "Qwen/Qwen3-VL-8B-Instruct"
+EAGLE3_COMMIT = text_gen_profiles.target_profile(VL8B).methods["eagle3"].draft_revision
+
+
+def _eagle3_xml(inputs=None, outputs=("logits", "d2t"), rt_info=True) -> str:
+    inputs = inputs or {"hidden_states": 3, "attention_mask": 2, "position_ids": 3,
+                        "inputs_embeds": 3, "beam_idx": 1}
+    layers = [
+        f'<layer id="{i}" name="{name}" type="Parameter" version="opset1"><output>'
+        f'<port id="0" precision="FP32" names="{name}">{"<dim>-1</dim>" * rank}</port>'
+        f"</output></layer>"
+        for i, (name, rank) in enumerate(inputs.items())
+    ]
+    layers += [
+        f'<layer id="{100 + i}" name="Result_{i}" type="Result" version="opset1" '
+        f'output_names="{name}"><input><port id="0" /></input></layer>'
+        for i, name in enumerate(outputs)
+    ]
+    marker = f'<{prep.EAGLE3_DRAFT_RT_INFO_KEY} value="True" />' if rt_info else ""
+    return (f'<?xml version="1.0"?><net name="d" version="11"><layers>{"".join(layers)}</layers>'
+            f"<edges /><rt_info><other value=\"1\" />{marker}</rt_info></net>")
+
+
+def _write_eagle3_draft(path: Path, prepared=None, xml=None, **cfg) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "openvino_model.xml").write_text(xml or _eagle3_xml(), encoding="utf-8")
+    (path / "openvino_model.bin").write_bytes(b"\0")
+    config = {"architectures": ["LlamaForCausalLMEagle3"], "target_model_type": "qwen3_vl",
+              "hidden_size": 16, "vocab_size": 100, "draft_vocab_size": 32}
+    config.update(cfg)
+    (path / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    if prepared:
+        (path / ".prepared.json").write_text(json.dumps({"revision": prepared}), encoding="utf-8")
+    return path
+
+
+def _write_vl_target(path: Path) -> Path:
+    _write_target(path)
+    (path / "config.json").write_text(json.dumps({
+        "model_type": "qwen3_vl",
+        "text_config": {"num_hidden_layers": 3, "hidden_size": 16, "vocab_size": 100}}),
+        encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def eagle3_env(env, monkeypatch):
+    _write_vl_target(env.models / "Qwen3-VL-8B-Instruct" / "int4")
+
+    def export(source_dir, draft_dir, settings, repo, revision):
+        env.exports.append((repo, revision))
+        _write_eagle3_draft(draft_dir, prepared=revision)
+
+    monkeypatch.setattr(prep, "_export_draft", export)
+    return env
+
+
+def test_auto_eagle3_downloads_pinned_source_exports_and_uses_the_target_as_is(eagle3_env):
+    plan = _plan(eagle3_env, VL8B, mode="auto")
+    result = prep.prepare(plan, genai_version=GENAI)
+    spec = result.speculative
+    assert spec is not None and spec.settings.method == "eagle3"
+    assert spec.draft_revision == EAGLE3_COMMIT and eagle3_env.resolved == []
+    assert eagle3_env.downloads == [("AQ-MedAI/Qwen3-VL-8B-Instruct-eagle3", EAGLE3_COMMIT,
+                                     ["*.json", "*.safetensors"])]
+    # No derived target or grafted head: the ordinary directories are loaded.
+    assert spec.target_dir == plan.target_dir
+    assert spec.draft_dir == plan.speculative.draft_dir()
+    manifest = json.loads(result.manifest.read_text(encoding="utf-8"))
+    assert manifest["speculative"]["method"] == "eagle3"
+    assert manifest["speculative"]["status"] == "ready"
+
+
+def test_eagle3_needs_genai_2026_4(eagle3_env):
+    result = prep.prepare(_plan(eagle3_env, VL8B, mode="auto"), genai_version=lambda: "2026.3.0")
+    assert result.speculative is None and "openvino-genai >= 2026.4" in result.speculative_error
+
+
+def test_eagle3_export_runs_on_the_overlay_without_repository_code(tmp_path, monkeypatch):
+    seen = {}
+
+    def run(cmd, env=None, check=False):
+        seen.update(cmd=cmd, env=env)
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(prep.subprocess, "run", run)
+    monkeypatch.setattr(prep, "_eagle3_overlay", lambda: tmp_path / "overlay")
+    settings = resolve_plan(SimpleNamespace(
+        vlm_name=VL8B, weight_format="int4", device="GPU", speculative={"mode": "auto"})).speculative
+    with pytest.raises(prep.PreparationError, match="transformers 4.57.6"):
+        prep._export_draft(tmp_path / "src", tmp_path / "int4", settings, "a/b", EAGLE3_COMMIT)
+    cmd = seen["cmd"]
+    script = cmd[cmd.index("-c") + 1]
+    assert script == prep._EAGLE3_EXPORT and "-I" in cmd
+    assert cmd[cmd.index("-c") + 2:] == [str(tmp_path / "overlay"), str(tmp_path / "src"),
+                                          "int4", str(tmp_path / "int4.partial")]
+    assert "trust_remote_code" not in script and "trust-remote-code" not in script
+    assert '"--task", "text-generation-with-past"' in script
+    assert seen["env"]["HF_HUB_OFFLINE"] == "1"
+
+
+def test_eagle3_overlay_failure_is_an_acquisition_error(tmp_path, monkeypatch):
+    def no_overlay():
+        raise prep.PreparationError("Could not provision transformers==4.57.6")
+
+    def run(*args, **kwargs):
+        pytest.fail("the export must not start without its overlay")
+
+    monkeypatch.setattr(prep, "_eagle3_overlay", no_overlay)
+    monkeypatch.setattr(prep.subprocess, "run", run)
+    settings = resolve_plan(SimpleNamespace(
+        vlm_name=VL8B, weight_format="int4", device="GPU", speculative={"mode": "auto"})).speculative
+    # A PreparationError: under mode auto, prepare() reports it and serves plain.
+    with pytest.raises(prep.PreparationError, match="provision"):
+        prep._export_draft(tmp_path / "src", tmp_path / "int4", settings, "a/b", EAGLE3_COMMIT)
+
+
+def test_validate_eagle3_pair_rules(tmp_path):
+    target = _write_vl_target(tmp_path / "t")
+    prep.validate_eagle3_pair(target, _write_eagle3_draft(tmp_path / "ok"))
+    cases = [
+        ("arch", {"architectures": ["LlamaForCausalLM"]}, None, "Eagle3 architecture"),
+        ("type", {"target_model_type": "qwen2_vl"}, None, "different model"),
+        ("hidden", {"hidden_size": 8}, None, "hidden_size"),
+        ("vocab", {"vocab_size": 99}, None, "vocab_size"),
+        ("text", {}, _eagle3_xml(inputs={"input_ids": 2, "position_ids": 2}), "not a VLM Eagle3"),
+        ("rank", {}, _eagle3_xml(inputs={"hidden_states": 3, "inputs_embeds": 3,
+                                         "position_ids": 2}), "rank 2"),
+        ("d2t", {}, _eagle3_xml(outputs=("logits",)), "d2t"),
+        ("mark", {}, _eagle3_xml(rt_info=False), "eagle3_mode"),
+    ]
+    for name, cfg, xml, message in cases:
+        with pytest.raises(prep.CompatibilityError, match=message):
+            prep.validate_eagle3_pair(target, _write_eagle3_draft(tmp_path / name, xml=xml, **cfg))
+
+
+def test_mismatched_eagle3_drafter_fails_even_in_auto(eagle3_env):
+    plan = _plan(eagle3_env, VL8B, mode="auto")
+    _write_eagle3_draft(plan.speculative.draft_dir(), prepared=EAGLE3_COMMIT, hidden_size=8)
+    with pytest.raises(prep.CompatibilityError, match="hidden_size"):
+        prep.prepare(plan, genai_version=GENAI)
+
+
+def test_local_eagle3_drafter_is_validated_never_downloaded(eagle3_env, tmp_path):
+    local = _write_eagle3_draft(tmp_path / "my-eagle3")
+    plan = _plan(eagle3_env, VL8B, mode="on", method="eagle3", draft_source="local",
+                 draft_model=str(local))
+    result = prep.prepare(plan, genai_version=GENAI)
+    assert result.speculative.draft_dir == local and eagle3_env.downloads == []
 
 
 # --- DFlash compatibility and derivation ----------------------------------------
@@ -443,6 +647,17 @@ def test_draft_head_reproduces_the_target_head_in_int4(tmp_path, asymmetric):
     assert prep.ensure_draft_head(target, draft) == derived
     assert (derived / ".derived.json").stat().st_mtime_ns == stamp
     assert prep.ensure_draft_head(target, derived) == derived
+
+
+def test_draft_head_is_kept_per_target_precision(tmp_path):
+    pytest.importorskip("openvino")
+    target, draft, _ = _write_head_pair(tmp_path, asymmetric=False)
+    assert prep.ensure_draft_head(target, draft, "int4") == draft.with_name("int4-lmhead")
+    stamp = (draft.with_name("int4-lmhead") / ".derived.json").stat().st_mtime_ns
+    # An INT8 target gets its own copy; the INT4 one is neither rebuilt nor set aside.
+    assert prep.ensure_draft_head(target, draft, "int8") == draft.with_name("int4-lmhead-int8")
+    assert (draft.with_name("int4-lmhead") / ".derived.json").stat().st_mtime_ns == stamp
+    assert not list(draft.parent.glob("*.stale-*"))
 
 
 def test_draft_head_failure_keeps_the_stock_drafter(tmp_path):

@@ -22,7 +22,7 @@ services:
     container_name: sc-storage-permissions
     command: >-
       sh -lc "
-        mkdir -p /app/storage/smart-classroom &&
+        mkdir -p /app/storage/smart-classroom /app/storage/content-search &&
         chown -R 10001:10001 /app/storage &&
         find /app/storage -type d -exec chmod 0775 {} + &&
         find /app/storage -type f -exec chmod 0664 {} +
@@ -39,9 +39,21 @@ services:
       args:
         VITE_API_BASE_URL: "${VITE_API_BASE_URL:-}"
         # Forward the host proxy (if any) so npm/pip can fetch packages.
-        HTTP_PROXY: "${HTTP_PROXY:-}"
-        HTTPS_PROXY: "${HTTPS_PROXY:-}"
-        NO_PROXY: "${NO_PROXY:-}"
+        HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+        NO_PROXY: "${NO_PROXY:-${no_proxy:-}}"
+      # Optional corporate TLS-inspection CA, see app.Dockerfile and the
+      # `secrets.corporate_ca` entry below. No-op unless CORPORATE_CA_FILE
+      # points at a real PEM file.
+      secrets:
+        - corporate_ca
+      # On some TLS-inspecting corporate proxies (observed: Fortinet), large
+      # downloads through docker's NAT'd bridge build network intermittently
+      # get a 504 from the proxy (the same request succeeds from the host's
+      # own network) -- this affects the GPU-runtime .deb downloads in
+      # app.Dockerfile. `host` routes build RUN steps through the host's
+      # network stack instead, same as `docker build --network host`.
+      network: host
     image: smart-classroom-app:local
     container_name: smart-classroom-app
     ports:
@@ -60,6 +72,9 @@ services:
     networks: [smart-classroom]
     group_add:
       - "1000"
+      - "${RENDER_GID:?Set RENDER_GID to the host render-group ID; run ./setup.sh}"
+    devices:
+      - "/dev/dri:/dev/dri"
     depends_on:
       storage-permissions: { condition: service_completed_successfully }
       metrics-collector: { condition: service_healthy }
@@ -68,12 +83,14 @@ services:
       - AUDIO_ANALYZER_URL=http://audio-analyzer:8010
       - SERVING_BASE_URL=${SERVING_BASE_URL:-http://ovms:9000}
       - VIDEO_ANALYTICS_URL=${VIDEO_ANALYTICS_URL:-http://video-analytics:8020}
-      - HTTP_PROXY=${HTTP_PROXY:-}
-      - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-}
-      - http_proxy=${HTTP_PROXY:-}
-      - https_proxy=${HTTPS_PROXY:-}
-      - no_proxy=${NO_PROXY:-}
+      - HF_HOME=/app/models/huggingface
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-}}
+      - HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}
+      - NO_PROXY=localhost,127.0.0.1,::1,${NO_PROXY:-${no_proxy:-}}
+      - http_proxy=${HTTP_PROXY:-${http_proxy:-}}
+      - https_proxy=${HTTPS_PROXY:-${https_proxy:-}}
+      - no_proxy=localhost,127.0.0.1,::1,${NO_PROXY:-${no_proxy:-}}
     volumes:
       - ${STORAGE_DIR:-../storage}:/app/storage
       - model-cache:/app/models
@@ -83,21 +100,12 @@ services:
     # a profile that isn't active (see repo memory: containerization
     # skeleton). SERVING_BASE_URL is treated as optional at runtime instead;
     # the app only calls it when text-gen is enabled in config.yaml.
-    # content-search is still out of scope for this pass:
-    # depends_on:
-    #   content-search: { condition: service_healthy }
-    # environment:
-    #   - CONTENT_SEARCH_HOST=content-search
+    # Content Search runs inside app when enabled by the feature resolver.
+    # Its localhost-only APIs are exposed through app's same-origin proxy;
+    # SQLite, ChromaDB and uploaded files persist under /app/storage/content-search.
 
   metrics-collector:   # telemetry sidecar: CPU/GPU/NPU/memory/power -> /metrics, /platform-info
-    build:
-      context: ../performance-tools
-      dockerfile: docker/Dockerfile
-      args:
-        HTTP_PROXY: "${HTTP_PROXY:-}"
-        HTTPS_PROXY: "${HTTPS_PROXY:-}"
-        NO_PROXY: "${NO_PROXY:-}"
-    image: sc-metrics-collector:local
+    image: ${METRICS_COLLECTOR_IMAGE:-intel/retail-benchmark:latest}
     container_name: sc-metrics-collector
     # privileged + host /proc,/sys are required by sar/free/qmassa/PCM inside
     # the performance-tools image; this does not require network_mode: host,
@@ -132,15 +140,8 @@ services:
 
   audio-analyzer:   
     profiles: ["asr"]
-    build:
-      context: ../edge-ai-libraries/microservices/audio-analyzer
-      dockerfile: docker/Dockerfile
-      args:
-        INSTALL_CJK: "${INSTALL_CJK:-true}"
-        HTTP_PROXY: "${HTTP_PROXY:-}"
-        HTTPS_PROXY: "${HTTPS_PROXY:-}"
-        NO_PROXY: "${NO_PROXY:-}"
-    image: smart-classroom-audio-analyzer:local
+    image: intel/audio-analyzer
+    pull_policy: always
     container_name: sc-audio-analyzer
     user: "1000:1000"
     environment:
@@ -287,6 +288,8 @@ services:
         HTTP_PROXY: "${HTTP_PROXY:-}"
         HTTPS_PROXY: "${HTTPS_PROXY:-}"
         NO_PROXY: "${NO_PROXY:-}"
+      secrets:
+        - corporate_ca
     image: sc-va-model-provision:local
     container_name: sc-va-model-provision
     environment:
@@ -351,6 +354,11 @@ services:
       - VA_POSE_STALE_UNIDENTIFIED_THRESHOLD=${VA_POSE_STALE_UNIDENTIFIED_THRESHOLD:-30}
       - VA_POSE_STUDENT_COUNT_WINDOW_FRAMES=${VA_POSE_STUDENT_COUNT_WINDOW_FRAMES:-150}
       # Per-pipeline default device; a launch call may still override it.
+      # NPU/GPU (default) need docker-compose.gpu.yml for device passthrough.
+      # CPU needs no passthrough for inference itself -- see the VA pipeline
+      # guide (dev-guide/va-pipeline) section "Device selection" -- but RTSP
+      # sources still decode on the GPU regardless of device, so /dev/dri is
+      # still required unless every source is a file.
       - VA_FRONT_DEVICE=${VA_FRONT_DEVICE:-NPU}
       - VA_BACK_DEVICE=${VA_BACK_DEVICE:-NPU}
       - VA_CONTENT_DEVICE=${VA_CONTENT_DEVICE:-NPU}
@@ -386,3 +394,13 @@ volumes:
   audio-analyzer-chunks:
   audio-analyzer-storage:
   audio-analyzer-cache:
+
+secrets:
+  # Optional corporate TLS-inspection root CA (PEM), shared by the `app`
+  # build's GPU/NPU-runtime step (docker/app.Dockerfile) and the
+  # `va-model-provision` build's model-download step
+  # (video-analytics/docker/Dockerfile.va-provision). Defaults to a tracked
+  # empty placeholder (0 bytes), which keeps this a verified no-op for
+  # everyone who doesn't need it.
+  corporate_ca:
+    file: "${CORPORATE_CA_FILE:-./corporate-ca.placeholder.pem}"

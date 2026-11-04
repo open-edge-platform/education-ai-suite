@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
 from pathlib import Path
@@ -14,9 +15,22 @@ _SC_ROOT = _COMPONENT_ROOT.parents[1]                   # smart-classroom/
 _ocr_instance = None
 
 
+def _ocr_model_dir(ocr_cfg: dict) -> Path:
+    rel = Path(str(ocr_cfg.get("model_dir", "models/ocr")))
+    if rel.is_absolute():
+        return rel
+    ud = os.environ.get("SMART_CLASSROOM_USERDATA")
+    if ud and ud.strip():
+        base = Path(ud) / "models"
+        parts = rel.parts
+        return base.joinpath(*parts[1:]) if parts and parts[0] == "models" else base / rel
+    return _SC_ROOT / rel
+
+
 def _load_ocr_config() -> dict:
     import yaml
-    cfg_path = _SC_ROOT / "config.yaml"
+    override = os.environ.get("SC_CONFIG_PATH")
+    cfg_path = Path(override) if override and override.strip() else (_SC_ROOT / "config.yaml")
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     return (raw.get("models") or {}).get("ocr") or {}
 
@@ -28,7 +42,7 @@ def _inject_config_loader(ocr_cfg: dict) -> None:
     if "utils.config_loader" in sys.modules:
         return
 
-    model_dir = str((_SC_ROOT / ocr_cfg.get("model_dir", "models/ocr")).resolve())
+    model_dir = str(_ocr_model_dir(ocr_cfg).resolve())
 
     ocr_ns = types.SimpleNamespace(
         det_model=ocr_cfg.get("det_model", "PP-OCRv6_small_det"),
@@ -43,9 +57,12 @@ def _inject_config_loader(ocr_cfg: dict) -> None:
     mock = types.ModuleType("utils.config_loader")
     mock.config = config_ns
 
-    utils_mock = sys.modules.get("utils") or types.ModuleType("utils")
+    utils_mock = sys.modules.get("utils")
+    if utils_mock is None:
+        utils_mock = types.ModuleType("utils")
+        utils_mock.__path__ = [str(_SC_ROOT / "utils")]
+        sys.modules["utils"] = utils_mock
     utils_mock.config_loader = mock
-    sys.modules.setdefault("utils", utils_mock)
     sys.modules["utils.config_loader"] = mock
 
 
@@ -62,7 +79,7 @@ def _get_processor():
         return _ocr_instance
 
     ocr_cfg = _load_ocr_config()
-    model_dir = str((_SC_ROOT / ocr_cfg.get("model_dir", "models/ocr")).resolve())
+    model_dir = str(_ocr_model_dir(ocr_cfg).resolve())
 
     if str(_SC_ROOT) not in sys.path:
         sys.path.insert(0, str(_SC_ROOT))

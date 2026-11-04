@@ -8,11 +8,41 @@ from pathlib import Path
 import yaml
 
 _HERE = Path(__file__).resolve().parent          # layout_detection_service/
+
+
+def _user_data_dir():
+    v = os.environ.get("SMART_CLASSROOM_USERDATA")
+    return Path(v) if v and v.strip() else None
+
+
+def _convert_venv_dir() -> Path:
+    data = _user_data_dir()
+    return data / "venv_convert" if data else _HERE / "venv_convert"
+
+
+def _remap_to_userdata(p: Path) -> Path:
+    data = _user_data_dir()
+    if not data:
+        return p
+    try:
+        idx = p.parts.index("models")
+        return data / "models" / Path(*p.parts[idx + 1:])
+    except ValueError:
+        return data / "models" / p.name
 _COMPONENT_ROOT = _HERE.parents[1]
 _SC_ROOT = _HERE.parents[3]                      # smart-classroom/
 _LAYOUT_CONFIG = _HERE / "config.yaml"
-_COMPONENT_CONFIG = _COMPONENT_ROOT / "config.yaml"
-_MAIN_CONFIG = _SC_ROOT / "config.yaml"
+_SC_CONFIG = os.environ.get("SC_CONFIG_PATH")
+_MAIN_CONFIG = Path(_SC_CONFIG) if _SC_CONFIG and _SC_CONFIG.strip() else (_SC_ROOT / "config.yaml")
+
+
+def _component_config_path() -> Path:
+    ud = os.environ.get("SMART_CLASSROOM_USERDATA")
+    if ud and ud.strip():
+        candidate = Path(ud) / "grading" / "config.yaml"
+        if candidate.exists():
+            return candidate
+    return _COMPONENT_ROOT / "config.yaml"
 
 INPUT_SIZE = 800
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
@@ -31,12 +61,12 @@ def _read_yaml(path: Path) -> dict:
 
 
 def _config_source() -> str:
-    raw = _read_yaml(_COMPONENT_CONFIG)
+    raw = _read_yaml(_component_config_path())
     return str(raw.get("config_source", "parent-override")).strip().lower()
 
 
 def _load_main_hub() -> str:
-    component = _read_yaml(_COMPONENT_CONFIG)
+    component = _read_yaml(_component_config_path())
     hub = str(((component.get("models") or {}).get("model_hub")) or "huggingface")
     if _config_source() == "parent-override":
         parent_hub = (_read_yaml(_MAIN_CONFIG).get("models") or {}).get("model_hub")
@@ -85,7 +115,7 @@ def _download(source: str, repo_id: str, download_dir: Path) -> None:
 
 def _find_paddle2onnx() -> str:
     candidates = [
-        str(_HERE / "venv_convert" / "Scripts" / "paddle2onnx"),
+        str(_convert_venv_dir() / "Scripts" / "paddle2onnx"),
         os.path.join(os.path.dirname(sys.executable), "paddle2onnx"),
     ]
     for c in candidates:
@@ -94,8 +124,8 @@ def _find_paddle2onnx() -> str:
     raise FileNotFoundError(
         "paddle2onnx not found. "
         "Create the conversion venv first:\n"
-        f"  python -m venv {_HERE / 'venv_convert'}\n"
-        f"  {_HERE / 'venv_convert' / 'Scripts' / 'pip'} install -r {_HERE / 'requirements_convert.txt'}"
+        f"  python -m venv {_convert_venv_dir()}\n"
+        f"  {_convert_venv_dir() / 'Scripts' / 'pip'} install -r {_HERE / 'requirements_convert.txt'}"
     )
 
 
@@ -211,8 +241,8 @@ def ensure_layout_model() -> Path:
     cfg = _load_layout_cfg()
     source = _load_main_hub()
     repo_id = cfg["repo_id"]
-    download_dir = _resolve(cfg["download_dir"])
-    model_dir = _resolve(cfg["model_dir"])
+    download_dir = _remap_to_userdata(_resolve(cfg["download_dir"]))
+    model_dir = _remap_to_userdata(_resolve(cfg["model_dir"]))
     precision = cfg.get("precision", "fp16")
     calib_dir = cfg.get("calibration_dir", "./input")
     calib_samples = int(cfg.get("calibration_samples", 100))
@@ -244,8 +274,8 @@ if __name__ == "__main__":
 
     cfg = _load_layout_cfg()
     source = _load_main_hub()
-    download_dir = _resolve(cfg["download_dir"])
-    model_dir = _resolve(cfg["model_dir"])
+    download_dir = _remap_to_userdata(_resolve(cfg["download_dir"]))
+    model_dir = _remap_to_userdata(_resolve(cfg["model_dir"]))
     precision = cfg.get("precision", "fp16")
 
     if not args.skip_download:

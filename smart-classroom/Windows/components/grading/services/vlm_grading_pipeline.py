@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -28,6 +29,11 @@ def _component_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _data_root() -> Path:
+    v = os.environ.get("SMART_CLASSROOM_USERDATA")
+    return Path(v) / "grading" if v and v.strip() else _component_root()
+
+
 def _load_component_config() -> dict[str, Any]:
     from services.config import load_config, get_language
 
@@ -43,7 +49,7 @@ def _load_provider_url(key: str, default: str) -> str:
 
 
 def _outputs_dir(task_id: str, student_id: str | None) -> Path:
-    return _component_root() / "outputs" / task_id / (student_id or "paper")
+    return _data_root() / "outputs" / task_id / (student_id or "paper")
 
 
 def run_vlm_grading_pipeline(
@@ -383,6 +389,14 @@ def run_vlm_grading_pipeline(
 
     scores = merge_page_scores(unit_score_dicts)
     _step_done("vlm_grading", _t, f"graded_questions={len(scores)}")
+    if not scores:
+        # A result with nothing in it is not a grade: report it as a failure
+        # instead of a completed paper scoring 0/0.
+        raise RuntimeError(
+            f"no question could be graded in {Path(paper_path).name}; check that the "
+            f"rubric matches the paper and that app.language "
+            f"({cfg.get('_language', 'en')}) is the paper's language"
+        )
 
     update_progress("merge", 95)
     _t = _step_start("merge")
