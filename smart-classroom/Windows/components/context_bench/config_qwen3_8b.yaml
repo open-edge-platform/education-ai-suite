@@ -149,21 +149,3 @@ profiles:
       max_num_batched_tokens: 65536
       max_num_seqs: 1
       enable_prefix_caching: false
-
-  - name: eagle3_k3
-    ov: *ov_qwen3_8b
-    scheduler: *scheduler_qwen3_8b
-    eagle3:
-      model: &eagle3_draft models/openvino/Qwen3-VL-8B-Instruct-eagle3/int4
-      num_assistant_tokens: 3
-
-  - name: eagle3_k4
-    ov: *ov_qwen3_8b
-    scheduler: *scheduler_qwen3_8b
-    eagle3: {model: *eagle3_draft, num_assistant_tokens: 4}
-
-  - name: eagle3_k5
-    ov: *ov_qwen3_8b
-    scheduler: *scheduler_qwen3_8b
-    eagle3: {model: *eagle3_draft, num_assistant_tokens: 5}
-
