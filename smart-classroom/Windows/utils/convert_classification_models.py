@@ -20,7 +20,6 @@ import certifi
 
 # Model URLs
 RESNET18 = "https://download.pytorch.org/models/resnet18-f37072fd.pth"
-RESNET50 = "https://download.pytorch.org/models/resnet50-11ad3fa6.pth"
 REID_XML = "https://storage.openvinotoolkit.org/repositories/open_model_zoo/2023.0/models_bin/1/person-reidentification-retail-0288/FP16/person-reidentification-retail-0288.xml"
 REID_BIN = "https://storage.openvinotoolkit.org/repositories/open_model_zoo/2023.0/models_bin/1/person-reidentification-retail-0288/FP16/person-reidentification-retail-0288.bin"
 
@@ -222,8 +221,6 @@ def convert_classification_models(output_dir: str = "models/va"):
     required_models = [
         "resnet18.xml",
         "resnet18.bin",
-        "resnet50.xml",
-        "resnet50.bin",
         "person-reidentification-retail-0288.xml",
         "person-reidentification-retail-0288.bin"
     ]
@@ -239,13 +236,6 @@ def convert_classification_models(output_dir: str = "models/va"):
     model.load_state_dict(torch.load(weights_path, map_location='cpu', weights_only=False))
     model = add_softmax(model)
     convert_to_openvino(model, "resnet18", output_path, input_shape=(1, 3, 224, 224))
-
-    print("\nProcessing ResNet-50")
-    weights_path = download(RESNET50, "resnet50-19c8e357.pth", output_path)
-    model = models.resnet50()
-    model.load_state_dict(torch.load(weights_path, map_location='cpu', weights_only=False))
-    model = add_softmax(model)
-    convert_to_openvino(model, "resnet50", output_path, input_shape=(1, 3, 224, 224))
 
     print("\nProcessing person-reidentification-retail-0288")
     download(REID_XML, "person-reidentification-retail-0288-original.xml", output_path)

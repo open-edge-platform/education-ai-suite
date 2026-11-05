@@ -1035,41 +1035,12 @@ class VideoAnalyticsPipelineService:
             f"file-path={output_dir.as_posix()}/back_posture.txt",
             "file-format=json-lines",
             "!",
-            "tee",
-            "name=t",
-            # Branch 1: video output, kept at the source framerate. Split off ahead
-            # of the classification decimation so the stream is not thinned too;
-            # gvawatermark already ran, and it only draws the pose detections.
-            "t.",
-            "!",
             "queue",
             "!",
+            # Not decimated, so this sink runs at the capped source rate.
             *self._get_video_sink_elements(
                 options, "back_stream", self.max_input_framerate
             ),
-            # Branch 2: ResNet18 classification
-            "t.",
-            "!",
-            "queue",
-            "!",
-            *self._get_classify_decimation_elements(options),
-            "gvaclassify",
-            f"model={self._get_model_path('resnet18')}",
-            f"device={options.device}",
-            *self._get_preprocess_backend_elements(options),
-            "batch-size=1",
-            "inference-region=1",
-            "model-instance-id=resnet18-0",
-            "!",
-            "gvametaconvert",
-            "!",
-            "gvametapublish",
-            f"file-path={output_dir.as_posix()}/back_resnet18.txt",
-            "file-format=json-lines",
-            "!",
-            "fakesink",
-            "async=false",
-            "sync=false",
         ]
         return pipeline
 
@@ -1215,10 +1186,7 @@ class VideoAnalyticsPipelineService:
             if pipeline_name == PipelineName.FRONT.value:
                 output_files = [Path(options.output_dir) / "front_posture.txt"]
             elif pipeline_name == PipelineName.BACK.value:
-                output_files = [
-                    Path(options.output_dir) / "back_posture.txt",
-                    Path(options.output_dir) / "back_resnet18.txt",
-                ]
+                output_files = [Path(options.output_dir) / "back_posture.txt"]
             elif pipeline_name == PipelineName.CONTENT.value:
                 output_files = [Path(options.output_dir) / "content_results.txt"]
             self.pipeline_output_files[pipeline_name] = output_files
