@@ -12,7 +12,7 @@
        Detects DL Streamer via the registry (HKLM:\SOFTWARE\Intel\dlstreamer),
        configures the session by running <InstallDir>\scripts\setup_dls_env.ps1,
        then runs a gst-inspect-1.0 sanity check and reports the result through
-       the exit code. When found, the registry version (e.g. "2026.1.0") is
+       the exit code. When found, the registry version (e.g. "2026.2.0") is
        written to stdout so callers can capture it.
 
     2. Install mode (-Install):
@@ -35,7 +35,7 @@
     can run unattended.
 
 .PARAMETER RequiredVersion
-    The minimum DL Streamer version required (default "2026.1.0"). Used by
+    The minimum DL Streamer version required (default "2026.2.0"). Used by
     -Install mode for the version gate and the installer download.
 
 .PARAMETER HttpProxy
@@ -67,7 +67,7 @@ param(
     [switch]$Quiet,
     [switch]$Install,
     [switch]$Yes,
-    [string]$RequiredVersion = "2026.1.0",
+    [string]$RequiredVersion = "2026.2.0",
     [string]$HttpProxy = "",
     [string]$HttpsProxy = ""
 )

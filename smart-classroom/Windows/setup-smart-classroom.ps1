@@ -126,7 +126,7 @@ System Requirements:
 
 Application Dependencies:
   - FFmpeg: Required for audio processing
-  - DL Streamer: Required for video pipelines (v2026.1.0 verified)
+  - DL Streamer: Required for video pipelines (v2026.2.0 verified)
 
 Proxy Configuration:
   If behind a corporate firewall, the script will prompt for proxy settings.
@@ -1466,7 +1466,7 @@ Write-Host ""
 Write-Host "Checking DL Streamer..." -ForegroundColor White
 
 $dlStreamerFound = $false
-$dlStreamerRequiredVersion = "2026.1.0"
+$dlStreamerRequiredVersion = "2026.2.0"
 
 # The full DL Streamer check (detection + version-gate + install/reinstall flow)
 # lives in Scripts\check_dlstreamer.ps1. Delegate to it and act on its exit code.
@@ -1510,7 +1510,7 @@ if ($appChecksFailed) {
 
     if (-not $dlStreamerFound) {
         Write-Host "  DL Streamer (required for video pipelines):" -ForegroundColor White
-        Write-Host "    https://github.com/open-edge-platform/dlstreamer/releases/download/v2026.1.0/dlstreamer-2026.1.0-win64.exe" -ForegroundColor Cyan
+        Write-Host "    https://github.com/open-edge-platform/dlstreamer/releases/download/v2026.2.0/dlstreamer-2026.2.0-win64.exe" -ForegroundColor Cyan
         Write-Host "    Download and run the installer" -ForegroundColor Gray
         Write-Host ""
         Write-Host "  Installation Guide:" -ForegroundColor White
