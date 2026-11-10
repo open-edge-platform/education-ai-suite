@@ -471,29 +471,25 @@ def _export_draft(source_dir: Path, draft_dir: Path, settings: SpeculativeSettin
 
 
 def _inherit_parent_permissions(directory: Path) -> None:
-    """Make an export's files inherit their permissions from the models directory.
+    """Rewrite each exported file as a new one, so it takes the folder's permissions.
 
     optimum exports a quantized model to a ``tempfile.mkdtemp()`` directory and
     moves the files out; a same-volume move keeps the private ACL Python gives
     that directory on Windows (SYSTEM, Administrators, owner). Exported from an
     elevated session the owner is the Administrators group, so a later
-    non-elevated start could not read the drafter. Best effort: a drafter left
-    unreadable is detected and re-exported by the next start.
+    non-elevated start could not read the drafter. A file created here inherits
+    the models directory's permissions instead: plain file I/O as the current
+    user, no ACL is edited. Peak extra disk is one file.
     """
     if os.name != "nt":
         return
-    icacls = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "icacls.exe"
-    try:
-        completed = subprocess.run([str(icacls), str(directory), "/reset", "/T", "/C", "/Q"],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                   check=False)
-    except OSError as exc:
-        logger.warning("Could not reset permissions of %s: %s", _rel(directory), exc)
-        return
-    if completed.returncode != 0:
-        logger.warning("Could not reset permissions of %s (icacls exit %d): %s",
-                       _rel(directory), completed.returncode,
-                       completed.stderr.decode(errors="replace").strip())
+    for path in sorted(p for p in directory.rglob("*") if p.is_file()):
+        fresh = path.with_name(path.name + ".inherit")
+        try:
+            shutil.copyfile(path, fresh)
+            os.replace(fresh, path)
+        finally:
+            fresh.unlink(missing_ok=True)
 
 
 def _unreadable_files(directory: Path, names) -> list:

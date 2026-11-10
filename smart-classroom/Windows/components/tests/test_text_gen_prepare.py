@@ -317,17 +317,19 @@ def test_unreadable_files_skips_missing_and_reports_denied(tmp_path, monkeypatch
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACLs")
-def test_permissions_are_reset_to_inherited_with_icacls(tmp_path, monkeypatch):
-    seen = []
-
-    def run(cmd, **kwargs):
-        seen.append(cmd)
-        return SimpleNamespace(returncode=0, stderr=b"")
-
-    monkeypatch.setattr(prep.subprocess, "run", run)
+def test_exported_files_are_rewritten_as_new_files(tmp_path):
+    """A new file inherits the folder's permissions; content stays byte-identical."""
+    (tmp_path / "sub").mkdir()
+    files = {tmp_path / "openvino_model.bin": bytes(range(256)) * 64,
+             tmp_path / "sub" / "config.json": b"{}"}
+    for path, data in files.items():
+        path.write_bytes(data)
+    before = {path: path.stat().st_ino for path in files}
     prep._inherit_parent_permissions(tmp_path)
-    assert Path(seen[0][0]).name.lower() == "icacls.exe"
-    assert seen[0][1:] == [str(tmp_path), "/reset", "/T", "/C", "/Q"]
+    for path, data in files.items():
+        assert path.read_bytes() == data
+        assert path.stat().st_ino != before[path]
+    assert not list(tmp_path.rglob("*.inherit"))
 
 
 def test_drafter_export_command_runs_no_repository_code(tmp_path, monkeypatch):
