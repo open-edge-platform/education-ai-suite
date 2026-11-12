@@ -17,6 +17,11 @@ For implementation details, see [Context Bench Design](context-bench-design.md).
 
 ## Quick start
 
+Context Bench runs from a source checkout; see
+[Build from Source on Windows](../../user-guide/get-started/build-from-source-windows.md).
+It does not use the desktop app installation, whose Python environment and models
+live under `%LOCALAPPDATA%\SmartClassroom`.
+
 Run from the app root, `smart-classroom/Windows/`. The benchmark uses the backend
 venv one level above it (`smart-classroom/smartclassroom`) that
 `setup-smart-classroom.ps1` creates; the

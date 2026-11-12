@@ -1,69 +1,31 @@
 # Advanced Setup Guide
 
-This guide walks you through installing dependencies, configuring defaults, and running the application on Windows.
+This guide is the configuration reference for Smart Classroom on Windows, with
+troubleshooting and uninstall steps. It applies to the desktop app installed with the
+installer; see [Get Started on Windows](./get-started/get-started-windows.md). To run
+from a source checkout instead, see
+[Build from Source on Windows](./get-started/build-from-source-windows.md).
 
-## Step 1: Install Dependencies
+## Where the Configuration Lives
 
-### A. Install FFmpeg (Required for Audio Processing)
+| Installation | Where to edit | File |
+| :--- | :--- | :--- |
+| Desktop app (installer) | **Configuration** screen; **Show file** opens the file itself | `%LOCALAPPDATA%\SmartClassroom\config.yaml` |
+| Source checkout | A text editor | `smart-classroom/Windows/config.yaml` |
 
-Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html), and add the `ffmpeg/bin` folder to your system `PATH`.
+The **Configuration** screen covers the settings most people change. For a setting it
+does not list, edit `config.yaml` directly.
 
-### B. Install DL Streamer
+> [!IMPORTANT]
+> Configuration changes take effect the next time the backend starts. In the desktop
+  app, select **Restart backend** when it is offered after you save, or restart it on
+  the **Services** screen.
 
-Download the Deep Learning Streamer (DL Streamer) installer from [DL Streamer assets on GitHub](https://github.com/open-edge-platform/dlstreamer/releases).
-For details, refer to the [Install Guide](https://docs.openedgeplatform.intel.com/dev/edge-ai-libraries/dlstreamer/install/install_guide_windows.html).
-
-> [!NOTE]
-> DL Streamer 2026.2.0 is the latest verified version. Also update your [NPU driver](./get-started/system-requirements.md#software-and-hardware-requirements) to the latest version for compatibility.
-
-Installing DL Streamer and the NPU driver needs administrator privileges. Start the application itself from a normal (non-administrator) shell.
-
-### C. Clone Repository
-
-Go to the target directory of your choice and clone the suite.
-If you want to clone a specific release branch, replace `main` with the desired tag.
-To learn more about partial cloning, see the [Repository Cloning guide](https://docs.openedgeplatform.intel.com/dev/OEP-articles/contribution-guide.html#repository-cloning-partial-cloning).
-
-```bash
-git clone --filter=blob:none --branch main https://github.com/open-edge-platform/education-ai-suite.git
-cd education-ai-suite/smart-classroom
-```
-
-### D. Install Python Dependencies
-
-It’s recommended to create a **dedicated Python virtual environment** for the base dependencies:
-
-```bash
-python -m venv smartclassroom
-smartclassroom\Scripts\activate
-
-# Use Python 3.12.x before running pip.
-cd Windows
-python.exe -m pip install --upgrade pip
-pip install --upgrade -r requirements.txt
-```
-
-### E. Install LibreOffice (Optional, Feature-Dependent)
-
-LibreOffice (the `soffice` executable) is an **optional** dependency used by two features. Install it only if you enable a feature that needs it:
-
-- **`report` — PDF report export:** The class report is generated as a `.docx` file. When you download it as **PDF**, the server converts the `.docx` using LibreOffice in headless mode (`soffice --convert-to pdf`). If LibreOffice is **not** installed, `.docx` download still works normally and only the PDF download returns `501 (PDF export unavailable)`.
-- **`content_search` — legacy document parsing:** Ingesting legacy Office formats (`.doc`, `.ppt`, `.xls`) requires LibreOffice to convert them. Modern formats (`.docx`, `.pptx`, `.xlsx`) do not need it. If LibreOffice is missing, uploading a legacy format is rejected with a message asking you to install it or convert to a modern format.
-
-If you enable either use case, download and install LibreOffice from [https://www.libreoffice.org/download/](https://www.libreoffice.org/download/), then make sure the `soffice` executable is available on your system `PATH`.
-
-Verify the executable is discoverable:
-
-```python
-import shutil
-shutil.which("soffice") is not None   # should return True
-```
-
-## Step 2: Configuration
+## Configure the Application
 
 ### A. Enable Feature Configuration
 
-The application uses a modular feature architecture. You can enable or disable individual features through the `features:` block in `smart-classroom/Windows/config.yaml`. Only enabled features are initialized at startup: they load their required models, register their API routes, and start their associated services.
+The application uses a modular feature architecture. You can enable or disable individual features through the `features:` block in `config.yaml`. Only enabled features are initialized at startup: they load their required models, register their API routes, and start their associated services.
 
 ```yaml
 features:
@@ -79,12 +41,9 @@ features:
   report:             { enabled: true }   # Class report generation (.docx, PDF export)
 ```
 
-> [!IMPORTANT]
-> After updating the configuration, reload the application for changes to take effect.
-
 ### B. Default Configuration
 
-By default, the project uses Whisper for transcription, and summarization runs on the shared OpenVINO™ vision-language model configured under `models.text_gen`. You can modify these settings in the configuration file (`smart-classroom/Windows/config.yaml`):
+By default, the project uses Whisper for transcription, and summarization runs on the shared OpenVINO™ vision-language model configured under `models.text_gen`. You can modify these settings in `config.yaml`:
 
 ```yaml
 asr:
@@ -104,9 +63,12 @@ text_gen:                     # Shared by summary, mindmap, segmentation and Q&A
   max_new_tokens: 5120        # Maximum tokens to generate
 ```
 
+For choosing the text-generation model and enabling DFlash, see the
+[VLM/LLM Serving Guide](./vlm-llm-serving/serving-guide.md).
+
 ### C. Chinese Audio Transcription
 
-For Chinese audio transcription, switch to FunASR with Paraformer in your configuration file (`smart-classroom/Windows/config.yaml`):
+For Chinese audio transcription, switch to FunASR with Paraformer in `config.yaml`:
 
 ```yaml
 asr:
@@ -187,9 +149,16 @@ Create a Read access token.
 
 Copy the generated token.
 
-#### c. Configure Hugging Face token in project configuration
+#### c. Configure the Hugging Face token
 
-Open `smart-classroom/Windows/config.yaml` and set `diarization: true` under `models.asr`, then add your Hugging Face token:
+In the desktop app, open **Configuration**, go to **Speech recognition**, turn on
+**Speaker diarization**, and enter the token in **Hugging Face token**. The app stores
+the token without showing it again.
+
+<!-- SCREENSHOT: Configuration screen, Speech recognition with Speaker diarization and Hugging Face token -->
+
+To edit the file directly instead, set `diarization: true` under `models.asr` in
+`config.yaml`, then add your Hugging Face token:
 
 ```yaml
 models:
@@ -228,202 +197,57 @@ audio_preprocessing:
   chunking: false
 ```
 
-> [!IMPORTANT]
-> After updating the configuration, reload the application for changes to take effect.
+## Install LibreOffice (Optional, Feature-Dependent)
 
-## Step 3: Run the Application
+LibreOffice (the `soffice` executable) is an **optional** dependency used by two features. Install it only if you enable a feature that needs it:
 
-Run the backend:
+- **`report` — PDF report export:** The class report is generated as a `.docx` file. When you download it as **PDF**, the server converts the `.docx` using LibreOffice in headless mode (`soffice --convert-to pdf`). If LibreOffice is **not** installed, `.docx` download still works normally and only the PDF download returns `501 (PDF export unavailable)`.
+- **`content_search` — legacy document parsing:** Ingesting legacy Office formats (`.doc`, `.ppt`, `.xls`) requires LibreOffice to convert them. Modern formats (`.docx`, `.pptx`, `.xlsx`) do not need it. If LibreOffice is missing, uploading a legacy format is rejected with a message asking you to install it or convert to a modern format.
 
-```bash
-python main.py
-```
+If you enable either use case, download and install LibreOffice from [https://www.libreoffice.org/download/](https://www.libreoffice.org/download/), then make sure the `soffice` executable is available on your system `PATH`. Restart the backend afterwards.
 
-You should see backend logs similar to this:
-
-```text
-pipeline initialized
-[INFO] __main__: App started, Starting Server...
-INFO:     Started server process [21616]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-```
-
-This means your pipeline server has started successfully and is ready to accept requests.
-
-## Step 4: Set Up Content Search
-
-Content Search provides multimodal semantic search, AI-driven video summarization, and RAG-based Q&A over uploaded educational materials.
-
-### A. Content Search Dependencies
-
-Content Search runs in the same `smartclassroom` environment as the backend.
-
-> [!NOTE]
-> When the `content_search` feature is enabled in `config.yaml`, the backend (`main.py`) automatically launches the Content Search services on startup and shuts them down when it exits.
-
-When all services are ready:
-
-```text
-[launcher] All 4 services are ready. (startup took XXs)
-[launcher] You can use Ctrl+C to stop all services.
-```
-
-Verify the service status:
+To verify the executable is discoverable, run this in PowerShell:
 
 ```PowerShell
-Invoke-RestMethod -Uri "http://127.0.0.1:9011/api/v1/system/health"
+Get-Command soffice
 ```
 
-This endpoint aggregates every service the launcher starts (ChromaDB, video
-preprocess, file ingest, and the Content Search API itself). It answers `200`
-with `status: "ok"` only when all of them are ready, and `503` with
-`status: "degraded"` until then - the `services` map in the body names what is
-still missing. `Invoke-RestMethod` throws on the `503`, so use
-`try { ... } catch { $_.ErrorDetails.Message }` to read the detail while
-services are still coming up.
+## Network Requirements
 
-> [!NOTE]
-> First-time execution may take several minutes as AI models (CLIP, BGE, Qwen VLM) are downloaded.
-
-### B. Network Requirements for Content Search
-
-- **Proxy**: If behind a proxy, ensure `HTTP_PROXY` and `HTTPS_PROXY` environment variables are configured.
-- **Model Downloads**: Stable access to `huggingface.co` is required for downloading pre-trained models.
-- **Windows Long Paths**: Move the project to a shallow directory (e.g., `C:\User\CS`) or enable long paths once from an administrator PowerShell:
+- **Proxy**: If you are behind a proxy, set `HTTP_PROXY` and `HTTPS_PROXY`. In the
+  desktop app, set them on the **Configuration** screen under **Proxy**.
+- **Model downloads**: Stable access to `huggingface.co` is required to download
+  pre-trained models.
+- **Windows long paths**: Model downloads with deep paths can fail when long paths are
+  disabled. Enable them on the **Setup** screen (Windows long paths row), or once from
+  an administrator PowerShell:
 
   ```PowerShell
   New-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\FileSystem" `
   -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
   ```
 
-## Step 5: Set Up Grading (Optional)
-
-> [!NOTE]
-> Skip this step if `grading.enabled: false` in `config.yaml`.
-
-Smart Grading uses a layout detection model that requires a one-time conversion from Paddle format to OpenVINO™ IR. This step creates a dedicated conversion environment.
-
-### A. Create the Model Conversion Environment
-
-```PowerShell
-cd smart-classroom\Windows\components\grading\providers\layout_detection_service
-python -m venv venv_convert
-.\venv_convert\Scripts\pip install -r requirements_convert.txt
-```
-
-### B. Convert and Download the Layout Detection Model
-
-```PowerShell
-.\venv_convert\Scripts\python ensure_layout_model.py
-```
-
-> [!NOTE]
-> This downloads PP-DocLayoutV2 (~200 MB) and converts it to OpenVINO™ IR. Subsequent runs detect the existing model and skip this step automatically.
-
-### C. Launch Grading Services
-
-Open two new terminal windows (the Backend terminal must remain running):
-
-**Terminal — Layout Detection (port 9902):**
-
-```PowerShell
-cd smart-classroom\Windows\components\grading\providers
-python .\layout_detection_service\layout_detection_server.py
-```
-
-**Terminal — Grading Service (port 9012):**
-
-```PowerShell
-cd smart-classroom\Windows\components\grading
-python grading_service.py
-```
-
-## Step 6: Bring Up the Frontend
-
-> [!NOTE]
-> Open a new Command Prompt / terminal window for the frontend.
-> The backend and Content Search terminals stay busy serving requests.
-
-```bash
-cd <path-to>\education-ai-suite\smart-classroom\Windows\ui
-npm install
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-> [!WARNING]
-> Keep the frontend bound to `127.0.0.1`. The dev server proxies `/api/v1` and
-  `/grading-api` to the Content Search and Grading backends, which have no
-  authentication. Binding it to `0.0.0.0` exposes those backends, including
-  their file read and write APIs, to every device on the network.
-
-### Optional: Run as an Electron Desktop App
-
-The UI can run as a Windows desktop app instead of a browser tab.
-This is an additive layer: it connects to the same backend services,
-so those must be running as in the previous steps.
-
-```bash
-cd <path-to>\education-ai-suite\smart-classroom\Windows\ui
-npm install
-
-# Development: opens the desktop window and starts the dev server on 5173
-npm run electron:dev
-
-# Production preview: builds the UI and runs the packaged launch path, no dev server.
-npm run electron:preview
-
-# Package a standalone Windows portable executable:
-#   release\SmartClassroom-<version>-portable.exe
-npm run electron:build
-```
-
-> [!NOTE]
-> The Electron runtime binary is fetched lazily the **first time Electron runs**
-  (`npm run electron:dev` / `electron:preview`). Behind a proxy, the first launch
-  needs the proxy variables `ELECTRON_GET_USE_PROXY=true` and
-  `GLOBAL_AGENT_HTTPS_PROXY=<proxy>` in addition to the usual
-  `HTTP_PROXY` / `HTTPS_PROXY`. The `npm run electron:build` downloads
-  its own copy via electron-builder and honors the standard `HTTPS_PROXY`.
-
-## Step 7: Access the UI
-
-After starting the frontend, you can open the Smart Classroom UI in a browser
-(or, if you used `npm run electron:dev`, in the Electron desktop window
-that opens automatically):
-
-- `http://localhost:5173`
-- `http://127.0.0.1:5173`
-
-The UI is only reachable from the machine running the services. If you changed
-the port, adjust the URL accordingly.
-
 ## Troubleshooting
 
-- **Frontend not opening:**
-  Ensure you ran `npm run dev` in a second terminal after starting `python main.py`.
+In the steps below, the `models` folder is `%LOCALAPPDATA%\SmartClassroom\models` for
+the desktop app, and `smart-classroom/Windows/models` for a source checkout. Stop the
+backend before you delete it.
 
-- **Backend not ready:**
-  Wait until Uvicorn shows **"Application startup complete"** and is listening on port **8000**.
-
-- **Nothing at http://localhost:5173:**
-  Check that the frontend terminal shows the Vite server running and no port conflict.
-
-- **Auto reload not happening:**
-  Refresh manually if the backend was restarted after initial UI load.
+- **Backend fails to start or stops unexpectedly:**
+  Open **Services** and read the backend's live logs, or select **Open folder** to see
+  the log files. Then open **Setup** and select **Re-check**: a row marked **Missing**,
+  **Outdated**, or **Failed** names what to fix. **Copy diagnostics** copies the full
+  check list for a bug report.
 
 - **Error: `Port for tensor name cache_position was not found.`**
   This means the models were not configured correctly.
   To fix this:
 
-  1. Delete the models directory:
-
-     ```text
-     education-ai-suite/smart-classroom/Windows/models
-     ```
-
-  2. Rerun only Step 1, option D. If the virtual environment already exists, rerun the required pip commands.
+  1. Delete the `models` folder.
+  2. In the desktop app, open **Setup** and select **Upgrade** on the
+     **Python environment** row. In a source checkout, rerun the `pip install`
+     commands from [Install Python Dependencies](./get-started/build-from-source-windows.md#c-install-python-dependencies).
+  3. Start the backend again. The models are downloaded and converted again.
 
 - **Application crash during bring-up on Intel® Core™ Ultra Series 3 and Intel® Core™ Series 3 processors without any error indication:** Sometimes OpenVINO™ GenAI models may crash on newer hardware. Try running the model on CPU by setting `device: CPU` under `models.text_gen` in `config.yaml`.
 
@@ -435,30 +259,18 @@ the port, adjust the URL accordingly.
   Either openvino_tokenizer.xml was not provided or it was not loaded correctly. Tokenizer::encode is not available
   ```
 
-  Delete the models folder from `education-ai-suite/smart-classroom/Windows/models` and try again.
-
-- If you see the following error while running the DL Streamer setup script:
-
-  ```text
-  .\setup_dls_env.ps1
-    CategoryInfo          : SecurityError: (:) [], PSSecurityException
-    FullyQualifiedErrorId : UnauthorizedAccess
-  ```
-
-  Run the command:
-
-  ```bash
-  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-  ```
+  Delete the `models` folder and start the backend again.
 
 - **Error: `CL_OUT_OF_RESOURCES`** during summarization of longer audio inputs:
   Summarization of longer transcripts may require additional GPU memory. If this error occurs, increase the GPU memory allocation in the **Intel® Graphics Software** application under the **Graphics** tab before rerunning the workflow.
 
   ![GPU Troubleshooting](./_assets/troubleshooting-gpu.png)
 
+For problems specific to the setup scripts or the browser UI, see
+[Build from Source on Windows](./get-started/build-from-source-windows.md#source-checkout---troubleshooting).
+
 ### Known Issues
 
-- **Manual Video File Path Input**: In a web browser, you must manually specify the path to video files from your local system in the base directory input. Using the Electron desktop app is recommended for seamless operation.
 - **Live Video Monitoring Timeout**: Live video monitoring sessions stop automatically after 45 minutes unless you reload the page to start a new session.
 - **Stream End Notification**: When video streaming ends, a "Stream not found" message appears on the screen, indicating that the stream has concluded.
 - **Do Not Reload During Active Streaming**: Do not reload the page while the stream is active. Reloading terminates the session, and you lose the current stream. Wait until the "Stream not found" notification appears before reloading.
@@ -466,16 +278,19 @@ the port, adjust the URL accordingly.
 
 ## Uninstall the Application
 
-To uninstall the application, follow these steps:
+To uninstall the desktop app:
 
-1. **Delete the Python virtual environment folder:** \
-   Navigate to the directory and remove \
-   *education-ai-suite/smart-classroom/smartclassroom*. \
-   For the grading model conversion environment (if created): *education-ai-suite/smart-classroom/Windows/components/grading/providers/layout_detection_service/venv_convert*.
-2. **Remove the models directory:**
-   Remove the models folder located under *education-ai-suite/smart-classroom/Windows*.
-3. **Remove the content search database:**
-   Remove uploaded files, the vector database, and the upload record at *education-ai-suite/smart-classroom/Windows/content_search/data*.
+1. Stop the backend on the **Services** screen and close the app.
+2. Open **Settings** > **Apps** > **Installed apps**, find **Smart Classroom**, and
+   select **Uninstall**.
+3. The uninstaller removes the program but keeps your data. To remove settings, the
+   Python environments, models, sessions, and content search data as well, delete
+   `%LOCALAPPDATA%\SmartClassroom`.
+
+<!-- SCREENSHOT: Settings > Apps > Installed apps with Smart Classroom and the Uninstall option -->
+
+To remove a source installation, see
+[Remove a Source Installation](./get-started/build-from-source-windows.md#remove-a-source-installation).
 
 ## Learn More
 

@@ -7,22 +7,28 @@ This folder contains the React UI for the Smart Classroom Application.
 3. `npm run dev` 
 4. `npm run build` → static files in `dist/`
 
-## Electron desktop app (optional)
+## Electron desktop app
 
-The UI can also run as a Windows desktop app. This is an **additive** layer
-(see [`electron/`](electron/)): the web-app workflow above is unchanged, and the
-Electron build consumes the same `dist/` output from `npm run build`.
+The desktop app is how Smart Classroom is distributed on Windows: end users install
+it with `SmartClassroom-<version>-setup.exe` from the
+[Releases page](https://github.com/open-edge-platform/education-ai-suite/releases).
+It is built from the code in [`electron/`](electron/) as a layer on top of the web
+app: the web-app workflow above is unchanged, and the Electron build consumes the
+same `dist/` output from `npm run build`.
 
 Unlike the web app, the desktop app **supervises the Python services itself** —
 it starts and stops them, tails their logs, edits the configuration files and
-runs first-time setup. Launch it from the repo root of the component:
+runs first-time setup. To run it from a source checkout, launch it from the repo
+root of the component:
 
 ```powershell
 ..\start-desktop-app.ps1
 ```
 
 That script bootstraps Node (installing it via `winget` when missing), rebuilds
-`dist/`, and hands over. It never requests Administrator privileges.
+`dist/`, and hands over. It never requests Administrator privileges. Unlike the
+installed app, it starts the backend automatically (`SC_AUTO_START_BACKEND=1`)
+unless you pass `-NoAutoStart`.
 
 | Screen | Backed by |
 |--------|-----------|
