@@ -32,6 +32,8 @@ extraResources:
       - '!**/__pycache__/**'
       - '!**/*.py[cod]'
       - '!**/.env'
+      - '!**/.proxy-config'
+      - '!**/models/**'
       - '!**/venv_convert/**'
       - '!**/.pytest_cache/**'
       - '!**/monitoring/tools/socwatch_windows_v2026.0/**'

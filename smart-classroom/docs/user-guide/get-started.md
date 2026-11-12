@@ -72,7 +72,7 @@ For the steps to apply the token, see the guide for your operating system, or th
 
 - [System Requirements](./get-started/system-requirements.md): Hardware, software, supported models, and weight formats.
 - [Advanced Setup Guide](./advanced-setup-guide.md): Windows configuration reference, troubleshooting, and uninstall.
-- [Build from Source on Windows](./get-started/build-from-source-windows.md): Source checkout, setup scripts, and building the installer.
+- [Build the Installer from Source](./get-started/build-from-source-windows.md): Build the Windows installer yourself.
 - [Application Flow](./application-flow.md): End-to-end application flow.
 - [Content Search Flow](./content-search-flow.md): The flow of the content search functionality.
 
@@ -81,7 +81,7 @@ For the steps to apply the token, see the guide for your operating system, or th
 :hidden:
 
 Start on Windows <./get-started/get-started-windows>
-Build from Source on Windows <./get-started/build-from-source-windows>
+Build the Installer from Source <./get-started/build-from-source-windows>
 Start on Linux <./get-started/get-started-linux>
 ./get-started/system-requirements
 

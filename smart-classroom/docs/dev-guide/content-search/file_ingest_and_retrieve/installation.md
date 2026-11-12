@@ -11,7 +11,17 @@ For full develop guide and API Reference, please see the [API Reference](../Cont
 
 ### Install Python Dependencies
 
-Content Search shares the base Smart Classroom environment. See [Install Python dependencies](../../../user-guide/get-started/build-from-source-windows.md#c-install-python-dependencies).
+Content Search shares the base Smart Classroom environment: the `smartclassroom`
+virtual environment next to `smart-classroom/Windows`. Create it with
+`setup-smart-classroom.ps1`, or by hand from `smart-classroom`:
+
+```powershell
+python -m venv smartclassroom
+smartclassroom\Scripts\activate
+cd Windows
+python -m pip install --upgrade pip
+pip install --upgrade -r requirements.txt
+```
 
 #### LibreOffice (Optional)
 

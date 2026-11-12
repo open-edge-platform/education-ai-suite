@@ -51,7 +51,7 @@ To see the system requirements and other installations, see the following guides
 
 - [System Requirements](../docs/user-guide/get-started/system-requirements.md): Check the hardware and software requirements for deploying the application.
 - [Get Started on Windows](../docs/user-guide/get-started/get-started-windows.md): Install the desktop app and complete the first-run setup.
-- [Build from Source on Windows](../docs/user-guide/get-started/build-from-source-windows.md): Run from a source checkout, use the setup scripts, or build the installer.
+- [Build the Installer from Source](../docs/user-guide/get-started/build-from-source-windows.md): Build the installer yourself.
 - [Application Flow](../docs/user-guide/application-flow.md): Check the flow of application.
 - [Speaker Diarization Setup](../docs/user-guide/advanced-setup-guide.md#f-speaker-diarization-setup-optional): Optional one-time Hugging Face token setup required to enable speaker diarization.
 
@@ -90,8 +90,8 @@ uses OpenCL to execute models on Intel GPUs. OpenCL lets each queue carry a prio
 hint, so the GPU driver can schedule higher-priority work first when several
 workloads compete for the GPU.
 
-Set `models.gpu_queue_priority` in `config.yaml` (the **Configuration** screen in the
-desktop app, or [config.yaml](./config.yaml) in a source checkout) to control the
+Set `models.gpu_queue_priority` in `config.yaml` (on the desktop app's
+**Configuration** screen) to control the
 OpenVINO GPU queue priority used by Smart Classroom services. It maps to the
 OpenVINO GPU plugin property `GPU_QUEUE_PRIORITY` (`ov::intel_gpu::hint::queue_priority`),
 which sets the OpenCL queue priority hint defined in the

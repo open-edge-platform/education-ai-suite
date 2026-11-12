@@ -58,7 +58,6 @@ The app manages the Python services itself. Use its screens for:
     Setup           prerequisites, Python environment, models
 
 This script never requests Administrator privileges.
-Use ./start-smart-classroom.ps1 for the browser UI with PowerShell-managed services.
 '@ -ForegroundColor Cyan
     exit 0
 }

@@ -1,25 +1,20 @@
 # Advanced Setup Guide
 
-This guide is the configuration reference for Smart Classroom on Windows, with
-troubleshooting and uninstall steps. It applies to the desktop app installed with the
-installer; see [Get Started on Windows](./get-started/get-started-windows.md). To run
-from a source checkout instead, see
-[Build from Source on Windows](./get-started/build-from-source-windows.md).
+This guide is the configuration reference for the Smart Classroom desktop app on
+Windows, with troubleshooting and uninstall steps. To install the app, see
+[Get Started on Windows](./get-started/get-started-windows.md).
 
 ## Where the Configuration Lives
 
-| Installation | Where to edit | File |
-| :--- | :--- | :--- |
-| Desktop app (installer) | **Configuration** screen; **Show file** opens the file itself | `%LOCALAPPDATA%\SmartClassroom\config.yaml` |
-| Source checkout | A text editor | `smart-classroom/Windows/config.yaml` |
-
-The **Configuration** screen covers the settings most people change. For a setting it
-does not list, edit `config.yaml` directly.
+Edit the settings on the **Configuration** screen. They are saved to
+`%LOCALAPPDATA%\SmartClassroom\config.yaml`, which **Show file** opens. The screen
+covers the settings most people change; for a setting it does not list, edit
+`config.yaml` directly.
 
 > [!IMPORTANT]
-> Configuration changes take effect the next time the backend starts. In the desktop
-  app, select **Restart backend** when it is offered after you save, or restart it on
-  the **Services** screen.
+> Configuration changes take effect the next time the backend starts. Select
+  **Restart backend** when it is offered after you save, or restart it on the
+  **Services** screen.
 
 ## Configure the Application
 
@@ -214,24 +209,17 @@ Get-Command soffice
 
 ## Network Requirements
 
-- **Proxy**: If you are behind a proxy, set `HTTP_PROXY` and `HTTPS_PROXY`. In the
-  desktop app, set them on the **Configuration** screen under **Proxy**.
+- **Proxy**: If you are behind a proxy, set `HTTP_PROXY` and `HTTPS_PROXY` on the
+  **Configuration** screen under **Proxy**.
 - **Model downloads**: Stable access to `huggingface.co` is required to download
   pre-trained models.
 - **Windows long paths**: Model downloads with deep paths can fail when long paths are
-  disabled. Enable them on the **Setup** screen (Windows long paths row), or once from
-  an administrator PowerShell:
-
-  ```PowerShell
-  New-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\FileSystem" `
-  -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
-  ```
+  disabled. Select **Enable** on the **Windows long paths** row of the **Setup** screen.
 
 ## Troubleshooting
 
-In the steps below, the `models` folder is `%LOCALAPPDATA%\SmartClassroom\models` for
-the desktop app, and `smart-classroom/Windows/models` for a source checkout. Stop the
-backend before you delete it.
+In the steps below, the `models` folder is `%LOCALAPPDATA%\SmartClassroom\models`.
+Stop the backend before you delete it.
 
 - **Backend fails to start or stops unexpectedly:**
   Open **Services** and read the backend's live logs, or select **Open folder** to see
@@ -244,9 +232,7 @@ backend before you delete it.
   To fix this:
 
   1. Delete the `models` folder.
-  2. In the desktop app, open **Setup** and select **Upgrade** on the
-     **Python environment** row. In a source checkout, rerun the `pip install`
-     commands from [Install Python Dependencies](./get-started/build-from-source-windows.md#c-install-python-dependencies).
+  2. Open **Setup** and select **Upgrade** on the **Python environment** row.
   3. Start the backend again. The models are downloaded and converted again.
 
 - **Application crash during bring-up on Intel® Core™ Ultra Series 3 and Intel® Core™ Series 3 processors without any error indication:** Sometimes OpenVINO™ GenAI models may crash on newer hardware. Try running the model on CPU by setting `device: CPU` under `models.text_gen` in `config.yaml`.
@@ -265,9 +251,6 @@ backend before you delete it.
   Summarization of longer transcripts may require additional GPU memory. If this error occurs, increase the GPU memory allocation in the **Intel® Graphics Software** application under the **Graphics** tab before rerunning the workflow.
 
   ![GPU Troubleshooting](./_assets/troubleshooting-gpu.png)
-
-For problems specific to the setup scripts or the browser UI, see
-[Build from Source on Windows](./get-started/build-from-source-windows.md#source-checkout---troubleshooting).
 
 ### Known Issues
 
@@ -288,9 +271,6 @@ To uninstall the desktop app:
    `%LOCALAPPDATA%\SmartClassroom`.
 
 <!-- SCREENSHOT: Settings > Apps > Installed apps with Smart Classroom and the Uninstall option -->
-
-To remove a source installation, see
-[Remove a Source Installation](./get-started/build-from-source-windows.md#remove-a-source-installation).
 
 ## Learn More
 

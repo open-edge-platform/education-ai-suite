@@ -2302,10 +2302,10 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Smart Classroom setup has finished successfully." -ForegroundColor Green
 Write-Host ""
-Write-Host "To start the services, run:" -ForegroundColor Yellow
-Write-Host "  .\start-smart-classroom.ps1" -ForegroundColor Cyan
+Write-Host "To start the backend (it also starts Content Search and Grading when enabled), run:" -ForegroundColor Yellow
+Write-Host "  cd `"$ScriptDir`"" -ForegroundColor Cyan
+Write-Host "  & `"$(Join-Path $venvBackend 'Scripts\python.exe')`" main.py" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Or with options:" -ForegroundColor Gray
-Write-Host "  .\start-smart-classroom.ps1 -SkipProxy       # Skip proxy configuration" -ForegroundColor Gray
-Write-Host "  .\start-smart-classroom.ps1 -Restart         # Force restart all services" -ForegroundColor Gray
+Write-Host "To run the desktop app from this checkout instead:" -ForegroundColor Gray
+Write-Host "  & `"$(Join-Path $ScriptDir 'start-desktop-app.ps1')`"" -ForegroundColor Gray
 Write-Host ""

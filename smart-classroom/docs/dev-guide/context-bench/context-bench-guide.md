@@ -17,10 +17,9 @@ For implementation details, see [Context Bench Design](context-bench-design.md).
 
 ## Quick start
 
-Context Bench runs from a source checkout; see
-[Build from Source on Windows](../../user-guide/get-started/build-from-source-windows.md).
-It does not use the desktop app installation, whose Python environment and models
-live under `%LOCALAPPDATA%\SmartClassroom`.
+Context Bench runs from a source checkout. It does not use the desktop app
+installation, whose Python environment and models live under
+`%LOCALAPPDATA%\SmartClassroom`.
 
 Run from the app root, `smart-classroom/Windows/`. The benchmark uses the backend
 venv one level above it (`smart-classroom/smartclassroom`) that
@@ -63,8 +62,8 @@ python -m components.context_bench.benchmark --config components/context_bench/c
 
 ## Configurations and artifacts
 
-The benchmark only reads artifacts prepared by the serving workflow
-(`start-smart-classroom.ps1`) or an explicit export; it never downloads, exports or repairs
+The benchmark only reads artifacts prepared by the serving workflow (starting the
+backend once, for example with `python main.py`) or an explicit export; it never downloads, exports or repairs
 files. Missing files are reported per case as `missing_ir` with a hint.
 
 | Config | Model / precision | Profiles | Default run |

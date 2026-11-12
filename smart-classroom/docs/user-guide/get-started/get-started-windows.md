@@ -5,8 +5,8 @@ app checks and installs the prerequisites, edits the configuration, and starts a
 stops the backend services, all from one window.
 
 > [!NOTE]
-> To run Smart Classroom from a source checkout, script a deployment, or build the
-> installer yourself, see [Build from Source on Windows](./build-from-source-windows.md).
+> To build the installer yourself, see
+> [Build the Installer from Source](./build-from-source-windows.md).
 
 ## Step 1: Download the Installer
 
@@ -120,10 +120,6 @@ menu.
 | **Home** | Audio transcription, summary, mind map, video analytics, and class reports |
 | **Content Search** | Upload materials, search them, and ask questions about them |
 | **Grading** | Grade exam papers against a rubric |
-| **Get started** | Overview of what is ready, what is missing, and the settings most people change |
-| **Setup** | Prerequisite checks plus the Python environment and model preparation |
-| **Configuration** | Edit `config.yaml` and `.proxy-config` |
-| **Services** | Start, stop, and restart the backend, and watch live logs for it and every child service |
 
 For a walkthrough of each feature, see [Application Flow](../application-flow.md),
 [Content Search Flow](../content-search-flow.md), and [Grading Flow](../grading-flow.md).
@@ -167,23 +163,7 @@ The installer accepts the standard silent-install options:
 .\SmartClassroom-<version>-setup.exe /S /currentuser /D=C:\Apps\SmartClassroom
 ```
 
-The first-run work on the **Setup** screen is interactive. For unattended preparation
-of a machine, the repository also provides PowerShell scripts that run from a source
-checkout; see [Build from Source on Windows](./build-from-source-windows.md).
-
-## Service Ports Reference
-
-The backend services listen on the local machine only:
-
-| Service | Port | Health Check |
-| :--- | :--- | :--- |
-| Backend | 8000 | <http://localhost:8000/health> |
-| Content Search | 9011 | <http://localhost:9011/api/v1/system/health> (200 only when ChromaDB, file ingest, and video preprocess are ready too; 503 while any is starting) |
-| Layout Detection | 9902 | <http://localhost:9902/health> |
-| Grading | 9012 | <http://localhost:9012/api/v1/health> |
-
-> [!NOTE]
-> Layout Detection and Grading services only start when `grading.enabled: true` in `config.yaml`.
+The first-run work on the **Setup** screen is interactive and cannot be scripted.
 
 ## Troubleshooting and Uninstall
 
@@ -195,6 +175,6 @@ See [Troubleshooting](../advanced-setup-guide.md#troubleshooting),
 
 - [System Requirements](./system-requirements.md): Hardware, software, supported models, and weight formats.
 - [Advanced Setup Guide](../advanced-setup-guide.md): Configuration reference, troubleshooting, and uninstall.
-- [Build from Source on Windows](./build-from-source-windows.md): Source checkout, setup scripts, and building the installer.
+- [Build the Installer from Source](./build-from-source-windows.md): Build `SmartClassroom-<version>-setup.exe` yourself.
 - [Application Flow](../application-flow.md): End-to-end application flow.
 - [Content Search Flow](../content-search-flow.md): The flow of the content search functionality.
