@@ -214,13 +214,12 @@ const ResourceUtilizationAccordion: React.FC<ResourceUtilizationAccordionProps> 
       y: {
         beginAtZero: true,
         min: 0,
-        max: 500, 
+        // No hard max: SoC package power is typically 5-60 W
         title: {
           display: true,
           text: 'Watts'
         },
         ticks: {
-          stepSize: 100,
           callback: function(value: any) {
             return value ;
           }
