@@ -8,10 +8,7 @@
 	shallow = true
 [submodule "smart-classroom/Linux/edge-ai-libraries"]
 	path = smart-classroom/Linux/edge-ai-libraries
-	# TEMPORARY: aa_n_md fork (ModelScope + shared model-downloader provisioning
-	# for audio-analyzer). Revert to open-edge-platform once merged upstream.
-	url = https://github.com/suryam789/edge-ai-libraries.git
-	branch = aa_n_md
+	url = https://github.com/open-edge-platform/edge-ai-libraries.git
 	shallow = true
 [submodule "smart-classroom/Linux/performance-tools"]
 	path = smart-classroom/Linux/performance-tools
