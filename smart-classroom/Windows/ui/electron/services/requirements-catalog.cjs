@@ -11,7 +11,7 @@ const MIN_MEMORY_GB = 32;
 const REQUIRED_OS = 'Windows 11';
 const MIN_WINDOWS_BUILD = 22000;
 const PYTHON_TARGET = [3, 12];
-const REQUIRED_DLSTREAMER = '2026.1.0';
+const REQUIRED_DLSTREAMER = '2026.2.0';
 
 module.exports = {
   MIN_MEMORY_GB,

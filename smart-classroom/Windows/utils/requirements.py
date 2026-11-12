@@ -26,7 +26,7 @@ REQUIRED_PYTHON_MINOR = 12
 #: For a from-source checkout. The packaged app bundles its own Node.
 REQUIRED_NODE_MAJOR = 18
 
-MIN_DLSTREAMER_VERSION = (2026, 1, 0)
+MIN_DLSTREAMER_VERSION = (2026, 2, 0)
 
 
 def dlstreamer_version_str() -> str:
