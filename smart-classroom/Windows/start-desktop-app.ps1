@@ -58,6 +58,8 @@ The app manages the Python services itself. Use its screens for:
     Setup           prerequisites, Python environment, models
 
 This script never requests Administrator privileges.
+./start-smart-classroom.ps1 launches this app too. Its -WebUI mode (the browser
+UI with PowerShell-managed services) is deprecated and will be removed after 2027.0.0.
 '@ -ForegroundColor Cyan
     exit 0
 }

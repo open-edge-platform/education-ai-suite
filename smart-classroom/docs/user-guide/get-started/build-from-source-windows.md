@@ -7,6 +7,13 @@ build `SmartClassroom-<version>-setup.exe` themselves, for example from a branch
 with local changes. The installer you build is installed and used the same way as a
 released one.
 
+> [!WARNING]
+> Running Smart Classroom from a source checkout with `setup-smart-classroom.ps1` and
+  the browser UI (`start-smart-classroom.ps1 -WebUI`) is deprecated and will be removed
+  after release 2027.0.0. Install the desktop app instead. The installed app keeps its
+  data in `%LOCALAPPDATA%\SmartClassroom`, so models and settings from a source checkout
+  are not reused.
+
 ## Prerequisites
 
 - **OS**: Windows 11

@@ -266,11 +266,18 @@ To uninstall the desktop app:
 1. Stop the backend on the **Services** screen and close the app.
 2. Open **Settings** > **Apps** > **Installed apps**, find **Smart Classroom**, and
    select **Uninstall**.
-3. The uninstaller removes the program but keeps your data. To remove settings, the
-   Python environments, models, sessions, and content search data as well, delete
-   `%LOCALAPPDATA%\SmartClassroom`.
+3. On the **Uninstall Options** page, choose what happens to your data in
+   `%LOCALAPPDATA%\SmartClassroom` (settings, Python environments, models, sessions,
+   and content search data):
+   - Leave **Delete this data as well** unchecked to keep it for a later installation.
+   - Check it to delete the folder too. If some files are in use, the uninstaller
+     tells you to delete the folder after restarting Windows.
+
+The option only covers the data of the Windows user running the uninstaller. Other
+users of an installation for everyone keep their data.
 
 <!-- SCREENSHOT: Settings > Apps > Installed apps with Smart Classroom and the Uninstall option -->
+<!-- SCREENSHOT: Uninstaller, Uninstall Options page -->
 
 ## Learn More
 

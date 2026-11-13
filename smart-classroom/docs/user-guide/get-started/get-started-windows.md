@@ -29,7 +29,10 @@ Run `SmartClassroom-<version>-setup.exe` and follow the installer:
 
 1. **Choose Installation Options**: install for **Anyone who uses this computer**
    (requires administrator approval) or **Only for me**.
-2. **Choose Install Location**: keep the default folder or pick another one.
+2. **Choose Install Location**: shows where the app will be installed. The folder
+   follows the option chosen on the previous page and cannot be changed:
+   `%LOCALAPPDATA%\Programs\Smart Classroom` for **Only for me**, and
+   `C:\Program Files\Smart Classroom` for **Anyone who uses this computer**.
 3. **Finish**: the installer adds a **Smart Classroom** shortcut to the desktop and the
    Start menu, and can launch the app right away.
 
@@ -37,7 +40,8 @@ Run `SmartClassroom-<version>-setup.exe` and follow the installer:
 <!-- SCREENSHOT: Installer, Choose Install Location page -->
 
 The installed program folder is not modified while the app runs. Settings, models,
-the Python environment, sessions, and logs are stored per user; see
+the Python environment, sessions, and logs are stored separately for each Windows
+user, also when the app is installed for everyone; see
 [Where Your Data Is Stored](#where-your-data-is-stored).
 
 ## Step 3: Complete the Setup Screen
@@ -127,15 +131,26 @@ For a walkthrough of each feature, see [Application Flow](../application-flow.md
 ## Update to a New Version
 
 1. Stop the backend on the **Services** screen and close the app.
-2. Download and run the newer `SmartClassroom-<version>-setup.exe`.
+2. Download and run the newer `SmartClassroom-<version>-setup.exe`. It installs over
+   the existing version in the same folder; you do not need to uninstall first.
 3. Launch the app and open **Setup**. If the **Python environment** row shows
    **Outdated**, select **Upgrade** to match the new release's requirements.
 
-Your settings, models, sessions, and content search data are kept across updates.
+Models, the Python environments, sessions, and content search data are kept across
+updates. Your settings are kept too, unless the new version ships different default
+settings:
+
+- On the first start after such an update, `config.yaml` and the grading
+  configuration are reset to the new defaults, and a message tells you so.
+- The previous files are saved in `logs\config-backups` as `pre-update.*.bak`.
+  Re-enter the settings you had changed, including the Hugging Face token, on the
+  **Configuration** screen.
+- Proxy settings (`.proxy-config`) are not reset.
 
 ## Where Your Data Is Stored
 
-Everything the app writes is under `%LOCALAPPDATA%\SmartClassroom\`:
+Everything the app writes is under `%LOCALAPPDATA%\SmartClassroom\` of the Windows user
+running it:
 
 | Path | Contents |
 | :--- | :--- |
@@ -145,7 +160,9 @@ Everything the app writes is under `%LOCALAPPDATA%\SmartClassroom\`:
 | `models\` | Downloaded and converted AI models |
 | `storage\` | Session recordings, transcripts, summaries, and reports |
 | `content_search\` | Uploaded materials and the content search vector database |
-| `logs\` | Service logs (**Open folder** on the **Services** screen opens them) and configuration backups |
+| `grading\` | Grading configuration, uploaded rubrics, and grading results |
+| `logs\` | Service logs (**Open folder** on the **Services** screen opens them) and configuration backups, including the `pre-update.*.bak` files saved by updates |
+| `state\` | Records which shipped default settings your configuration came from |
 | `huggingface\`, `paddlex\`, `pip-cache\` | Download caches |
 
 ## Automated Deployment
@@ -158,9 +175,6 @@ The installer accepts the standard silent-install options:
 
 # Install silently for all users (run from an administrator PowerShell)
 .\SmartClassroom-<version>-setup.exe /S /allusers
-
-# Install to a specific folder; /D= must be the last option
-.\SmartClassroom-<version>-setup.exe /S /currentuser /D=C:\Apps\SmartClassroom
 ```
 
 The first-run work on the **Setup** screen is interactive and cannot be scripted.

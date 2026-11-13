@@ -1,31 +1,24 @@
 
-This folder contains the React UI for the Smart Classroom Application.
+This folder contains the React UI for the Smart Classroom Application. It runs as a
+Windows desktop app (Electron, see [`electron/`](electron/)), which is the default way
+to start Smart Classroom.
 
-## Quick start
-1. Install **Node 20.19+**
-2. `npm install`
-3. `npm run dev` 
-4. `npm run build` → static files in `dist/`
+## Desktop app
 
-## Electron desktop app
-
-The desktop app is how Smart Classroom is distributed on Windows: end users install
-it with `SmartClassroom-<version>-setup.exe` from the
+End users install the desktop app with `SmartClassroom-<version>-setup.exe` from the
 [Releases page](https://github.com/open-edge-platform/education-ai-suite/releases).
-It is built from the code in [`electron/`](electron/) as a layer on top of the web
-app: the web-app workflow above is unchanged, and the Electron build consumes the
-same `dist/` output from `npm run build`.
-
-Unlike the web app, the desktop app **supervises the Python services itself** —
-it starts and stops them, tails their logs, edits the configuration files and
-runs first-time setup. To run it from a source checkout, launch it from the repo
-root of the component:
+From a source checkout, launch it from the repo root of the component:
 
 ```powershell
 ..\start-desktop-app.ps1
 ```
 
-That script bootstraps Node (installing it via `winget` when missing), rebuilds
+`..\start-smart-classroom.ps1` without `-WebUI` does the same.
+
+The desktop app **supervises the Python services itself**: it starts and stops
+them, tails their logs, edits the configuration files and runs first-time setup.
+
+`start-desktop-app.ps1` bootstraps Node (installing it via `winget` when missing), rebuilds
 `dist/`, and hands over. It never requests Administrator privileges. Unlike the
 installed app, it starts the backend automatically (`SC_AUTO_START_BACKEND=1`)
 unless you pass `-NoAutoStart`.
@@ -51,6 +44,21 @@ survives updates.
 The backend loads the user's config copy from there via `SC_CONFIG_PATH`; in dev
 these paths stay in the source tree.
 
+When an update ships a different `config.yaml` or `components/grading/config.yaml`,
+the first start replaces the user's copy with the new default instead of merging
+it ([`electron/services/config-reset.cjs`](electron/services/config-reset.cjs)),
+because old values can conflict with new keys, combinations or meanings. The
+previous copy is saved as `logs\config-backups\pre-update.<file>.<time>.bak` and
+the user is told once the window opens. `state\*.sha256` records which shipped
+file each copy came from, so an update that leaves a shipped file unchanged keeps
+the user's settings.
+
+The uninstaller has an Uninstall Options page with an unchecked box to delete
+`%LOCALAPPDATA%\SmartClassroom` as well ([`build/installer.nsh`](build/installer.nsh));
+updates and silent uninstalls keep it.
+
+Run the main-process unit tests with `npm run test:electron`.
+
 | Command | What it does |
 |---------|--------------|
 | `npm run electron:dev` | Runs the Vite dev server + Electron pointed at it (hot reload). |
@@ -75,6 +83,17 @@ Secrets never cross the boundary: `models.asr.hf_token` is reported to the UI as
 "set" or "not set", and is only written when the user types a replacement.
 
 `contextIsolation`, `sandbox` and `webSecurity` are on; `nodeIntegration` is off.
+
+## Browser UI (deprecated)
+
+> **Deprecated:** the browser UI will be removed after release 2027.0.0. Code that
+> exists only for it is tagged `DEPRECATED(webui)`; list it with
+> `git grep -n "DEPRECATED(webui)"`.
+
+1. Install **Node 20.19+**
+2. `npm install`
+3. `npm run dev`, then open <http://localhost:5173>
+4. `npm run build` → static files in `dist/` (also used by the desktop app)
 
 ## Core dependencies
 
