@@ -150,7 +150,7 @@ In the desktop app, open **Configuration**, go to **Speech recognition**, turn o
 **Speaker diarization**, and enter the token in **Hugging Face token**. The app stores
 the token without showing it again.
 
-<!-- SCREENSHOT: Configuration screen, Speech recognition with Speaker diarization and Hugging Face token -->
+![Configuration screen: Speaker diarization and Hugging Face token](./_assets/windows-app-configuration-diarization.png)<!--hide_directive{w=700px}hide_directive-->
 
 To edit the file directly instead, set `diarization: true` under `models.asr` in
 `config.yaml`, then add your Hugging Face token:
@@ -276,8 +276,9 @@ To uninstall the desktop app:
 The option only covers the data of the Windows user running the uninstaller. Other
 users of an installation for everyone keep their data.
 
-<!-- SCREENSHOT: Settings > Apps > Installed apps with Smart Classroom and the Uninstall option -->
-<!-- SCREENSHOT: Uninstaller, Uninstall Options page -->
+![Installed apps: Uninstall Smart Classroom](./_assets/windows-uninstall-installed-apps.png)<!--hide_directive{w=700px}hide_directive-->
+
+![Uninstaller: Uninstall Options](./_assets/windows-uninstall-options.png)<!--hide_directive{w=400px}hide_directive-->
 
 ## Learn More
 

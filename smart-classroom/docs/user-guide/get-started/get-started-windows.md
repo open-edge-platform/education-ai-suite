@@ -16,8 +16,6 @@ stops the backend services, all from one window.
 3. Under **Assets** of the release you want, download
    `SmartClassroom-<version>-setup.exe`.
 
-<!-- SCREENSHOT: Release assets list with SmartClassroom-<version>-setup.exe highlighted -->
-
 > [!NOTE]
 > The app checks the Intel GPU and NPU drivers but does not install them. Install or
 > update the [NPU driver](./system-requirements.md#software-and-hardware-requirements)
@@ -36,8 +34,9 @@ Run `SmartClassroom-<version>-setup.exe` and follow the installer:
 3. **Finish**: the installer adds a **Smart Classroom** shortcut to the desktop and the
    Start menu, and can launch the app right away.
 
-<!-- SCREENSHOT: Installer, Choose Installation Options page -->
-<!-- SCREENSHOT: Installer, Choose Install Location page -->
+![Installer: Choose Installation Options](../_assets/windows-installer-install-mode.png)<!--hide_directive{w=400px}hide_directive-->
+
+![Installer: Choose Install Location](../_assets/windows-installer-install-location.png)<!--hide_directive{w=400px}hide_directive-->
 
 The installed program folder is not modified while the app runs. Settings, models,
 the Python environment, sessions, and logs are stored separately for each Windows
@@ -50,7 +49,7 @@ Launch **Smart Classroom** from the desktop or the Start menu. While anything st
 needs doing, the app opens on the **Get started** screen, which lists what is missing.
 The menu button at the top left switches between screens.
 
-<!-- SCREENSHOT: Get started screen on first launch -->
+![Get started screen on first launch](../_assets/windows-app-get-started.png)<!--hide_directive{w=700px}hide_directive-->
 
 Follow the links on **Get started**, or open **Setup** directly, and work down the list:
 
@@ -70,7 +69,7 @@ Each row shows what was found and what it blocks. Rows the app can fix have a bu
 the **Output** pane below, and **Copy diagnostics** puts the whole list on the
 clipboard for a bug report.
 
-<!-- SCREENSHOT: Setup screen with the Fix n items button and the Output pane -->
+![Setup screen](../_assets/windows-app-setup.png)<!--hide_directive{w=700px}hide_directive-->
 
 > [!IMPORTANT]
 > If you are behind a proxy, set `HTTP_PROXY` and `HTTPS_PROXY` on the **Get started**
@@ -90,7 +89,7 @@ the full list from `config.yaml` and `.proxy-config`, grouped and searchable.
 **Show file** opens the file the screen writes to. For what each setting does, see
 [Configure the Application](../advanced-setup-guide.md#configure-the-application).
 
-<!-- SCREENSHOT: Configuration screen -->
+![Configuration screen](../_assets/windows-app-configuration.png)<!--hide_directive{w=700px}hide_directive-->
 
 > [!NOTE]
 > Speaker diarization (identifying who is speaking) is optional and requires a
@@ -105,7 +104,7 @@ The backend does not start on its own. Start it in either of these ways:
 - Select **Start backend** on the **Get started** screen.
 - Open **Services** and select **Start** on the backend row.
 
-<!-- SCREENSHOT: Services screen with the backend running and live logs -->
+![Services screen with live logs](../_assets/windows-app-services.png)<!--hide_directive{w=700px}hide_directive-->
 
 The **Services** screen shows the backend and every service it starts, with their
 status and live logs. Use **Stop** and **Restart** there as needed. The first start
