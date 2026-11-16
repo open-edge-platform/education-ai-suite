@@ -23,13 +23,13 @@ The audio pipeline handles speech-to-text conversion and content summarization:
   Cleans and formats audio data using FFmpeg, chunking input into segments for optimal processing.
 
 - **ASR Component (Automatic Speech Recognition)**
-  Converts audio into text through the Audio Analyzer microservice, which provides transcription and optional speaker diarization. The provider is set by `models.asr.provider` in `config.yaml`, and models are downloaded on first start, then cached:
+  Converts audio into text through the Audio Analyzer microservice, which provides transcription and optional speaker diarization. The provider is set by `models.asr.provider` in `config.yaml`. On Linux, Audio Analyzer requests its models from the shared `model-downloader` container on first start and reuses them from the `model-cache` volume afterwards:
 
   | Provider | Models | Downloaded from |
   |---|---|---|
-  | OpenVINO™ (default) | Whisper (e.g. `whisper-base`) | Hugging Face (`openai/whisper-*`), exported to OpenVINO IR |
-  | FunASR | Paraformer (`paraformer-zh`), for Mandarin | ModelScope (switch to Hugging Face with `model_hub`) |
-  | OpenAI | Whisper (e.g. `whisper-base`) | OpenAI's public `openai-whisper` checkpoints |
+  | OpenVINO™ (default) | Whisper (e.g. `whisper-base`) | Hugging Face (`openai/whisper-*`) via `model-downloader`, exported to OpenVINO IR |
+  | FunASR | Paraformer (`paraformer-zh`), for Mandarin | ModelScope via `model-downloader` |
+  | OpenAI | Whisper (e.g. `whisper-base`) | OpenAI's public `openai-whisper` checkpoints (fetched directly) |
 
 - **Speaker Diarization**
   Identifies and separates individual speakers using Pyannote Audio models. This can be enabled or disabled by modifying `config.yaml`.
@@ -57,17 +57,17 @@ Each pipeline is built as a DL Streamer processing graph with the following stag
 1. **Video Decode and Preprocessing** — Input from RTSP stream or video file is decoded and preprocessed with hardware acceleration (D3D11)
 2. **Person Detection and Pose Estimation** — YOLO models (YOLOv8m-pose for front, YOLOv8s-pose for back) detect persons and estimate 17-keypoint skeletons per frame
 3. **Posture Detection** — A custom DL Streamer element analyzes keypoint geometry to classify posture (sit/stand) and detect hand-raises
-4. **Multi-branch Classification** — Detected persons are routed through parallel classification branches:
-   - **ResNet-18** for activity/action classification
-   - **MobileNet-V2** for lightweight classification (front pipeline)
-   - **Person-ReID-retail-0288** for identity tracking across frames (front pipeline)
+4. **Re-identification and Classification**:
+   - **Person-ReID-retail-0288** re-identifies standing students across frames (front pipeline)
+   - **ResNet-18** classifies whole frames of the content pipeline
+   - On Linux, the front and back pipelines also run per-person **ResNet-18** classification, and the front pipeline **MobileNet-V2** classification; the Windows application does not run these branches
 5. **Output** — Annotated video is streamed via RTSP through a MediaMTX media server; per-frame metadata is written as JSON for statistics aggregation
 
 ### Classroom Statistics
 
 The VA pipeline aggregates per-frame metadata into classroom engagement statistics:
 
-- **Student count** — Average number of students detected (sampled periodically)
+- **Student count** — Number of students detected by the front pipeline. On Windows, each one-minute window takes the median of its per-frame counts, which smooths out frames where a student is briefly missed or detected twice, and the class value is the median over all windows, so the minutes when students are arriving or leaving do not skew it. The window length and percentile are set by `count_bucket_sec` and `count_percentile` under `va_pipeline.pose_statistics` in `config.yaml`. On Linux, the count is the average over the most recent 150 frames (`VA_POSE_STUDENT_COUNT_WINDOW_FRAMES`).
 - **Stand-up events** — Per-student stand-up detection with noise filtering
 - **Hand-raise events** — Per-student hand-raise tracking with configurable confirmation thresholds
 - **Per-student tracking** — Re-identified students are tracked across frames with unique IDs
