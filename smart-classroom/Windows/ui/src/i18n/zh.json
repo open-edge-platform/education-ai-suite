@@ -200,6 +200,18 @@
         "summary": "推理框架与模型不匹配",
         "message": "{{provider}} 推理框架只能运行 {{family}} 模型，但当前 ASR 模型为“{{model}}”。请选择 {{family}} 模型或更换推理框架。"
       },
+      "vlmWeightFormat": {
+        "summary": "未测试的权重格式",
+        "message": "{{model}} 仅在权重格式 {{available}} 下测试过；{{format}} 没有预转换的 IR。请选择 {{available}}。"
+      },
+      "speculativeNone": {
+        "summary": "没有已测试的投机解码",
+        "message": "{{model}} 没有已测试的投机解码方法。请将投机解码模式设为 off。"
+      },
+      "speculativeUntested": {
+        "summary": "未测试的投机解码",
+        "message": "投机解码方法 {{method}} 未针对 {{model}} {{format}}（app.language {{language}}）测试。已测试：{{supported}}。请选择已测试的方法，或将模式设为 off。"
+      },
       "diarizationToken": {
         "summary": "需要 Hugging Face 令牌",
         "message": "说话人分离模型尚未下载，下载需要 Hugging Face 令牌。请填写令牌或关闭说话人分离。"
@@ -404,7 +416,7 @@
         },
         "vlm_name": {
           "label": "VLM 模型",
-          "help": "列表中的选项以预转换的 OpenVINO IR 形式下载；其他模型会在首次运行时转换。"
+          "help": "这些模型以预转换的 OpenVINO IR 形式下载。"
         },
         "device": {
           "label": "文本生成（VLM）设备"
@@ -422,7 +434,7 @@
           },
           "method": {
             "label": "投机解码方法",
-            "help": "auto 选用针对该 VLM 模型调优的方法。模式为 off 时忽略。"
+            "help": "已测试：Qwen3-VL-8B-Instruct int4 eagle3（仅英文）；Qwen3.5-9B int4/int8 dflash 或 mtp；Qwen3.6-35B-A3B int4 dflash；Qwen3.8-27B 无。auto 选用已测试的方法。模式为 off 时忽略。"
           }
         }
       },
@@ -832,10 +844,8 @@
     "lastUpdated": "最后更新",
     "resourceUtilization": "资源利用率",
     "configuration": "配置",
-    "models": "已验证的模型",
     "subtitle_configuration": "平台和软件配置详情",
     "subtitle_resource": "CPU、GPU、NPU、内存与功耗随时间变化",
-    "subtitle_models": "此管道配置的模型",
     "platformConfiguration": "平台配置",
     "processor": "处理器",
     "npu": "NPU",
@@ -858,13 +868,26 @@
     "tps":"每秒 Token 数",
     "totalTokensProcessed": "处理的总 Token 数",
     "summarizationTime":"摘要生成耗时",
+    "change": "更改",
+    "changeInSettings": "在 设置 → 配置 中更改",
+    "changeModelAria": "更改 {{name}} 模型",
     "cpuUtilization": "CPU 利用率",
     "gpuUtilization": "GPU 利用率",
     "npuUtilization": "NPU 利用率",
     "memoryUtilization": "内存利用率",
     "powerUtilization": "功耗利用率",
-    "transcriptsModel": "转录模型",
-    "summaryModel": "摘要模型",
+    "perf": {
+      "memory": "内存",
+      "power": "功耗",
+      "average": "平均",
+      "peak": "峰值",
+      "used": "已用",
+      "sharedMemory": "共享内存",
+      "timeRange": "时间范围",
+      "range1m": "1 分钟",
+      "range5m": "5 分钟",
+      "rangeSession": "整个会话"
+    },
     "classStatistics": "课堂参与度",
     "roomView": "教室视图",
     "frontCamera": "前置摄像头",

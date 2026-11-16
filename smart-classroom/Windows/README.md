@@ -44,10 +44,14 @@ The main features are as follows:
 
 ## Get Started
 
+Smart Classroom for Windows is distributed as a desktop app installer,
+`SmartClassroom-<version>-setup.exe`, on the
+[Releases page](https://github.com/open-edge-platform/education-ai-suite/releases).
 To see the system requirements and other installations, see the following guides:
 
 - [System Requirements](../docs/user-guide/get-started/system-requirements.md): Check the hardware and software requirements for deploying the application.
-- [Get Started](../docs/user-guide/get-started.md): Follow step-by-step instructions to set up the application.
+- [Get Started on Windows](../docs/user-guide/get-started/get-started-windows.md): Install the desktop app and complete the first-run setup.
+- [Build the Installer from Source](../docs/user-guide/get-started/build-from-source-windows.md): Build the installer yourself.
 - [Application Flow](../docs/user-guide/application-flow.md): Check the flow of application.
 - [Speaker Diarization Setup](../docs/user-guide/advanced-setup-guide.md#f-speaker-diarization-setup-optional): Optional one-time Hugging Face token setup required to enable speaker diarization.
 
@@ -57,7 +61,7 @@ The architecture follows a modular, dual-pipeline design for comprehensive class
 
 The **audio pipeline** begins with audio preprocessing, where FFmpeg chunks input audio into smaller segments for optimal handling. These segments are processed by an **ASR transcriber** (e.g., Whisper or Paraformer) to convert speech into text. An **LLM summariser** (Qwen), optimised through OpenVINO™, generates concise summaries delivered via the output handler.
 
-The **video analytics pipeline** processes up to three concurrent camera streams (front, back, content) through DL Streamer-based processing graphs. Each stream passes through **YOLO-based person detection and pose estimation**, followed by **posture classification** (sit/stand, hand-raise) and **multi-model classification** (ResNet-18, MobileNet-V2, Person-ReID). All models run on OpenVINO™ with NPU by default. Processed video is streamed via a **MediaMTX RTSP server**, and per-frame metadata is aggregated into classroom engagement statistics.
+The **video analytics pipeline** processes up to three concurrent camera streams (front, back, content) through DL Streamer-based processing graphs. The front and back streams pass through **YOLO-based person detection and pose estimation**, followed by **posture classification** (sit/stand, hand-raise); the front stream also runs **Person-ReID** on standing students. The content stream runs whole-frame **ResNet-18** classification. All models run on OpenVINO™ with NPU by default. Processed video is streamed via a **MediaMTX RTSP server**, and per-frame metadata is aggregated into classroom engagement statistics.
 
 The **content search pipeline** handles multimodal content ingestion and retrieval. Uploaded files (videos, documents, images) are processed through format-specific extractors: videos are split into time-based chunks and summarized by a **VLM** (Qwen3-VL); documents undergo text extraction with optional OCR (PaddleOCR) and semantic chunking; images are embedded directly via **CLIP**. All content is indexed into **ChromaDB** with dual embeddings (CLIP for visual, mE5 for text). At query time, a **cross-encoder reranker** (BGE-reranker) scores document results, and **Reciprocal Rank Fusion (RRF)** merges results across modalities for balanced retrieval. A RAG-based Q&A layer generates grounded answers from the retrieved context.
 
@@ -86,7 +90,8 @@ uses OpenCL to execute models on Intel GPUs. OpenCL lets each queue carry a prio
 hint, so the GPU driver can schedule higher-priority work first when several
 workloads compete for the GPU.
 
-Set `models.gpu_queue_priority` in [config.yaml](./config.yaml) to control the
+Set `models.gpu_queue_priority` in `config.yaml` (on the desktop app's
+**Configuration** screen) to control the
 OpenVINO GPU queue priority used by Smart Classroom services. It maps to the
 OpenVINO GPU plugin property `GPU_QUEUE_PRIORITY` (`ov::intel_gpu::hint::queue_priority`),
 which sets the OpenCL queue priority hint defined in the

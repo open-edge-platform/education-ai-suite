@@ -201,6 +201,7 @@ const App: React.FC = () => {
       );
     }
 
+    // DEPRECATED(webui): browser-only dead end, remove after 2027.0.0.
     return (
       <div className="app-error">
         <div className="error-content">
@@ -262,7 +263,8 @@ const App: React.FC = () => {
       )}
       <div style={{ display: activeScreen === 'grading' || isToolScreen ? 'none' : 'contents' }}>
         <div className="main-content">
-          <Body activeScreen={isToolScreen ? 'main' : activeScreen} featureGuard={guard} hasMainFeatures={hasMainFeatures} />
+          <Body activeScreen={isToolScreen ? 'main' : activeScreen} featureGuard={guard} hasMainFeatures={hasMainFeatures}
+            onOpenConfig={(path) => openScreen('config', path)} />
         </div>
       </div>
       {activeScreen === 'grading' && (
