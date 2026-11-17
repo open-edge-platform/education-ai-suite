@@ -47,7 +47,8 @@ models:
   summarizer:
     mode: dialog   # dialog | teacher | hybrid
 
-  model_hub: huggingface # huggingface or modelscope
+  model_hub: huggingface # huggingface or modelscope, fallback to the configured hub for models only available on single platform
+  hf_endpoint: "" # Hugging Face mirror, e.g. https://hf-mirror.com; HF_ENDPOINT env wins
 
   gpu_queue_priority: LOW # LOW, MEDIUM, or HIGH for OpenVINO GPU services
 
@@ -78,7 +79,7 @@ models:
 
   text_gen:
     provider: vlm
-    vlm_name: Qwen/Qwen3-VL-8B-Instruct
+    vlm_name: Qwen/Qwen3.5-9B
     device: GPU # GPU or CPU
     weight_format: int4 # int4,int 8-- shared with content_search.vlm.weight_format
     max_new_tokens: 5120
