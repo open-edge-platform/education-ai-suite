@@ -249,16 +249,8 @@ services:
 
   va-model-provision:  # one-shot: export VA OpenVINO IR models into the model volume
     profiles: ["va"]
-    build:
-      context: ../video-analytics
-      dockerfile: docker/Dockerfile.va-provision
-      args:
-        HTTP_PROXY: "${HTTP_PROXY:-}"
-        HTTPS_PROXY: "${HTTPS_PROXY:-}"
-        NO_PROXY: "${NO_PROXY:-}"
-      secrets:
-        - corporate_ca
-    image: sc-va-model-provision:local
+    # Built locally from video-analytics/docker/Dockerfile.va-provision under REGISTRY: false (docker-compose.local-build.yml).
+    image: ${VA_MODEL_PROVISION_IMAGE:-intel/smart-classroom-va-model-provision:${INTEL_IMAGE_TAG:-latest}}
     container_name: sc-va-model-provision
     environment:
       - HTTP_PROXY=${HTTP_PROXY:-}
@@ -292,14 +284,8 @@ services:
 
   video-analytics:     # DL Streamer VA pipeline engine (control API on :8020)
     profiles: ["va"]
-    build:
-      context: ../video-analytics
-      dockerfile: docker/Dockerfile.va-pipeline
-      args:
-        HTTP_PROXY: "${HTTP_PROXY:-}"
-        HTTPS_PROXY: "${HTTPS_PROXY:-}"
-        NO_PROXY: "${NO_PROXY:-}"
-    image: sc-video-analytics:local
+    # Built locally from video-analytics/docker/Dockerfile.va-pipeline under REGISTRY: false (docker-compose.local-build.yml).
+    image: ${VIDEO_ANALYTICS_IMAGE:-intel/smart-classroom-video-analytics:${INTEL_IMAGE_TAG:-latest}}
     container_name: sc-video-analytics
     environment:
       - VA_PORT=8020
