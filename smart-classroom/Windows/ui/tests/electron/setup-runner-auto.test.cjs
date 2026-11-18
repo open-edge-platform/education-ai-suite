@@ -10,6 +10,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { SetupRunner } = require('../../electron/services/setup-runner.cjs');
+const registry = require('../../electron/services/registry.cjs');
+
+// Which features count as enabled, pinned per test instead of read from the
+// developer's config.yaml. setup-runner looks the rule up on every call, so
+// replacing it here reaches the DL Streamer step.
+const realEffectivelyEnabled = registry.effectivelyEnabled;
+let featureOverrides = {};
+registry.effectivelyEnabled = (id) => (id in featureOverrides ? featureOverrides[id] : realEffectivelyEnabled(id));
 
 const quietLogs = { note() { }, openSink() { }, closeSink() { } };
 
@@ -23,7 +31,8 @@ const FRESH = {
   venv: { status: 'missing', repair: 'create' },
 };
 
-function runner({ fail = [], onRun } = {}) {
+function runner({ fail = [], onRun, features = {} } = {}) {
+  featureOverrides = { video_analytics: true, ...features };
   const setup = new SetupRunner(quietLogs);
   for (const id of setup.state.keys()) {
     setup.state.set(id, { ...setup.state.get(id), status: 'ok', repair: null });
@@ -123,4 +132,55 @@ test('working clears even when a step fails', async () => {
   const { setup } = runner({ fail: ['python', 'ffmpeg'] });
   await setup.runAutomatic();
   assert.equal(setup.working, false);
+});
+
+test('plan() lists the repairs in step order, each with how it runs', () => {
+  const { setup } = runner();
+  assert.deepEqual(setup.plan(), [
+    { stepId: 'longPaths', actionId: 'enable', kind: 'elevated' },
+    { stepId: 'python', actionId: 'install', kind: 'auto' },
+    { stepId: 'ffmpeg', actionId: 'install', kind: 'auto' },
+    { stepId: 'dlStreamer', actionId: 'install', kind: 'elevated' },
+    { stepId: 'venv', actionId: 'create', kind: 'auto' },
+  ]);
+});
+
+test('plan() marks a destructive repair as manual', () => {
+  const { setup } = runner();
+  setup.state.set('venv', { ...setup.state.get('venv'), status: 'outdated', repair: 'recreate' });
+  assert.equal(setup.plan().find((entry) => entry.stepId === 'venv').kind, 'manual');
+});
+
+test('with approval, plan() and the run put the elevated steps first', async () => {
+  const { setup, calls } = runner();
+  assert.deepEqual(
+    setup.plan({ includeElevated: true }).map((entry) => entry.stepId),
+    ['longPaths', 'dlStreamer', 'python', 'ffmpeg', 'venv']
+  );
+
+  const result = await setup.runAutomatic({ includeElevated: true });
+
+  // The prompts come while the person who approved them is still there.
+  assert.deepEqual(calls, ['longPaths:enable', 'dlStreamer:install', 'python:install', 'ffmpeg:install', 'venv:create']);
+  assert.deepEqual(result.manual, []);
+});
+
+test('approval still never runs a destructive repair', async () => {
+  const { setup, calls } = runner();
+  setup.state.set('venv', { ...setup.state.get('venv'), status: 'outdated', repair: 'recreate' });
+  const result = await setup.runAutomatic({ includeElevated: true });
+
+  assert.ok(!calls.includes('venv:recreate'));
+  assert.deepEqual(result.manual, ['venv']);
+});
+
+test('without video analytics, DL Streamer is neither planned nor reported', async () => {
+  const { setup, calls } = runner({ features: { video_analytics: false } });
+
+  assert.ok(!setup.plan().some((entry) => entry.stepId === 'dlStreamer'));
+  const result = await setup.runAutomatic({ includeElevated: true });
+  assert.ok(!calls.includes('dlStreamer:install'));
+  assert.ok(!result.manual.includes('dlStreamer'));
+  // And the Setup screen does not list it.
+  assert.ok(!setup.snapshot().some((step) => step.id === 'dlStreamer'));
 });

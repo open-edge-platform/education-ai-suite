@@ -11,13 +11,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require('electron');
 const { startServer } = require('./server.cjs');
 const servicePaths = require('./services/paths.cjs');
 const serviceIpc = require('./services/ipc.cjs');
 const { LogStore } = require('./services/log-store.cjs');
 const { ServiceManager } = require('./services/process-manager.cjs');
 const { SetupRunner, LOG_ID: SETUP_LOG_ID } = require('./services/setup-runner.cjs');
+const { FirstRunController } = require('./services/first-run.cjs');
+const networkProbe = require('./services/network-probe.cjs');
+const config = require('./services/config-store.cjs');
 const winEnv = require('./services/win-env.cjs');
 const { resetToShippedDefaults } = require('./services/config-reset.cjs');
 
@@ -269,50 +272,89 @@ function autoPrepareEnabled() {
 const backendService = () => serviceManager.snapshot().find((service) => service.id === 'backend');
 const isIdle = (service) => service?.status === 'stopped' || service?.status === 'failed';
 
+/** Start the backend if it can start and nobody has started it yet. */
+function startBackend() {
+  // Re-read: setup may have created the environment, and the user may have
+  // started the backend from Services in the meantime.
+  const backend = backendService();
+  if (!backend?.runnable || !isIdle(backend)) return;
+  serviceManager.startService('backend').catch((error) => {
+    console.error('[electron] backend auto-start failed:', error.message);
+  });
+}
+
+const configuredHub = () => (config.readConfig()?.models?.model_hub === 'modelscope' ? 'modelscope' : 'huggingface');
+
+// The first-run wizard's flow (docs/dev-guide/first-run-wizard). It runs only
+// when launchPlan() says `wizard`; the window shows it and sends choices.
+const firstRun = new FirstRunController({
+  recordFile: () => path.join(servicePaths.stateDir(), 'first-run.json'),
+  setupRunner,
+  testNetwork: () =>
+    networkProbe.test({
+      saved: networkProbe.readSaved(),
+      env: networkProbe.readEnv(process.env),
+      // The Windows proxy settings, PAC scripts included, as Chromium resolves
+      // them; pip and the model downloads cannot read PAC scripts themselves.
+      resolveSystem: (url) => session.defaultSession.resolveProxy(url),
+    }),
+  configuredHub,
+  applyChanges: (changes) => config.apply(changes),
+  startBackend,
+  // Into the Setup screen's Output pane, so what was decided is visible.
+  log: (line) => logStore.note(SETUP_LOG_ID, line),
+});
+
 /**
- * Startup sequence for the windowed app: check everything, then, if allowed,
- * run every repair that needs no one at the keyboard and start the backend.
+ * Startup sequence for the windowed app.
  *
- * Progress shows on the Get started and Setup screens like a Fix run would,
- * because it uses the same runner. A first launch on a fresh machine therefore
- * ends with a running backend instead of an idle app waiting for clicks.
+ * - The Python environment is OK: start the backend, then check the rest.
+ * - Never set up: the first-run wizard's flow, which installs by itself after
+ *   a countdown, or at once when no wizard is on screen.
+ * - Set up before, and broken since: the automatic repair, which runs every
+ *   repair that needs no one at the keyboard, then starts the backend.
+ * - The user chose to set up by hand: check only.
  */
 async function prepareAndStartBackend() {
-  const startBackend = () => {
-    // Re-read: setup may have created the environment, and the user may have
-    // started the backend from Services in the meantime.
-    const backend = backendService();
-    if (!backend?.runnable || !isIdle(backend)) return;
-    serviceManager.startService('backend').catch((error) => {
-      console.error('[electron] backend auto-start failed:', error.message);
-    });
-  };
+  // The environment check alone says whether the backend can start, so a
+  // returning user's backend starts now rather than after the driver queries.
+  // An environment that exists but is incomplete (a first run closed during
+  // pip) fails it. Outdated still starts, as it always has; Upgrade stays on
+  // the Setup screen.
+  let envOk = false;
+  if (backendService()?.runnable) {
+    const venv = await setupRunner.checkStep('venv');
+    envOk = venv.status === 'ok' || venv.status === 'outdated';
+  }
 
-  // checkAll() is unconditional: it fills in the Setup screen so a first-time
-  // user sees real statuses instead of "Not checked".
-  if (!autoPrepareEnabled()) {
+  const plan = firstRun.launchPlan({ envOk });
+
+  if (plan === 'ready') {
+    // An upgrade from a version without the wizard, or a machine prepared by
+    // --setup-only: the wizard has nothing to do there.
+    firstRun.markCompleted();
+    if (autoPrepareEnabled()) startBackend();
+    // Unconditional: it fills in the Setup screen so a first-time user sees
+    // real statuses instead of "Not checked".
     await setupRunner.checkAll();
     return;
   }
 
-  // Every launch after the first: the environment check alone says whether the
-  // backend can start, so start it now rather than after the driver queries.
-  // An environment that exists but is incomplete (a first run closed during
-  // pip) fails this and takes the setup path below. Outdated still starts, as
-  // it always has; Upgrade stays on the Setup screen.
-  if (backendService()?.runnable) {
-    const venv = await setupRunner.checkStep('venv');
-    if (venv.status === 'ok' || venv.status === 'outdated') {
-      startBackend();
-      await setupRunner.checkAll();
-      return;
-    }
+  // A backend already up, for example one adopted from the legacy PowerShell
+  // path, has the environment's files in use, so setup cannot change them.
+  if (!isIdle(backendService())) {
+    await setupRunner.checkAll();
+    return;
+  }
+
+  if (plan === 'wizard') {
+    // The flow runs the checks itself, alongside the network test.
+    firstRun.start({ autoStart: autoPrepareEnabled() });
+    return;
   }
 
   await setupRunner.checkAll();
-  // A backend already up, for example one adopted from the legacy PowerShell
-  // path, has the environment's files in use, so setup cannot change them.
-  if (!isIdle(backendService())) return;
+  if (plan === 'manual' || !autoPrepareEnabled()) return;
 
   const result = await setupRunner.runAutomatic();
   if (result.ran.length || result.failed.length) {
@@ -461,6 +503,7 @@ async function createWindow() {
   // A dead renderer process cannot be caught by the in-page error boundary, so
   // report it natively rather than leaving a blank window.
   mainWindow.webContents.on('render-process-gone', async (_event, details) => {
+    firstRun.detach();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const { response } = await dialog.showMessageBox(mainWindow, {
       type: 'error',
@@ -476,6 +519,10 @@ async function createWindow() {
     else app.quit();
   });
 
+  // Every page load starts without a wizard on screen; one attaches when it
+  // mounts. Until then the first-run flow has nobody to show a countdown to.
+  mainWindow.webContents.on('did-start-loading', () => firstRun.detach());
+
   mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error('[electron] preload script failed:', preloadPath, error);
   });
@@ -486,6 +533,7 @@ async function createWindow() {
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
+    firstRun.detach();
   });
 
   const startUrl = await resolveStartUrl();
@@ -599,6 +647,14 @@ if (!app.requestSingleInstanceLock()) {
       manager: serviceManager,
       logs: logStore,
       setup: setupRunner,
+      firstRun,
+      network: {
+        probeEntered: (values) =>
+          networkProbe.probeEntered(values, {
+            hub: configuredHub(),
+            needInstallers: networkProbe.needsInstallers(setupRunner.plan()),
+          }),
+      },
       getWindow: () => mainWindow,
       getLanguage: () => currentLanguage,
     });

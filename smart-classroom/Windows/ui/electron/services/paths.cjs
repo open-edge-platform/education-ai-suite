@@ -102,6 +102,13 @@ const paths = {
     return data ? path.join(data, 'grading', 'config.yaml') : null;
   },
   bundledGradingConfigFile: () => path.join(home(), 'components', 'grading', 'config.yaml'),
+  // App state that is neither configuration nor a log: the first-run record.
+  // Follows the user data dir, including its SMART_CLASSROOM_USERDATA
+  // override, so tests and CI can isolate it; logs/ is git-ignored in a checkout.
+  stateDir: () => {
+    const data = userDataDir();
+    return data ? path.join(data, 'state') : path.join(home(), 'logs', 'state');
+  },
   shippedConfigStampFile: (name) => {
     const data = userDataDir();
     return data ? path.join(data, 'state', `${name}.sha256`) : null;

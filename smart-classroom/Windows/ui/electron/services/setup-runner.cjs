@@ -96,6 +96,16 @@ function repairFor(step, result) {
   return (step.actions ?? []).find((action) => !action.destructive)?.id ?? null;
 }
 
+/**
+ * How a repair runs unattended: `auto` needs no one; `elevated` raises a UAC
+ * prompt, so it runs only once someone has approved it; `manual` — destructive,
+ * or no such action — is left for the Setup screen.
+ */
+function kindOf(action) {
+  if (!action || action.destructive) return 'manual';
+  return action.elevates ? 'elevated' : 'auto';
+}
+
 function run(file, args, timeout = 20000) {
   return new Promise((resolve) => {
     execFile(file, args, { timeout, windowsHide: true }, (error, stdout, stderr) => {
@@ -692,6 +702,10 @@ const STEPS = [
     id: 'dlStreamer',
     label: 'DL Streamer',
     section: 'software',
+    // Only video analytics uses it, so it is not asked for — nor its UAC prompt
+    // raised — on a machine where video analytics will not run. "Effectively":
+    // board OCR and the report drag video analytics in at startup.
+    enabled: () => registry.effectivelyEnabled('video_analytics'),
     async check() {
       // Its installer records both values under this key.
       const install = await winEnv.dlStreamerInstall();
@@ -1186,7 +1200,8 @@ class SetupRunner extends EventEmitter {
    * It is the Fix button's queue minus two kinds of action: destructive ones,
    * which must stay a confirmed click, and ones that raise a UAC prompt, which
    * would otherwise appear unannounced or hang a headless run. Those are left
-   * for the Setup screen and reported as `manual`.
+   * for the Setup screen and reported as `manual` — the elevated ones unless
+   * includeElevated says someone has approved them.
    *
    * Unlike the Fix button it does not stop at the first failure: FFmpeg failing
    * to install is no reason not to create the Python environment. A step whose
@@ -1195,16 +1210,38 @@ class SetupRunner extends EventEmitter {
    *
    * Reads the repairs from the current state, so call checkAll() first.
    */
-  async runAutomatic() {
+  async runAutomatic({ includeElevated = false } = {}) {
     this.autoCancelled = false;
     this.autoRunning = true;
     this.emitChanged();
     try {
-      return await this.runRepairs();
+      return await this.runRepairs({ includeElevated });
     } finally {
       this.autoRunning = false;
       this.emitChanged();
     }
+  }
+
+  /**
+   * The repairs runAutomatic() would make, in the order it would make them:
+   * what the first-run wizard lists before and while it installs. Read from
+   * the current state, so call checkAll() first.
+   *
+   * With includeElevated, the elevated ones come first, so their prompts
+   * appear while the person who approved them is still at the screen, and the
+   * rest can run with nobody there.
+   */
+  plan({ includeElevated = false } = {}) {
+    const entries = [];
+    for (const step of STEPS) {
+      if (step.enabled && !step.enabled()) continue;
+      const actionId = this.state.get(step.id).repair;
+      if (!actionId) continue;
+      const kind = kindOf(step.actions.find((entry) => entry.id === actionId));
+      entries.push({ stepId: step.id, actionId, kind });
+    }
+    if (!includeElevated) return entries;
+    return [...entries.filter((entry) => entry.kind === 'elevated'), ...entries.filter((entry) => entry.kind !== 'elevated')];
   }
 
   /** Setup is installing or changing something, so the backend must not start. */
@@ -1212,34 +1249,44 @@ class SetupRunner extends EventEmitter {
     return this.busy || this.autoRunning;
   }
 
-  async runRepairs() {
+  async runRepairs({ includeElevated }) {
     const result = { ran: [], failed: [], blocked: [], manual: [] };
 
-    for (const step of STEPS) {
-      if (this.autoCancelled) break;
-      if (step.enabled && !step.enabled()) continue;
-      const actionId = this.state.get(step.id).repair;
-      if (!actionId) continue;
-      const action = step.actions.find((entry) => entry.id === actionId);
-      if (!action || action.destructive || action.elevates) {
-        result.manual.push(step.id);
-        continue;
-      }
+    // Elevated first, in a pass of their own, when they are approved; see
+    // plan(). Each pass reads the state as it goes rather than from a list
+    // made up front, so a step that a feature toggle enables mid-run is still
+    // picked up.
+    const passes = includeElevated ? ['elevated', 'auto'] : ['auto'];
+    const lastPass = passes[passes.length - 1];
 
-      const unmet = (step.requires ?? []).filter((id) => !SATISFIED.includes(this.state.get(id)?.status));
-      if (unmet.length) {
-        const names = unmet.map((id) => BY_ID.get(id).label).join(', ');
-        this.log(`Skipping ${step.label}: it needs ${names}.`);
-        result.blocked.push(step.id);
-        continue;
-      }
+    for (const pass of passes) {
+      for (const step of STEPS) {
+        if (this.autoCancelled) return result;
+        if (step.enabled && !step.enabled()) continue;
+        const actionId = this.state.get(step.id).repair;
+        if (!actionId) continue;
+        const kind = kindOf(step.actions.find((entry) => entry.id === actionId));
+        if (kind !== pass) {
+          // Reported once, and only for what no pass of this run will do.
+          if (pass === lastPass && !passes.includes(kind)) result.manual.push(step.id);
+          continue;
+        }
 
-      try {
-        await this.runStep(step.id, actionId);
-        result.ran.push(step.id);
-      } catch (error) {
-        // runStep has already recorded and logged it.
-        result.failed.push({ id: step.id, error: error.message });
+        const unmet = (step.requires ?? []).filter((id) => !SATISFIED.includes(this.state.get(id)?.status));
+        if (unmet.length) {
+          const names = unmet.map((id) => BY_ID.get(id).label).join(', ');
+          this.log(`Skipping ${step.label}: it needs ${names}.`);
+          result.blocked.push(step.id);
+          continue;
+        }
+
+        try {
+          await this.runStep(step.id, actionId);
+          result.ran.push(step.id);
+        } catch (error) {
+          // runStep has already recorded and logged it.
+          result.failed.push({ id: step.id, error: error.message });
+        }
       }
     }
     return result;

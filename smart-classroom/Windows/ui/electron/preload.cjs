@@ -81,12 +81,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     logs: (options) => ipcRenderer.invoke('setup:logs', options),
     clearLogs: () => ipcRenderer.invoke('setup:clearLogs'),
     revealLogs: () => ipcRenderer.invoke('setup:revealLogs'),
+    // What an automatic run would do, in order.
+    plan: (options) => ipcRenderer.invoke('setup:plan', options),
     // Subscribe to step status changes; returns an unsubscribe function.
     onChanged: (callback) => {
       const listener = (_event, snapshot) => callback(snapshot);
       ipcRenderer.on('setup:changed', listener);
       return () => ipcRenderer.removeListener('setup:changed', listener);
     },
+  },
+
+  // The first-run wizard's flow, which the main process owns. `attach` says a
+  // wizard is on screen; `send` takes 'customize', 'installNow' (with
+  // { includeElevated }), 'approveElevated' or 'manual'.
+  firstRun: {
+    get: () => ipcRenderer.invoke('firstRun:get'),
+    attach: () => ipcRenderer.invoke('firstRun:attach'),
+    send: (choice, options) => ipcRenderer.invoke('firstRun:send', choice, options),
+    onChanged: (callback) => {
+      const listener = (_event, snapshot) => callback(snapshot);
+      ipcRenderer.on('firstRun:changed', listener);
+      return () => ipcRenderer.removeListener('firstRun:changed', listener);
+    },
+  },
+
+  // Test proxy values typed on the wizard's Network page.
+  network: {
+    probe: (values) => ipcRenderer.invoke('network:probe', values),
   },
 
   // Copy through the main process: navigator.clipboard needs a secure context,
