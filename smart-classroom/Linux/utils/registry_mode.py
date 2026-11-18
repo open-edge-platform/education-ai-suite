@@ -6,6 +6,8 @@
   REGISTRY: true   -> pull the published Docker Hub images
                       (intel/smart-classroom-app,
                       intel/smart-classroom-ovms-provision,
+                      intel/smart-classroom-va-model-provision,
+                      intel/smart-classroom-video-analytics,
                       intel/audio-analyzer, intel/model-download,
                       intel/retail-benchmark)
   REGISTRY: false  -> build those images locally from the submodules by adding

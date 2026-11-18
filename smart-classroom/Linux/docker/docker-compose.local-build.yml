@@ -47,6 +47,30 @@ services:
     image: sc-ovms-provision:local
     pull_policy: build
 
+  va-model-provision:
+    build:
+      context: ../video-analytics
+      dockerfile: docker/Dockerfile.va-provision
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+      secrets:
+        - corporate_ca
+    image: sc-va-model-provision:local
+    pull_policy: build
+
+  video-analytics:
+    build:
+      context: ../video-analytics
+      dockerfile: docker/Dockerfile.va-pipeline
+      args:
+        HTTP_PROXY: "${HTTP_PROXY:-}"
+        HTTPS_PROXY: "${HTTPS_PROXY:-}"
+        NO_PROXY: "${NO_PROXY:-}"
+    image: sc-video-analytics:local
+    pull_policy: build
+
   audio-analyzer:
     build:
       context: ../edge-ai-libraries/microservices/audio-analyzer

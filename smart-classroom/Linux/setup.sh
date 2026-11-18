@@ -159,9 +159,9 @@ else
 fi
 
 if [[ "$REGISTRY" == "true" ]]; then
-  log "REGISTRY=true: pulling smart-classroom-app, ovms-provision, audio-analyzer, model-downloader and metrics-collector images from Docker Hub."
+  log "REGISTRY=true: pulling smart-classroom-app, ovms-provision, va-model-provision, video-analytics, audio-analyzer, model-downloader and metrics-collector images from Docker Hub."
 else
-  log "REGISTRY=false: building smart-classroom-app, ovms-provision, audio-analyzer, model-downloader and metrics-collector images locally."
+  log "REGISTRY=false: building smart-classroom-app, ovms-provision, va-model-provision, video-analytics, audio-analyzer, model-downloader and metrics-collector images locally."
   for build_ctx in edge-ai-libraries/microservices/audio-analyzer edge-ai-libraries/microservices/model-download performance-tools; do
     [[ -f "${SCRIPT_DIR}/${build_ctx}/docker/Dockerfile" ]] \
       || die "Missing ${build_ctx}/docker/Dockerfile — initialize the git submodules (git submodule update --init) or set REGISTRY: true in config.yaml."
@@ -181,7 +181,7 @@ if [[ "$REGISTRY" == "true" ]]; then
     || die "docker compose pull failed — check network/proxy access to Docker Hub, or set REGISTRY: false in config.yaml to build locally."
 fi
 
-log "Starting the stack (docker compose up -d --build; the video-analytics image is always built locally)…"
+log "Starting the stack (docker compose up -d --build)…"
 (cd "$SCRIPT_DIR" && docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" up -d --build) \
   || die "docker compose up failed — check the build/service logs above."
 
