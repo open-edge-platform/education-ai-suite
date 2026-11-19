@@ -493,7 +493,7 @@ function Invoke-NativeInstallCommand {
     }
     try {
         & $ScriptBlock 2>&1 | ForEach-Object {
-            if ("$_" -match '\[WinError 206\]') {
+            if ("$_" -match '\[WinError 206\]|https://pip\.pypa\.io/warnings/enable-long-paths') {
                 $HasLongPathError = $true
             }
             if (-not $Quiet) {
