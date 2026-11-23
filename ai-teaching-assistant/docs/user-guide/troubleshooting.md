@@ -96,9 +96,8 @@ with an error such as:
 ERROR: Could not install packages due to an OSError: [WinError 206] The filename or extension is too long
 ```
 
-Deeply nested paths inside the PyTorch package can exceed the Windows path-length
-limit, even when the repository is cloned under a relatively short path such as
-`C:\rc1`. Setup exits before all dependencies are installed.
+Deeply nested files can exceed Windows' path-length limit, causing setup to stop
+before all dependencies are installed.
 
 **Fix**:
 
