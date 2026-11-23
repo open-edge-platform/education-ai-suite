@@ -4,13 +4,15 @@
 // The first-run wizard's flow, owned by the main process (first-run wizard
 // design, docs/dev-guide/first-run-wizard).
 //
-// The window only shows this flow and sends the user's choices. With no wizard
-// on screen to show a countdown — the window has not loaded, or failed to —
-// installation starts at once, so nothing that happens in the renderer can
-// stall an unattended first launch.
+// The window only shows this flow and sends the user's choices. The countdown
+// runs here, so it ends — and installation starts — whether or not the window
+// ever loaded: nothing in the renderer can stall an unattended first launch.
+// (An earlier version installed at once while no wizard had said it was on
+// screen; but the checks can finish before the window has loaded, which made
+// the countdown, and the chance to customize, depend on a race.)
 //
 // The record, state/first-run.json, holds onboarding facts only. It never
-// claims the machine is ready: useReadiness.ts derives that from live checks,
+// claims the machine is ready: the Setup screen derives that from live checks,
 // because a stored flag goes stale when the environment is deleted or moved.
 
 const fs = require('fs');
@@ -83,12 +85,11 @@ function launchPlan({ record, envOk }) {
 // Flow
 // ---------------------------------------------------------------------------
 
-function initialState({ resume = false, autoStart = true, uiAttached = false } = {}) {
+function initialState({ resume = false, autoStart = true } = {}) {
   return {
     phase: PHASE.CHECKING,
     resume,
     autoStart,
-    uiAttached,
     // Why the flow waits instead of counting down: 'choice' (automatic start
     // is off), 'customize', 'setup' (someone started a setup step by hand) or
     // 'cancelled'.
@@ -113,12 +114,6 @@ function installing(state, { recommended }) {
 /** The flow as a pure function of its state, an event and the time. */
 function next(state, event, now) {
   switch (event.type) {
-    case 'attach':
-    case 'detach': {
-      const uiAttached = event.type === 'attach';
-      return state.uiAttached === uiAttached ? state : { ...state, uiAttached };
-    }
-
     case 'checked': {
       if (state.phase !== PHASE.CHECKING) return state;
       const checked = { ...state, network: event.network ?? null, diskLow: !!event.diskLow };
@@ -126,8 +121,6 @@ function next(state, event, now) {
       if (state.resume) return installing(checked, { recommended: false });
       if (state.held) return { ...checked, phase: PHASE.WAITING };
       if (!state.autoStart) return { ...checked, phase: PHASE.WAITING, held: 'choice' };
-      // No wizard on screen, so nobody to show a countdown to.
-      if (!state.uiAttached) return installing(checked, { recommended: true });
       const caution = !checked.network?.ok ? 'network' : checked.diskLow ? 'disk' : null;
       const seconds = caution ? COUNTDOWN_SECONDS.CAUTION : COUNTDOWN_SECONDS.READY;
       return { ...checked, phase: PHASE.COUNTDOWN, caution, endsAt: now + seconds * 1000 };
@@ -141,6 +134,9 @@ function next(state, event, now) {
       if (state.phase === PHASE.COUNTDOWN) {
         return { ...state, phase: PHASE.WAITING, held: event.reason, caution: null, endsAt: null };
       }
+      // Already waiting, for example with automatic start off: Customize
+      // still has to take the user through the pages.
+      if (state.phase === PHASE.WAITING) return state.held === event.reason ? state : { ...state, held: event.reason };
       return state;
 
     case 'installNow': {
@@ -214,9 +210,12 @@ class FirstRunController extends EventEmitter {
     this.clearTimer = clearTimer;
     this.state = null;
     this.record = undefined;
-    this.uiAttached = false;
     this.timer = null;
     this.installingNow = false;
+    this.exiting = false;
+    // The queue as it stood when the installation started, for the Install
+    // page: steps drop out of plan() as they succeed.
+    this.installPlan = null;
     this.recommended = [];
     this.onSetupChanged = this.onSetupChanged.bind(this);
   }
@@ -251,7 +250,7 @@ class FirstRunController extends EventEmitter {
   start({ autoStart = true } = {}) {
     if (this.state) return;
     const resume = this.currentRecord()?.stage === 'installing';
-    this.state = initialState({ resume, autoStart, uiAttached: this.uiAttached });
+    this.state = initialState({ resume, autoStart });
     this.saveRecord({ stage: resume ? 'installing' : 'welcome' });
     this.setupRunner.on('changed', this.onSetupChanged);
     this.emitChanged();
@@ -259,17 +258,6 @@ class FirstRunController extends EventEmitter {
       this.log(`First-run checks failed: ${error.message}`);
       this.dispatch({ type: 'checked', network: null, diskLow: false });
     });
-  }
-
-  /** A wizard is on screen; it may show a countdown. */
-  attach() {
-    this.uiAttached = true;
-    this.dispatch({ type: 'attach' });
-  }
-
-  detach() {
-    this.uiAttached = false;
-    this.dispatch({ type: 'detach' });
   }
 
   /** A choice from the window. Only these names cross IPC. */
@@ -298,7 +286,20 @@ class FirstRunController extends EventEmitter {
     const view = record ? { stage: record.stage, mode: record.mode, completedAt: record.completedAt } : null;
     if (!this.state) return { active: false, record: view };
     const { phase, held, caution, endsAt, diskLow, recommended, includeElevated, network, result } = this.state;
-    return { active: true, phase, held, caution, endsAt, diskLow, recommended, includeElevated, network, result, record: view };
+    return {
+      active: true,
+      phase,
+      held,
+      caution,
+      endsAt,
+      diskLow,
+      recommended,
+      includeElevated,
+      network,
+      plan: this.installPlan,
+      result,
+      record: view,
+    };
   }
 
   emitChanged() {
@@ -333,6 +334,16 @@ class FirstRunController extends EventEmitter {
   clearCountdown() {
     if (this.timer) this.clearTimer(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * The app is closing during the installation. Its setup step is about to be
+   * cancelled, but unlike Cancel this is not the user changing their mind:
+   * the record keeps `installing`, so the next launch picks up where this one
+   * stopped (design, Section 7.6).
+   */
+  stopForExit() {
+    this.exiting = true;
   }
 
   /** A setup step started by hand during the checks or the countdown. */
@@ -384,6 +395,7 @@ class FirstRunController extends EventEmitter {
 
   async install(state) {
     this.installingNow = true;
+    this.installPlan = this.setupRunner.plan({ includeElevated: state.includeElevated });
     this.saveRecord({ stage: 'installing' });
 
     if (state.recommended && this.recommended.length) {
@@ -420,8 +432,11 @@ class FirstRunController extends EventEmitter {
 
     const cancelled = this.setupRunner.autoCancelled;
     const envOk = environmentOk(this.setupRunner.snapshot());
-    if (cancelled) this.saveRecord({ stage: 'welcome' });
-    else if (envOk) this.markCompleted();
+    if (cancelled) {
+      if (!this.exiting) this.saveRecord({ stage: 'welcome' });
+    } else if (envOk) {
+      this.markCompleted();
+    }
     // Otherwise the record still says `installing`, so the next launch tries
     // again without asking: the user already agreed.
 

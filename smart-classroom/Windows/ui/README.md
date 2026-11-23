@@ -21,15 +21,18 @@ them, tails their logs, edits the configuration files and runs first-time setup.
 `start-desktop-app.ps1` bootstraps Node (installing it via `winget` when missing), rebuilds
 `dist/`, and hands over. It never requests Administrator privileges.
 
-On launch, the app (installed, or started by the script) prepares and starts the
-backend by itself. It checks every setup step, then runs each repair that needs
-no Administrator rights and no confirmation: installing Python and FFmpeg,
-creating the Python environment and, with grading enabled, the grading
-environment and layout model. When the Python environment exists, it starts the
-backend. Enabling long paths, installing DL Streamer and **Recreate** stay on
-the Setup screen, because they raise a UAC prompt or delete files. When the
-environment is already fine, the backend starts after that one check, without
-waiting for the rest.
+On the first launch the app opens the **setup assistant**, which checks the PC
+and the network, then installs with recommended settings after a short
+countdown unless the user chooses **Customize** (design:
+[first-run-wizard-design.md](../../docs/dev-guide/first-run-wizard/first-run-wizard-design.md)).
+On later launches it prepares and starts the backend by itself: when the Python
+environment is fine, the backend starts after that one check; when it is
+broken, the app runs each repair that needs no Administrator rights and no
+confirmation, then starts the backend. Enabling long paths, installing DL
+Streamer and **Recreate** always wait for the user, because they raise a UAC
+prompt or delete files. To see the first launch again, delete
+`state\first-run.json` (`logs\state\` in a source checkout) and move the Python
+environment aside.
 
 - `SC_AUTO_START_BACKEND=1` / `0` turns this on or off. The script sets `1`, or
   `0` with `-NoAutoStart`. When the variable is unset, the installed app does it
@@ -44,9 +47,28 @@ waiting for the rest.
 
 | Screen | Backed by |
 |--------|-----------|
-| **Setup** | [`electron/services/setup-runner.cjs`](electron/services/setup-runner.cjs) — prerequisite checks, Python environment, model preparation |
+| **Setup assistant** | [`electron/services/first-run.cjs`](electron/services/first-run.cjs) — the first run only: welcome, network, features, install — [`src/components/assistant`](src/components/assistant) |
+| **Setup** | [`electron/services/setup-runner.cjs`](electron/services/setup-runner.cjs) — what is not working, with one **Fix** for what the app can repair ([`src/services/problemList.ts`](src/services/problemList.ts)); below it every check with its actions, and the setup output |
 | **Configuration** | [`electron/services/config-store.cjs`](electron/services/config-store.cjs) — comment-preserving writes to `config.yaml`, `.proxy-config` in the user data dir |
 | **Services** | [`electron/services/process-manager.cjs`](electron/services/process-manager.cjs) — spawns `main.py`, health-polls it and every service it starts, stops the tree |
+
+### Settings UI
+
+The setup assistant and the Setup, Configuration and Services screens are built
+from the same parts, so they look and behave alike and are fixed in one place:
+
+- [`src/components/ui`](src/components/ui): page header, buttons, banners, status
+  rows and the log viewer, with one set of colours in `ui.css`.
+- [`src/components/setup`](src/components/setup): the sections more than one
+  screen shows: setup steps, settings fields with their rule problems, the feature
+  picker (feature groups come from `FEATURE_GROUPS` in `config-schema.cjs`), the
+  proxy settings with **Test connection**, and the readiness checklist.
+- [`src/services/setupStatus.ts`](src/services/setupStatus.ts): what a setup
+  step's status means.
+
+A screen composes these and keeps only its own layout: it does not style its own
+buttons, banners, rows or headers. A setting appears in the assistant when the
+schema gives it an `onboarding` place (a feature group's id, or `network`).
 
 How it reaches the backends: the main API (8000) is CORS-enabled, so calls go to
 it directly. Content-search (9011) has no CORS, so like the Vite dev proxy,

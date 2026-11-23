@@ -89,7 +89,7 @@ class FakeRunner extends EventEmitter {
   }
 }
 
-function harness(t, { record, runner = new FakeRunner(), network = WORKING_NETWORK, attach = false } = {}) {
+function harness(t, { record, runner = new FakeRunner(), network = WORKING_NETWORK } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-first-run-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'state', 'first-run.json');
@@ -119,7 +119,6 @@ function harness(t, { record, runner = new FakeRunner(), network = WORKING_NETWO
       timer.cleared = true;
     },
   });
-  if (attach) controller.attach();
   return { controller, runner, file, timers, applied, logs, starts: () => backendStarts };
 }
 
@@ -146,6 +145,13 @@ function waitFor(controller, predicate) {
 }
 
 const inPhase = (phase) => (snapshot) => snapshot.phase === phase;
+
+/** Start the flow and let the countdown run out, as the main process would. */
+async function startAndInstall({ controller, timers }) {
+  controller.start();
+  await waitFor(controller, inPhase(PHASE.COUNTDOWN));
+  timers[timers.length - 1].fn();
+}
 
 // ---------------------------------------------------------------------------
 // Launch decision and record
@@ -199,56 +205,57 @@ test('a record round-trips, creating its folder and leaving no temporary file', 
 const checked = (state, { network = { ok: true }, diskLow = false } = {}) =>
   next(state, { type: 'checked', network, diskLow }, NOW);
 
-test('with no wizard on screen, the checks lead straight to installing', () => {
-  const state = checked(initialState({ uiAttached: false }));
-  assert.equal(state.phase, PHASE.INSTALLING);
-  assert.equal(state.recommended, true);
-});
-
-test('with a wizard on screen, the checks lead to a countdown', () => {
-  const state = checked(initialState({ uiAttached: true }));
+test('the checks lead to a countdown, which runs here whether or not a window shows it', () => {
+  const state = checked(initialState());
   assert.equal(state.phase, PHASE.COUNTDOWN);
   assert.equal(state.caution, null);
   assert.equal(state.endsAt, NOW + COUNTDOWN_SECONDS.READY * 1000);
 });
 
 test('a failed network test or low disk space lengthens the countdown rather than stopping it', () => {
-  const network = checked(initialState({ uiAttached: true }), { network: { ok: false } });
+  const network = checked(initialState(), { network: { ok: false } });
   assert.equal(network.phase, PHASE.COUNTDOWN);
   assert.equal(network.caution, 'network');
   assert.equal(network.endsAt, NOW + COUNTDOWN_SECONDS.CAUTION * 1000);
 
-  const disk = checked(initialState({ uiAttached: true }), { diskLow: true });
+  const disk = checked(initialState(), { diskLow: true });
   assert.equal(disk.caution, 'disk');
   assert.equal(disk.endsAt, NOW + COUNTDOWN_SECONDS.CAUTION * 1000);
 });
 
 test('with automatic start off, the flow waits for a choice', () => {
-  const state = checked(initialState({ autoStart: false, uiAttached: true }));
+  const state = checked(initialState({ autoStart: false }));
   assert.equal(state.phase, PHASE.WAITING);
   assert.equal(state.held, 'choice');
 });
 
 test('a resumed installation needs no countdown and keeps the saved settings', () => {
-  const state = checked(initialState({ resume: true, uiAttached: true }));
+  const state = checked(initialState({ resume: true }));
   assert.equal(state.phase, PHASE.INSTALLING);
   assert.equal(state.recommended, false);
 });
 
 test('customize during the checks or the countdown means waiting', () => {
-  const duringChecks = next(initialState({ uiAttached: true }), { type: 'hold', reason: 'customize' }, NOW);
+  const duringChecks = next(initialState(), { type: 'hold', reason: 'customize' }, NOW);
   assert.equal(duringChecks.phase, PHASE.CHECKING);
   assert.equal(checked(duringChecks).phase, PHASE.WAITING);
   assert.equal(checked(duringChecks).held, 'customize');
 
-  const countdown = checked(initialState({ uiAttached: true }));
+  const countdown = checked(initialState());
   const held = next(countdown, { type: 'hold', reason: 'customize' }, NOW);
   assert.equal(held.phase, PHASE.WAITING);
   assert.equal(held.endsAt, null);
 });
 
+test('customize from waiting for a choice takes the user through the pages', () => {
+  const waiting = checked(initialState({ autoStart: false }));
+  const customizing = next(waiting, { type: 'hold', reason: 'customize' }, NOW);
+  assert.equal(customizing.phase, PHASE.WAITING);
+  assert.equal(customizing.held, 'customize');
+});
+
 test('the countdown ending installs the recommended settings; a stray timeout does nothing', () => {
-  const countdown = checked(initialState({ uiAttached: true }));
+  const countdown = checked(initialState());
   const state = next(countdown, { type: 'timeout' }, NOW);
   assert.equal(state.phase, PHASE.INSTALLING);
   assert.equal(state.recommended, true);
@@ -258,7 +265,7 @@ test('the countdown ending installs the recommended settings; a stray timeout do
 });
 
 test('Install now uses the recommended settings only from the countdown', () => {
-  const countdown = checked(initialState({ uiAttached: true }));
+  const countdown = checked(initialState());
   assert.equal(next(countdown, { type: 'installNow' }, NOW).recommended, true);
 
   const waiting = checked(initialState({ autoStart: false }));
@@ -269,20 +276,20 @@ test('Install now uses the recommended settings only from the countdown', () => 
 });
 
 test('approval of the elevated steps is remembered in any phase but manual', () => {
-  const installing = checked(initialState({ uiAttached: false }));
+  const installing = next(checked(initialState()), { type: 'timeout' }, NOW);
   assert.equal(next(installing, { type: 'approveElevated' }, NOW).includeElevated, true);
 });
 
 test('manual ends the flow, but not in the middle of an installation', () => {
-  const countdown = checked(initialState({ uiAttached: true }));
+  const countdown = checked(initialState());
   assert.equal(next(countdown, { type: 'manual' }, NOW).phase, PHASE.MANUAL);
 
-  const installing = checked(initialState({ uiAttached: false }));
+  const installing = next(checked(initialState()), { type: 'timeout' }, NOW);
   assert.equal(next(installing, { type: 'manual' }, NOW), installing);
 });
 
 test('an installation ends finished, or waiting when it was cancelled', () => {
-  const installing = checked(initialState({ uiAttached: false }));
+  const installing = next(checked(initialState()), { type: 'timeout' }, NOW);
   const finished = next(installing, { type: 'installEnded', result: { envOk: true } }, NOW);
   assert.equal(finished.phase, PHASE.FINISHED);
   assert.equal(next(finished, { type: 'installNow' }, NOW).phase, PHASE.INSTALLING);
@@ -297,8 +304,9 @@ test('an installation ends finished, or waiting when it was cancelled', () => {
 // ---------------------------------------------------------------------------
 
 test('an unattended first launch installs with what the test found, then starts the backend', async (t) => {
-  const { controller, runner, file, applied, starts } = harness(t);
-  controller.start();
+  const h = harness(t);
+  const { controller, runner, file, applied, starts } = h;
+  await startAndInstall(h);
   const done = await waitFor(controller, inPhase(PHASE.FINISHED));
 
   assert.deepEqual(runner.runs, [false]);
@@ -321,8 +329,8 @@ test('an unattended first launch installs with what the test found, then starts 
   assert.equal(typeof record.completedAt, 'string');
 });
 
-test('with a wizard on screen, installation waits for the countdown', async (t) => {
-  const { controller, runner, timers } = harness(t, { attach: true });
+test('installation waits for the countdown', async (t) => {
+  const { controller, runner, timers } = harness(t);
   controller.start();
   await waitFor(controller, inPhase(PHASE.COUNTDOWN));
 
@@ -336,7 +344,7 @@ test('with a wizard on screen, installation waits for the countdown', async (t) 
 });
 
 test('a failed network test still installs after the long countdown, changing nothing', async (t) => {
-  const { controller, runner, timers, applied } = harness(t, { attach: true, network: FAILED_NETWORK });
+  const { controller, runner, timers, applied } = harness(t, { network: FAILED_NETWORK });
   controller.start();
   const countdown = await waitFor(controller, inPhase(PHASE.COUNTDOWN));
 
@@ -351,7 +359,7 @@ test('a failed network test still installs after the long countdown, changing no
 });
 
 test('customize stops the countdown, and the later installation keeps the user\'s settings', async (t) => {
-  const { controller, runner, timers, applied, file } = harness(t, { attach: true });
+  const { controller, runner, timers, applied, file } = harness(t);
   controller.start();
   await waitFor(controller, inPhase(PHASE.COUNTDOWN));
 
@@ -367,7 +375,7 @@ test('customize stops the countdown, and the later installation keeps the user\'
 });
 
 test('with automatic start off, nothing installs until asked', async (t) => {
-  const { controller, runner } = harness(t, { attach: true });
+  const { controller, runner } = harness(t);
   controller.start({ autoStart: false });
   const waiting = await waitFor(controller, inPhase(PHASE.WAITING));
 
@@ -376,7 +384,7 @@ test('with automatic start off, nothing installs until asked', async (t) => {
 });
 
 test('set up manually ends the flow, and later launches stay manual', async (t) => {
-  const { controller, runner, file } = harness(t, { attach: true });
+  const { controller, runner, file } = harness(t);
   controller.start();
   await waitFor(controller, inPhase(PHASE.COUNTDOWN));
 
@@ -388,7 +396,7 @@ test('set up manually ends the flow, and later launches stay manual', async (t) 
 });
 
 test('an installation interrupted by closing the app resumes without a countdown', async (t) => {
-  const { controller, runner, applied, timers } = harness(t, { attach: true, record: { stage: 'installing' } });
+  const { controller, runner, applied, timers } = harness(t, { record: { stage: 'installing' } });
   controller.start();
   await waitFor(controller, inPhase(PHASE.FINISHED));
 
@@ -398,7 +406,7 @@ test('an installation interrupted by closing the app resumes without a countdown
 });
 
 test('a setup step started by hand during the countdown stops it', async (t) => {
-  const { controller, runner } = harness(t, { attach: true });
+  const { controller, runner } = harness(t);
   controller.start();
   await waitFor(controller, inPhase(PHASE.COUNTDOWN));
 
@@ -416,8 +424,9 @@ test('approval given during the installation runs the elevated steps next', asyn
       if (round === 1) controller.send('approveElevated');
     },
   });
-  ({ controller } = harness(t, { runner }));
-  controller.start();
+  const h = harness(t, { runner });
+  ({ controller } = h);
+  await startAndInstall(h);
   await waitFor(controller, inPhase(PHASE.FINISHED));
 
   assert.deepEqual(runner.runs, [false, true]);
@@ -429,8 +438,9 @@ test('a cancelled installation waits, starts nothing and leaves the wizard to co
       self.autoCancelled = true;
     },
   });
-  const { controller, file, starts } = harness(t, { runner });
-  controller.start();
+  const h = harness(t, { runner });
+  const { controller, file, starts } = h;
+  await startAndInstall(h);
   const waiting = await waitFor(controller, inPhase(PHASE.WAITING));
 
   assert.equal(waiting.held, 'cancelled');
@@ -441,8 +451,9 @@ test('a cancelled installation waits, starts nothing and leaves the wizard to co
 });
 
 test('an installation that leaves the environment broken is retried at the next launch', async (t) => {
-  const { controller, file, starts } = harness(t, { runner: new FakeRunner({ venvAfter: 'missing' }) });
-  controller.start();
+  const h = harness(t, { runner: new FakeRunner({ venvAfter: 'missing' }) });
+  const { controller, file, starts } = h;
+  await startAndInstall(h);
   const done = await waitFor(controller, inPhase(PHASE.FINISHED));
 
   assert.equal(done.result.envOk, false);
@@ -465,4 +476,32 @@ test('markCompleted() writes the record once', (t) => {
 test('only the known choices are accepted', (t) => {
   const { controller } = harness(t);
   assert.throws(() => controller.send('format-disk'), /Unknown first-run choice/);
+});
+
+test('the snapshot carries the queue as it stood when the installation started', async (t) => {
+  const h = harness(t);
+  const { controller } = h;
+  assert.equal(controller.snapshot().plan ?? null, null);
+  await startAndInstall(h);
+  const done = await waitFor(controller, inPhase(PHASE.FINISHED));
+  assert.deepEqual(done.plan, [{ stepId: 'venv', actionId: 'create', kind: 'auto' }]);
+});
+
+test('closing the app mid-installation keeps the record, so the next launch resumes', async (t) => {
+  let controller;
+  const runner = new FakeRunner({
+    onRun: (self) => {
+      // What the close confirmation does: mark the exit, then cancel.
+      controller.stopForExit();
+      self.autoCancelled = true;
+    },
+  });
+  const h = harness(t, { runner });
+  ({ controller } = h);
+  const file = controller.recordFile();
+  await startAndInstall(h);
+  await waitFor(controller, inPhase(PHASE.WAITING));
+
+  assert.equal(readRecord(file).stage, 'installing');
+  assert.equal(launchPlan({ record: readRecord(file), envOk: false }), 'wizard');
 });

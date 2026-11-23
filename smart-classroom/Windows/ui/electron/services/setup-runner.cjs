@@ -1029,8 +1029,12 @@ class SetupRunner extends EventEmitter {
             id: action.id,
             label: action.label,
             destructive: !!action.destructive,
+            elevates: !!action.elevates,
           })),
         ...state,
+        // How the repair would run (see kindOf): the screens tell from this,
+        // not from step ids, which steps need administrator approval.
+        repairKind: state.repair ? kindOf((step.actions ?? []).find((action) => action.id === state.repair)) : null,
       };
     });
   }

@@ -97,6 +97,8 @@ export type FirstRunSnapshot =
       recommended: boolean;
       includeElevated: boolean;
       network: FirstRunNetwork | null;
+      /** The queue as it stood when the installation started; null before. */
+      plan: SetupPlanEntry[] | null;
       result: FirstRunResult | null;
       record: FirstRunRecordView | null;
     };

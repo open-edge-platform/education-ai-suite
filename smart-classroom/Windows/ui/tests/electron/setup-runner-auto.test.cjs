@@ -184,3 +184,17 @@ test('without video analytics, DL Streamer is neither planned nor reported', asy
   // And the Setup screen does not list it.
   assert.ok(!setup.snapshot().some((step) => step.id === 'dlStreamer'));
 });
+
+test('the setup data says how each repair runs, so screens need no step ids', () => {
+  const { setup } = runner();
+  setup.state.set('venv', { ...setup.state.get('venv'), status: 'outdated', repair: 'recreate' });
+  const byId = Object.fromEntries(setup.snapshot().map((step) => [step.id, step]));
+
+  assert.equal(byId.longPaths.repairKind, 'elevated');
+  assert.equal(byId.dlStreamer.repairKind, 'elevated');
+  assert.equal(byId.python.repairKind, 'auto');
+  assert.equal(byId.venv.repairKind, 'manual');
+  assert.equal(byId.os.repairKind, null);
+  assert.equal(byId.longPaths.actions.find((action) => action.id === 'enable').elevates, true);
+  assert.equal(byId.python.actions.find((action) => action.id === 'install').elevates, false);
+});
