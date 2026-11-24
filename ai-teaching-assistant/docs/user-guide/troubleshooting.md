@@ -168,6 +168,26 @@ If any model warmup fails, setup reports `SETUP INCOMPLETE` and exits with code 
 A package metadata check alone does not verify native DLL imports or model
 readiness. Resolve the reported error and rerun setup before starting services.
 
+## Persistent Smart App Control Blocks
+
+If the native-import error persists after the checks above and Smart App Control
+is confirmed as the cause, you can optionally turn it off in Windows 11.
+Prefer keeping it enabled when possible. Turning it off removes its protection
+against untrusted or malicious apps across the system, not just for Teaching
+Assistant; Smart App Control does not support per-app exceptions.
+
+1. Open **Windows Security** from the Start menu.
+2. Select **App & browser control** > **Smart App Control settings**.
+3. Check the current state. If it is **On**, select **Off** and confirm the prompt.
+4. Rerun the affected native-import check in a fresh process. If setup was
+  incomplete, rerun `.\setup_windows.ps1` and confirm model warmup succeeds
+  before starting services with `.\start_ata.ps1`.
+
+If it is already **Off**, do not disable other security features to
+resolve this error. Another application-control policy may be responsible;
+use the Code Integrity events shown above.
+
+
 ## RAG Warmup Skips the Local LLM
 
 For the local Windows configuration, warmup must use the same `.env` as
