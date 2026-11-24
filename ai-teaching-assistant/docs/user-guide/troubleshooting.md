@@ -26,65 +26,6 @@ If missing, rerun:
 .\setup_windows.ps1
 ```
 
-## FFmpeg Download Fails Behind a Corporate Proxy
-
-WinGet error `0x80072F0D` or a TLS `UntrustedRoot` error can mean that a
-TLS-inspecting corporate proxy signs downloads with a CA Windows does not trust.
-Changing PATH or opening another terminal cannot fix missing certificate trust.
-Setup shows concise progress messages and suppresses package-manager output.
-Set `$VerbosePreference = 'Continue'` before running setup to see fallback error
-details and installer exit codes when troubleshooting.
-
-If WinGet fails, setup now tries the publisher's direct
-[FFmpeg Essentials ZIP](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip)
-before trying Chocolatey. This avoids the GitHub release-assets download host
-when `gyan.dev` is reachable with normal certificate validation. The direct
-download uses `HTTPS_PROXY` (or `HTTP_PROXY` when unset), verifies the publisher's
-SHA-256 checksum before extraction, and installs under
-`%LOCALAPPDATA%\AI-Teaching-Assistant\ffmpeg`. It adds that installation's `bin`
-directory to the current process and persistent user PATH; no new terminal is
-required. This is a user-local Essentials build, not a WinGet-managed Full build.
-If already installed and usable, FFmpeg is left unchanged.
-
-The alternative host does not repair missing corporate CA trust for other
-downloads. If that host also fails TLS validation, use the approved CA option
-below; setup never disables verification.
-
-Smart Classroom Linux accepts an explicitly supplied `CORPORATE_CA_FILE` for
-its build trust store. Smart Classroom Windows uses Python `truststore` to read
-the Windows certificate store. WinGet already uses Windows trust, so adding
-`truststore` to Python alone cannot repair a missing Windows root CA.
-
-Teaching Assistant accepts the same optional `CORPORATE_CA_FILE` environment
-variable, or the equivalent setup argument:
-
-```powershell
-.\setup_windows.ps1 -CorporateCaFile 'C:\Certificates\intel-proxy-root.cer'
-```
-
-Alternatively, set the process environment before running setup:
-
-```powershell
-$env:CORPORATE_CA_FILE = 'C:\Certificates\intel-proxy-root.cer'
-.\setup_windows.ps1
-```
-
-Use an IT-approved public root CA file and verify its fingerprint with IT.
-Do not obtain the trusted root from an unverified intercepted connection.
-Supply a single certificate in DER or PEM format, not a PFX/private key or
-certificate bundle. Setup checks the CA role and validity dates, then imports
-it into `Cert:\CurrentUser\Root` before network-dependent setup steps. Existing
-entries are skipped. No certificate is imported when the option is unset.
-The environment input is read before the application's `.env` is loaded, so
-use the argument or process environment rather than an entry in `.env`.
-
-Unlike Linux's temporary build trust, this Windows trust entry persists and
-affects other applications using this user's Windows certificate store. Setup
-does not change machine-wide trust or disable TLS verification. If organizational
-policy prevents user-level root installation, have IT deploy the approved CA.
-Proxy routing remains separate: `HTTP_PROXY` and `HTTPS_PROXY` must be plain
-URLs, and WinGet's proxy configuration must follow your organization's policy.
-
 ## Windows Path-Length Error During Setup (WinError 206)
 
 **Symptom**:
@@ -227,32 +168,25 @@ If any model warmup fails, setup reports `SETUP INCOMPLETE` and exits with code 
 A package metadata check alone does not verify native DLL imports or model
 readiness. Resolve the reported error and rerun setup before starting services.
 
-## Smart App Control Blocks PyTorch `_C`
+## Persistent Smart App Control Blocks
 
-An error while importing `torch._C` that says an Application Control policy
-blocked the file is a Windows native-code enforcement failure, not a missing
-model or evidence that a submodule fix was not pushed. Check recent enforcement
-events to identify the binary that was blocked:
+If the native-import error persists after the checks above and Smart App Control
+is confirmed as the cause, you can optionally turn it off in Windows 11.
+Prefer keeping it enabled when possible. Turning it off removes its protection
+against untrusted or malicious apps across the system, not just for Teaching
+Assistant; Smart App Control does not support per-app exceptions.
 
-```powershell
-Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-CodeIntegrity/Operational'; Id=3077} -MaxEvents 10 |
-	Select-Object TimeCreated, Message | Format-List
-```
+1. Open **Windows Security** from the Start menu.
+2. Select **App & browser control** > **Smart App Control settings**.
+3. Check the current state. If it is **On**, select **Off** and confirm the prompt.
+4. Rerun the affected native-import check in a fresh process. If setup was
+  incomplete, rerun `.\setup_windows.ps1` and confirm model warmup succeeds
+  before starting services with `.\start_ata.ps1`.
 
-Test the installed build in a fresh process before changing versions:
+If it is already **Off**, do not disable other security features to
+resolve this error. Another application-control policy may be responsible;
+use the Code Integrity events shown above.
 
-```powershell
-& .\voice-enabled-interactions\smart-kiosk-assistant\rag-service\venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.ones(2).sum().item())"
-```
-
-On the tested Windows x64 / Python 3.12 installation, `torch==2.13.0+cpu`
-was initially blocked but later passed this check and a full local OpenVINO
-model export and preload with Smart App Control enabled, without reinstalling
-or changing versions. A `regex==2026.11.18` import also failed and later passed
-without replacement. The reason the enforcement outcome changed was not
-established; these results do not guarantee approval on another machine or a
-later run. Keep Smart App Control enabled. If blocking persists, consult the
-Windows security administrator rather than repeatedly changing unrelated pins.
 
 ## RAG Warmup Skips the Local LLM
 
