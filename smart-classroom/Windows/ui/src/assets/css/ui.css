@@ -383,6 +383,34 @@
   font-size: 11.5px;
 }
 
+/* --- download progress --- */
+
+.ui-banner-body .ui-download {
+  margin-top: 6px;
+}
+
+.ui-download {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 480px;
+}
+
+.ui-download-bar {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--sc-running);
+}
+
+.ui-download-text {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* --- status icon --- */
 
 .ui-status {

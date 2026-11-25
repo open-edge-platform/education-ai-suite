@@ -118,7 +118,9 @@ const paths = {
     return d ? path.join(d, '.proxy-config') : path.join(home(), '.proxy-config');
   },
   requirementsFile: () => path.join(home(), 'requirements.txt'),
-  dlStreamerScript: () => path.join(home(), 'Scripts', 'check_dlstreamer.ps1'),
+  // Runs the setup tasks that need administrator rights, behind one UAC
+  // prompt; it runs check_dlstreamer.ps1 next to it. See elevation.cjs.
+  adminTasksScript: () => path.join(home(), 'Scripts', 'run_admin_tasks.ps1'),
   convertVenvDir: () => (userDataDir()
     ? path.join(userDataDir(), 'venv_convert')
     : path.join(layoutServiceDir(), 'venv_convert')),

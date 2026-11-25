@@ -3,7 +3,8 @@
 
 // Steps that need administrator approval. They are approved or skipped before
 // the unattended part starts, and approved ones run first, so Windows asks
-// while the user is still here.
+// while the user is still here. It asks once for all of them: they run in one
+// elevated PowerShell (electron/services/elevation.cjs).
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -47,7 +48,7 @@ const AdminTasksPage: React.FC<AdminTasksPageProps> = ({
         title={t('assistant.pages.admin', 'Administrator tasks')}
         subtitle={t(
           'assistant.admin.lead',
-          'These change Windows itself, so Windows asks you to approve each one. Approved ones run first, while you are here; the rest needs nobody.'
+          'These change Windows itself, so Windows asks an administrator to approve them, once for all of them. The prompt names Windows PowerShell, which runs them. They run first, while you are here; the rest needs nobody.'
         )}
       />
 
@@ -57,9 +58,7 @@ const AdminTasksPage: React.FC<AdminTasksPageProps> = ({
         <label className="assistant-check">
           <input type="radio" name="assistant-admin" checked={approve} onChange={() => onApproveChange(true)} />
           {tasks.length > 1
-            ? t('assistant.admin.approveMany', 'Install them first. Windows asks for approval {{count}} times.', {
-                count: tasks.length,
-              })
+            ? t('assistant.admin.approveAll', 'Install them first. Windows asks for approval once, for all of them.')
             : t('assistant.admin.approveOne', 'Install it first. Windows asks for approval once.')}
         </label>
         <label className="assistant-check">

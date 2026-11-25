@@ -11,6 +11,7 @@ export { default as Banner } from './Banner';
 export type { BannerTone } from './Banner';
 export { default as Button } from './Button';
 export type { ButtonVariant } from './Button';
+export { default as DownloadBar } from './DownloadBar';
 export { default as LogViewer } from './LogViewer';
 export { default as PageHeader } from './PageHeader';
 export { Row, RowList } from './Row';

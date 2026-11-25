@@ -5,8 +5,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import '../../assets/css/Services.css';
 import type { ServiceSnapshot } from '../../types/services';
+import { runningDownload } from '../../services/downloadProgress';
 import { revealLogs, useServiceLogs, useServices } from '../../services/serviceManager';
-import { Banner, Button, LogViewer, PageHeader, Row, RowList, type StatusState } from '../ui';
+import { Banner, Button, DownloadBar, LogViewer, PageHeader, Row, RowList, type StatusState } from '../ui';
 
 const STATUS_LABELS: Record<string, string> = {
   stopped: 'services.status.stopped',
@@ -137,33 +138,43 @@ const ServicesScreen: React.FC<ServicesScreenProps> = ({ onOpenSetup }) => {
         <div className="services-pane">
           <div className="services-list">
             <RowList label={t('services.title', 'Services')}>
-              {tree.map(({ service, depth }) => (
-                <Row
-                  key={service.id}
-                  state={STATE[service.status] ?? 'pending'}
-                  title={
-                    <span style={{ paddingLeft: depth * 14 }}>
-                      {depth > 0 && <span className="services-tree-branch">└ </span>}
-                      {service.label}
-                    </span>
-                  }
-                  badge={service.external ? t('services.external', 'external') : undefined}
-                  meta={t(STATUS_LABELS[service.status] ?? service.status, service.status)}
-                  detail={
-                    <span className="services-row-meta" style={{ paddingLeft: depth * 14 }}>
-                      {[
-                        service.port ? `:${service.port}` : null,
-                        service.pid ? `pid ${service.pid}` : null,
-                        service.uptimeMs ? formatUptime(service.uptimeMs) : null,
-                      ]
-                        .filter(Boolean)
-                        .join('  ·  ') || '—'}
-                    </span>
-                  }
-                  selected={selectedId === service.id}
-                  onSelect={() => setSelectedId(service.id)}
-                />
-              ))}
+              {tree.map(({ service, depth }) => {
+                const download = runningDownload(service.download);
+                return (
+                  <Row
+                    key={service.id}
+                    state={STATE[service.status] ?? 'pending'}
+                    title={
+                      <span style={{ paddingLeft: depth * 14 }}>
+                        {depth > 0 && <span className="services-tree-branch">└ </span>}
+                        {service.label}
+                      </span>
+                    }
+                    badge={service.external ? t('services.external', 'external') : undefined}
+                    meta={t(STATUS_LABELS[service.status] ?? service.status, service.status)}
+                    detail={
+                      <>
+                        <span className="services-row-meta" style={{ paddingLeft: depth * 14 }}>
+                          {[
+                            service.port ? `:${service.port}` : null,
+                            service.pid ? `pid ${service.pid}` : null,
+                            service.uptimeMs ? formatUptime(service.uptimeMs) : null,
+                          ]
+                            .filter(Boolean)
+                            .join('  ·  ') || '—'}
+                        </span>
+                        {download && (
+                          <div style={{ paddingLeft: depth * 14 }}>
+                            <DownloadBar progress={download} named />
+                          </div>
+                        )}
+                      </>
+                    }
+                    selected={selectedId === service.id}
+                    onSelect={() => setSelectedId(service.id)}
+                  />
+                );
+              })}
             </RowList>
           </div>
 

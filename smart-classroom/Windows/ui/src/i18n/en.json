@@ -1,13 +1,12 @@
 {
     "assistant": {
       "admin": {
-        "approveMany": "Install them first. Windows asks for approval {{count}} times.",
-        "approveMany_other": "Install them first. Windows asks for approval {{count}} times.",
         "approveOne": "Install it first. Windows asks for approval once.",
         "dlStreamer": "Runs the video analytics pipelines.",
-        "lead": "These change Windows itself, so Windows asks you to approve each one. Approved ones run first, while you are here; the rest needs nobody.",
+        "lead": "These change Windows itself, so Windows asks an administrator to approve them, once for all of them. The prompt names Windows PowerShell, which runs them. They run first, while you are here; the rest needs nobody.",
         "longPaths": "Lets downloads with deep folder paths succeed.",
-        "skip": "Skip for now. What needs them will not work until they are installed here or on the Setup screen."
+        "skip": "Skip for now. What needs them will not work until they are installed here or on the Setup screen.",
+        "approveAll": "Install them first. Windows asks for approval once, for all of them."
       },
       "back": "Back",
       "checking": "Checking…",
@@ -42,12 +41,14 @@
         "approve": "Install now",
         "cancel": "Cancel",
         "causes": {
-          "certificate": "A download was refused because the connection is inspected and its certificate is not trusted. Ask your IT department, or try another network.",
+          "certificate": "A download was refused because the connection is inspected and its certificate is not trusted. Check your network settings, or try another network.",
           "disk": "The disk is full. Free some space, then retry.",
           "filesInUse": "Files that setup has to replace are in use. Close other Smart Classroom windows, then retry.",
           "network": "A download failed. Check the network settings, then retry.",
           "other": "A step failed. The details below show what it reported.",
-          "backendRunning": "The backend is using files this step replaces. Stop it on the Services screen, then retry."
+          "backendRunning": "The backend is using files this step replaces. Stop it on the Services screen, then retry.",
+          "declined": "Windows asked for administrator approval, and it was not given. Try again and approve the prompt; it names Windows PowerShell.",
+          "rateLimit": "The model hub is turning away downloads from this network for now. Wait a few minutes, then retry, or download from the other model source (network settings)."
         },
         "copied": "Copied",
         "copy": "Copy diagnostics",
@@ -63,16 +64,15 @@
         "stopped": "Nothing is lost: what finished stays installed, and Resume picks up the rest.",
         "stoppedTitle": "Setup stopped",
         "title": "Installing",
-        "openSetup": "Open the Setup screen"
+        "openSetup": "Open the Setup screen",
+        "cancelling": "Cancelling…"
       },
       "installButton": "Install",
       "network": {
-        "countdown": "Setup could not reach the download hosts. Fix the proxy below, or it tries anyway in {{seconds}} s.",
         "hubSuggested": "{{unreachable}} cannot be reached from here, so models will come from {{source}}.",
         "lead": "Setup downloads Python packages, installers and AI models. Behind a proxy, enter it here; the test shows what each download host answers.",
         "saveRetry": "Save and retry",
-        "stay": "Stop the countdown",
-        "tryAnyway": "Try anyway"
+        "unreachable": "Setup could not reach the download hosts, so it has not started installing. Fix the proxy below, then continue."
       },
       "next": "Next",
       "pages": {
@@ -141,7 +141,7 @@
       "direct": "Direct connection",
       "hosts": {
         "huggingface": "Models from Hugging Face",
-        "installers": "Installers for Python, FFmpeg and DL Streamer",
+        "installers": "Installers",
         "modelscope": "Models from ModelScope",
         "packages": "Python packages"
       },
@@ -203,7 +203,7 @@
       },
       "problems": "What needs fixing",
       "needsAdmin": "needs administrator",
-      "adminNote": "Windows asks an administrator to approve each item marked “needs administrator”.",
+      "adminNote": "Windows asks an administrator to approve the items marked “needs administrator”, once for all of them. The prompt names Windows PowerShell.",
       "proxySettings": "Proxy settings",
       "allChecks": "All checks",
       "showChecks": "All checks ({{count}})",
@@ -211,7 +211,8 @@
       "showOutput": "Show output",
       "hideOutput": "Hide output",
       "menuBadge": "{{count}} item needs fixing",
-      "menuBadge_other": "{{count}} items need fixing"
+      "menuBadge_other": "{{count}} items need fixing",
+      "cancelling": "Cancelling…"
     },
     "config": {
       "title": "Configuration",
@@ -304,7 +305,17 @@
         "openFolder": "Open folder",
         "empty": "No output captured yet."
       },
-      "openSetup": "Open Setup"
+      "openSetup": "Open Setup",
+      "download": {
+        "starting": "Starting the download…",
+        "sizes": "{{done}} of {{total}}",
+        "speed": "{{speed}}/s",
+        "secondsLeft": "less than a minute left",
+        "minutesLeft": "about {{minutes}} min left",
+        "hoursLeft": "about {{hours}} h {{minutes}} min left",
+        "wholeHoursLeft": "about {{hours}} h left",
+        "label": "Downloading {{model}} from {{hub}}"
+      }
     },
     "header": {
       "title": "Smart Classroom Sample App",

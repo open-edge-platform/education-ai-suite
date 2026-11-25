@@ -208,19 +208,41 @@ const checked = (state, { network = { ok: true }, diskLow = false } = {}) =>
 test('the checks lead to a countdown, which runs here whether or not a window shows it', () => {
   const state = checked(initialState());
   assert.equal(state.phase, PHASE.COUNTDOWN);
-  assert.equal(state.caution, null);
-  assert.equal(state.endsAt, NOW + COUNTDOWN_SECONDS.READY * 1000);
+  assert.equal(state.endsAt, NOW + COUNTDOWN_SECONDS * 1000);
 });
 
-test('a failed network test or low disk space lengthens the countdown rather than stopping it', () => {
-  const network = checked(initialState(), { network: { ok: false } });
-  assert.equal(network.phase, PHASE.COUNTDOWN);
-  assert.equal(network.caution, 'network');
-  assert.equal(network.endsAt, NOW + COUNTDOWN_SECONDS.CAUTION * 1000);
-
+test('low disk space stops the flow until someone accepts it', () => {
   const disk = checked(initialState(), { diskLow: true });
-  assert.equal(disk.caution, 'disk');
-  assert.equal(disk.endsAt, NOW + COUNTDOWN_SECONDS.CAUTION * 1000);
+  assert.equal(disk.phase, PHASE.WAITING);
+  assert.equal(disk.held, 'disk');
+  assert.equal(disk.endsAt, null);
+  assert.equal(next(disk, { type: 'timeout' }, NOW), disk);
+  assert.equal(checked(initialState({ autoStart: false }), { diskLow: true }).held, 'disk');
+  // Installing is the user's choice, with their settings.
+  const installing = next(disk, { type: 'installNow' }, NOW);
+  assert.equal(installing.phase, PHASE.INSTALLING);
+  assert.equal(installing.recommended, false);
+  // The installation the user agreed to before the app was closed goes on.
+  assert.equal(checked(initialState({ resume: true }), { diskLow: true }).phase, PHASE.INSTALLING);
+});
+
+test('a failed network test stops the flow until someone fixes the network', () => {
+  for (const network of [{ ok: false }, null]) {
+    const state = checked(initialState(), { network, diskLow: true });
+    assert.equal(state.phase, PHASE.WAITING);
+    // The network first: it is what the user can fix on the page that shows.
+    assert.equal(state.held, 'network');
+    assert.equal(state.endsAt, null);
+    // Nothing counts down, so nothing installs by itself.
+    assert.equal(next(state, { type: 'timeout' }, NOW), state);
+  }
+  // Even with automatic start off: the network is what needs a person.
+  assert.equal(checked(initialState({ autoStart: false }), { network: { ok: false } }).held, 'network');
+  // A user who already chose to customize keeps their place.
+  const customizing = next(initialState(), { type: 'hold', reason: 'customize' }, NOW);
+  assert.equal(checked(customizing, { network: { ok: false } }).held, 'customize');
+  // The installation the user agreed to before the app was closed goes on.
+  assert.equal(checked(initialState({ resume: true }), { network: { ok: false } }).phase, PHASE.INSTALLING);
 });
 
 test('with automatic start off, the flow waits for a choice', () => {
@@ -335,7 +357,7 @@ test('installation waits for the countdown', async (t) => {
   await waitFor(controller, inPhase(PHASE.COUNTDOWN));
 
   assert.equal(timers.length, 1);
-  assert.equal(timers[0].ms, COUNTDOWN_SECONDS.READY * 1000);
+  assert.equal(timers[0].ms, COUNTDOWN_SECONDS * 1000);
   assert.deepEqual(runner.runs, []);
 
   timers[0].fn();
@@ -343,16 +365,17 @@ test('installation waits for the countdown', async (t) => {
   assert.deepEqual(runner.runs, [false]);
 });
 
-test('a failed network test still installs after the long countdown, changing nothing', async (t) => {
+test('a failed network test waits for the user, who installs with their own settings', async (t) => {
   const { controller, runner, timers, applied } = harness(t, { network: FAILED_NETWORK });
   controller.start();
-  const countdown = await waitFor(controller, inPhase(PHASE.COUNTDOWN));
+  const waiting = await waitFor(controller, inPhase(PHASE.WAITING));
 
-  assert.equal(countdown.caution, 'network');
-  assert.equal(countdown.network.ok, false);
-  assert.equal(timers[0].ms, COUNTDOWN_SECONDS.CAUTION * 1000);
+  assert.equal(waiting.held, 'network');
+  assert.equal(waiting.network.ok, false);
+  assert.deepEqual(timers, []);
+  assert.deepEqual(runner.runs, []);
 
-  timers[0].fn();
+  controller.send('installNow');
   await waitFor(controller, inPhase(PHASE.FINISHED));
   assert.deepEqual(runner.runs, [false]);
   assert.deepEqual(applied, []);

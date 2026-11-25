@@ -3,21 +3,20 @@
 
 // How the downloads connect: the proxy, a test of what it reaches, and where
 // models come from. The same ProxySettings as the Configuration screen. Shown
-// when customizing, when the network test failed during the countdown, and to
-// fix the network after a failed installation.
+// when customizing, when the network test failed (the flow then waits here),
+// and to fix the network after a failed installation.
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useConfig } from '../../services/configManager';
 import { useSettingsDraft } from '../../services/settingsDraft';
-import { useNow } from '../../hooks/useNow';
 import ProblemBanners from '../setup/ProblemBanners';
 import ProxySettings from '../setup/ProxySettings';
 import { proxyDraft, proxyPrefill, savedProxy } from '../setup/proxyModel';
 import { Banner, Button, PageHeader } from '../ui';
-import { secondsLeft, type ActiveSnapshot } from './assistantModel';
+import type { ActiveSnapshot } from './assistantModel';
 
-export type NetworkMode = 'customize' | 'countdown' | 'retry';
+export type NetworkMode = 'customize' | 'retry';
 
 interface NetworkPageProps {
   mode: NetworkMode;
@@ -25,13 +24,9 @@ interface NetworkPageProps {
   onBack?: () => void;
   /** Saved; go on (customize) or install again (retry). */
   onContinue?: () => void;
-  /** Install with what there is, now (countdown). */
-  onInstallNow?: () => void;
-  /** The user acted on the page: stop the countdown. */
-  onInterrupt?: () => void;
 }
 
-const NetworkPage: React.FC<NetworkPageProps> = ({ mode, snapshot, onBack, onContinue, onInstallNow, onInterrupt }) => {
+const NetworkPage: React.FC<NetworkPageProps> = ({ mode, snapshot, onBack, onContinue }) => {
   const { t } = useTranslation();
   const { description, save, saving, error } = useConfig();
   // The proxy first, then where models come from.
@@ -61,12 +56,8 @@ const NetworkPage: React.FC<NetworkPageProps> = ({ mode, snapshot, onBack, onCon
     if (Object.keys(initial).length) setDraft(initial);
   }, [description, network, setDraft]);
 
-  const counting = snapshot.phase === 'countdown';
-  const now = useNow(counting);
-  const seconds = secondsLeft(snapshot.endsAt, now);
-  const interact = () => {
-    if (counting) onInterrupt?.();
-  };
+  // The network test failed, so the flow waits here instead of installing.
+  const unreachable = mode === 'customize' && snapshot.phase === 'waiting' && !network?.ok;
 
   const commit = async () => {
     if (changes.length && !(await save(changes))) return false;
@@ -85,12 +76,11 @@ const NetworkPage: React.FC<NetworkPageProps> = ({ mode, snapshot, onBack, onCon
         )}
       />
 
-      {counting && (
+      {unreachable && (
         <Banner tone="warning">
           {t(
-            'assistant.network.countdown',
-            'Setup could not reach the download hosts. Fix the proxy below, or it tries anyway in {{seconds}} s.',
-            { seconds }
+            'assistant.network.unreachable',
+            'Setup could not reach the download hosts, so it has not started installing. Fix the proxy below, then continue.'
           )}
         </Banner>
       )}
@@ -113,34 +103,18 @@ const NetworkPage: React.FC<NetworkPageProps> = ({ mode, snapshot, onBack, onCon
           fields={fields}
           draft={draft}
           byField={byField}
-          onChange={(field, value) => {
-            interact();
-            setValue(field, value);
-          }}
+          onChange={setValue}
           initialResults={network?.chosen?.results ?? network?.tried?.[0]?.results}
-          onInteract={interact}
         />
       )}
 
       <div className="assistant-actions">
-        {mode === 'countdown' && (
-          <>
-            <Button onClick={interact}>{t('assistant.network.stay', 'Stop the countdown')}</Button>
-            <Button variant="primary" onClick={onInstallNow}>
-              {t('assistant.network.tryAnyway', 'Try anyway')}
-            </Button>
-          </>
-        )}
-        {mode !== 'countdown' && (
-          <>
-            <Button disabled={saving} onClick={onBack}>
-              {t('assistant.back', 'Back')}
-            </Button>
-            <Button variant="primary" disabled={saving || !description || blocking.length > 0} onClick={async () => (await commit()) && onContinue?.()}>
-              {mode === 'retry' ? t('assistant.network.saveRetry', 'Save and retry') : t('assistant.next', 'Next')}
-            </Button>
-          </>
-        )}
+        <Button disabled={saving} onClick={onBack}>
+          {t('assistant.back', 'Back')}
+        </Button>
+        <Button variant="primary" disabled={saving || !description || blocking.length > 0} onClick={async () => (await commit()) && onContinue?.()}>
+          {mode === 'retry' ? t('assistant.network.saveRetry', 'Save and retry') : t('assistant.next', 'Next')}
+        </Button>
       </div>
     </div>
   );

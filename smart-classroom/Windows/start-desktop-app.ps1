@@ -14,7 +14,7 @@
 
     It never elevates: steps that need Administrator, such as enabling Windows
     long paths or installing DL Streamer, are left for the app's Setup screen,
-    which raises their UAC prompt when selected.
+    which raises one UAC prompt for all of them when selected.
 
     Node is required for `npm install` and `npm run build` only. Once node_modules
     and dist exist, the app runs on Electron's own embedded Node.

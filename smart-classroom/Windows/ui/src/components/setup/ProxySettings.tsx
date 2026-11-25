@@ -29,8 +29,6 @@ interface ProxySettingsProps {
   /** Results already known, such as the first-run test's. Shown until the values change. */
   initialResults?: HostResult[];
   onTested?: (result: NetworkProbeResult) => void;
-  /** The user acted here, which stops the first-run countdown. */
-  onInteract?: () => void;
   flashedKey?: string | null;
   idPrefix?: string;
 }
@@ -43,7 +41,6 @@ const ProxySettings: React.FC<ProxySettingsProps> = ({
   onChange,
   initialResults,
   onTested,
-  onInteract,
   flashedKey,
   idPrefix,
 }) => {
@@ -66,7 +63,6 @@ const ProxySettings: React.FC<ProxySettingsProps> = ({
   const results = tested?.results ?? (stale ? [] : initialResults ?? []);
 
   const runTest = async () => {
-    onInteract?.();
     setTesting(true);
     setError('');
     try {
@@ -81,7 +77,7 @@ const ProxySettings: React.FC<ProxySettingsProps> = ({
   };
 
   return (
-    <div className="proxy-settings" onFocusCapture={onInteract}>
+    <div className="proxy-settings">
       <SettingsFields
         fields={fields}
         allFields={description.fields}

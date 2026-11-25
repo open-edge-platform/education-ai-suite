@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // runAutomatic() is what prepares a fresh machine on first launch. These tests
-// seed the state a fresh machine would check to and stub runStep, so nothing is
-// installed: what is under test is which steps run, in what order, and which
-// are left for the Setup screen.
+// seed the state a fresh machine would check to and stub runStep and runAdmin,
+// so nothing is installed: what is under test is which steps run, in what
+// order, and which are left for the Setup screen.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,6 +21,11 @@ registry.effectivelyEnabled = (id) => (id in featureOverrides ? featureOverrides
 
 const quietLogs = { note() { }, openSink() { }, closeSink() { } };
 
+// Never the real helper: it would raise a UAC prompt.
+const noElevation = () => {
+  throw new Error('The administrator helper must not run in tests.');
+};
+
 // A fresh machine: no Python, FFmpeg or environment, long paths off, no DL
 // Streamer. Every other step is satisfied.
 const FRESH = {
@@ -33,7 +38,7 @@ const FRESH = {
 
 function runner({ fail = [], onRun, features = {} } = {}) {
   featureOverrides = { video_analytics: true, ...features };
-  const setup = new SetupRunner(quietLogs);
+  const setup = new SetupRunner(quietLogs, { adminTasks: noElevation });
   for (const id of setup.state.keys()) {
     setup.state.set(id, { ...setup.state.get(id), status: 'ok', repair: null });
   }
@@ -42,7 +47,7 @@ function runner({ fail = [], onRun, features = {} } = {}) {
   }
 
   const calls = [];
-  setup.runStep = async (stepId, actionId) => {
+  const ran = (stepId, actionId) => {
     calls.push(`${stepId}:${actionId}`);
     onRun?.(stepId, setup);
     if (fail.includes(stepId)) {
@@ -52,7 +57,23 @@ function runner({ fail = [], onRun, features = {} } = {}) {
     setup.state.set(stepId, { ...setup.state.get(stepId), status: 'ok', repair: null });
     return setup.state.get(stepId);
   };
-  return { setup, calls };
+  setup.runStep = async (stepId, actionId) => ran(stepId, actionId);
+
+  // The administrator tasks, which a run hands over together: one batch is
+  // one UAC prompt.
+  const batches = [];
+  setup.runAdmin = async (entries) => {
+    batches.push(entries.map(({ step }) => step.id));
+    return entries.map(({ step, action }) => {
+      try {
+        ran(step.id, action.id);
+        return { step, ok: true, skipped: false, error: null };
+      } catch (error) {
+        return { step, ok: false, skipped: false, error };
+      }
+    });
+  };
+  return { setup, calls, batches };
 }
 
 test('a fresh machine gets Python, FFmpeg and the environment, in that order', async () => {
@@ -160,9 +181,25 @@ test('with approval, plan() and the run put the elevated steps first', async () 
 
   const result = await setup.runAutomatic({ includeElevated: true });
 
-  // The prompts come while the person who approved them is still there.
+  // The prompt comes while the person who approved it is still there.
   assert.deepEqual(calls, ['longPaths:enable', 'dlStreamer:install', 'python:install', 'ffmpeg:install', 'venv:create']);
+  assert.deepEqual(result.ran, ['longPaths', 'dlStreamer', 'python', 'ffmpeg', 'venv']);
   assert.deepEqual(result.manual, []);
+});
+
+test('the approved administrator tasks run together, behind one prompt', async () => {
+  const { setup, batches } = runner();
+  await setup.runAutomatic({ includeElevated: true });
+  assert.deepEqual(batches, [['longPaths', 'dlStreamer']]);
+});
+
+test('an administrator task that fails is reported like any other step', async () => {
+  const { setup, calls } = runner({ fail: ['dlStreamer'] });
+  const result = await setup.runAutomatic({ includeElevated: true });
+  assert.deepEqual(result.failed, [{ id: 'dlStreamer', error: 'dlStreamer failed' }]);
+  assert.ok(result.ran.includes('longPaths'));
+  // Nothing else needs DL Streamer, so the rest still runs.
+  assert.ok(calls.includes('venv:create'));
 });
 
 test('approval still never runs a destructive repair', async () => {

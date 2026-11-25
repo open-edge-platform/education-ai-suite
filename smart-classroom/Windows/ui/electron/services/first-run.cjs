@@ -35,10 +35,11 @@ const PHASE = {
 };
 
 // Seconds before the recommended installation starts by itself: long enough
-// to read the page and choose Customize, and longer when the checks found
-// something a person at the screen should see first. Never forever: nobody
-// may be there (design, D6).
-const COUNTDOWN_SECONDS = { READY: 15, CAUTION: 60 };
+// to read the page and choose Customize. Never forever when the checks pass:
+// nobody may be there (design, D6). A failed network test or a nearly full
+// disk stops the flow instead, because installing then fails, or fills the
+// disk, partway through.
+const COUNTDOWN_SECONDS = 15;
 
 // ---------------------------------------------------------------------------
 // Record
@@ -91,11 +92,10 @@ function initialState({ resume = false, autoStart = true } = {}) {
     resume,
     autoStart,
     // Why the flow waits instead of counting down: 'choice' (automatic start
-    // is off), 'customize', 'setup' (someone started a setup step by hand) or
+    // is off), 'customize', 'network' (the network test failed), 'disk' (the
+    // disk is nearly full), 'setup' (someone started a setup step by hand) or
     // 'cancelled'.
     held: null,
-    // Why a countdown is the long one: 'network' or 'disk'.
-    caution: null,
     endsAt: null,
     network: null,
     diskLow: false,
@@ -108,7 +108,7 @@ function initialState({ resume = false, autoStart = true } = {}) {
 }
 
 function installing(state, { recommended }) {
-  return { ...state, phase: PHASE.INSTALLING, recommended, held: null, caution: null, endsAt: null };
+  return { ...state, phase: PHASE.INSTALLING, recommended, held: null, endsAt: null };
 }
 
 /** The flow as a pure function of its state, an event and the time. */
@@ -120,10 +120,14 @@ function next(state, event, now) {
       // The user already agreed to install, before the app was closed.
       if (state.resume) return installing(checked, { recommended: false });
       if (state.held) return { ...checked, phase: PHASE.WAITING };
+      // The downloads cannot get through, or the test could not run: wait for
+      // someone to fix the network rather than install into a failure.
+      if (!checked.network?.ok) return { ...checked, phase: PHASE.WAITING, held: 'network' };
+      // Running out of space mid-download is the hardest failure to recover
+      // from: installing takes a deliberate yes.
+      if (checked.diskLow) return { ...checked, phase: PHASE.WAITING, held: 'disk' };
       if (!state.autoStart) return { ...checked, phase: PHASE.WAITING, held: 'choice' };
-      const caution = !checked.network?.ok ? 'network' : checked.diskLow ? 'disk' : null;
-      const seconds = caution ? COUNTDOWN_SECONDS.CAUTION : COUNTDOWN_SECONDS.READY;
-      return { ...checked, phase: PHASE.COUNTDOWN, caution, endsAt: now + seconds * 1000 };
+      return { ...checked, phase: PHASE.COUNTDOWN, endsAt: now + COUNTDOWN_SECONDS * 1000 };
     }
 
     case 'timeout':
@@ -132,7 +136,7 @@ function next(state, event, now) {
     case 'hold':
       if (state.phase === PHASE.CHECKING) return state.held ? state : { ...state, held: event.reason };
       if (state.phase === PHASE.COUNTDOWN) {
-        return { ...state, phase: PHASE.WAITING, held: event.reason, caution: null, endsAt: null };
+        return { ...state, phase: PHASE.WAITING, held: event.reason, endsAt: null };
       }
       // Already waiting, for example with automatic start off: Customize
       // still has to take the user through the pages.
@@ -156,7 +160,7 @@ function next(state, event, now) {
 
     case 'manual':
       if (![PHASE.CHECKING, PHASE.COUNTDOWN, PHASE.WAITING].includes(state.phase)) return state;
-      return { ...state, phase: PHASE.MANUAL, held: null, caution: null, endsAt: null };
+      return { ...state, phase: PHASE.MANUAL, held: null, endsAt: null };
 
     case 'installEnded':
       if (state.phase !== PHASE.INSTALLING) return state;
@@ -285,12 +289,11 @@ class FirstRunController extends EventEmitter {
     const record = this.currentRecord();
     const view = record ? { stage: record.stage, mode: record.mode, completedAt: record.completedAt } : null;
     if (!this.state) return { active: false, record: view };
-    const { phase, held, caution, endsAt, diskLow, recommended, includeElevated, network, result } = this.state;
+    const { phase, held, endsAt, diskLow, recommended, includeElevated, network, result } = this.state;
     return {
       active: true,
       phase,
       held,
-      caution,
       endsAt,
       diskLow,
       recommended,

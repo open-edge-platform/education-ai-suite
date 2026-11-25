@@ -23,16 +23,20 @@ them, tails their logs, edits the configuration files and runs first-time setup.
 
 On the first launch the app opens the **setup assistant**, which checks the PC
 and the network, then installs with recommended settings after a short
-countdown unless the user chooses **Customize** (design:
+countdown unless the user chooses **Customize**. When the network test fails or
+the disk is nearly full, it waits for the user instead (design:
 [first-run-wizard-design.md](../../docs/dev-guide/first-run-wizard/first-run-wizard-design.md)).
 On later launches it prepares and starts the backend by itself: when the Python
 environment is fine, the backend starts after that one check; when it is
 broken, the app runs each repair that needs no Administrator rights and no
 confirmation, then starts the backend. Enabling long paths, installing DL
 Streamer and **Recreate** always wait for the user, because they raise a UAC
-prompt or delete files. To see the first launch again, delete
-`state\first-run.json` (`logs\state\` in a source checkout) and move the Python
-environment aside.
+prompt or delete files. Once approved, long paths and DL Streamer run together
+in one elevated helper, `Scripts\run_admin_tasks.ps1`, so Windows asks once
+and its prompt names Windows PowerShell
+([`electron/services/elevation.cjs`](electron/services/elevation.cjs)).
+To see the first launch again, delete `state\first-run.json` (`logs\state\` in
+a source checkout) and move the Python environment aside.
 
 - `SC_AUTO_START_BACKEND=1` / `0` turns this on or off. The script sets `1`, or
   `0` with `-NoAutoStart`. When the variable is unset, the installed app does it
@@ -124,6 +128,16 @@ Secrets never cross the boundary: `models.asr.hf_token` is reported to the UI as
 "set" or "not set", and is only written when the user types a replacement.
 
 `contextIsolation`, `sandbox` and `webSecurity` are on; `nodeIntegration` is off.
+
+Model downloads show real progress. The backend and the setup scripts run with
+`SC_PROGRESS_EVENTS=1`, and with it
+[`utils/download_progress.py`](../utils/download_progress.py) prints a
+`@@download {json}` line at most twice a second while a model downloads. The
+process manager and the setup runner take those lines out of the log and keep
+the latest on the service or the setup step
+([`electron/services/download-progress.cjs`](electron/services/download-progress.cjs)),
+and the screens draw it with `DownloadBar`. Details: Section 8.4 of the
+[first-run design](../../docs/dev-guide/first-run-wizard/first-run-wizard-design.md).
 
 ## Browser UI (deprecated)
 

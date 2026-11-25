@@ -59,6 +59,6 @@ export function hostGroupText(t: TFunction, group: HostGroup): string {
     case 'modelscope':
       return t('network.hosts.modelscope', 'Models from ModelScope');
     default:
-      return t('network.hosts.installers', 'Installers for Python, FFmpeg and DL Streamer');
+      return t('network.hosts.installers', 'Installers');
   }
 }

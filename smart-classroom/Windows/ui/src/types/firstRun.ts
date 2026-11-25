@@ -8,10 +8,7 @@
 export type FirstRunPhase = 'checking' | 'countdown' | 'waiting' | 'installing' | 'finished' | 'manual';
 
 /** Why the flow waits instead of counting down. */
-export type FirstRunHold = 'choice' | 'customize' | 'setup' | 'cancelled';
-
-/** Why a countdown is the long one. */
-export type FirstRunCaution = 'network' | 'disk';
+export type FirstRunHold = 'choice' | 'customize' | 'network' | 'disk' | 'setup' | 'cancelled';
 
 /** The only choices the window can send. */
 export type FirstRunChoice = 'customize' | 'installNow' | 'approveElevated' | 'manual';
@@ -90,7 +87,6 @@ export type FirstRunSnapshot =
       active: true;
       phase: FirstRunPhase;
       held: FirstRunHold | null;
-      caution: FirstRunCaution | null;
       /** Epoch milliseconds when the countdown ends; null outside it. */
       endsAt: number | null;
       diskLow: boolean;

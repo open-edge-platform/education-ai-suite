@@ -37,13 +37,13 @@ const WelcomePage: React.FC<WelcomePageProps> = ({
   const counting = snapshot.phase === 'countdown';
   const now = useNow(counting);
   const seconds = secondsLeft(snapshot.endsAt, now);
-  const total = snapshot.caution ? 60 : 15;
+  const total = 15;
 
   const warnings = steps.filter((step) => step.status === 'warn').length;
   const network = snapshot.network;
   const hub = network?.suggestedHub ?? network?.hub ?? 'huggingface';
-  // Once nothing counts down, installing on a nearly full disk takes a deliberate yes.
-  const needsDiskYes = snapshot.diskLow && !counting;
+  // A nearly full disk stops the flow; installing then takes a deliberate yes.
+  const needsDiskYes = snapshot.diskLow;
 
   return (
     <div className="assistant-page">

@@ -74,8 +74,7 @@ const SetupAssistant: React.FC<SetupAssistantProps> = ({ snapshot, send, onOpenS
   };
 
   // Without a deliberate yes, a nearly full disk keeps the installation from
-  // starting once nothing counts down; and the flow installs only once its
-  // checks are done.
+  // starting; and the flow installs only once its checks are done.
   const diskBlocked = snapshot.diskLow && !diskAccepted;
   const installBlocked = diskBlocked || snapshot.phase === 'checking';
   // That yes is given on the page whose button installs.
@@ -98,16 +97,21 @@ const SetupAssistant: React.FC<SetupAssistantProps> = ({ snapshot, send, onOpenS
           />
         );
       case 'network': {
-        const mode: NetworkMode =
-          snapshot.phase === 'countdown' ? 'countdown' : snapshot.held === 'customize' ? 'customize' : 'retry';
+        const mode: NetworkMode = snapshot.held === 'customize' || snapshot.held === 'network' ? 'customize' : 'retry';
+        // From Done: the installation worked and the backend's first start did
+        // not, so trying again means starting the backend, not installing.
+        const restart = snapshot.phase === 'finished' && !!snapshot.result?.envOk;
+        const retry = () => {
+          if (!restart) return install(snapshot.includeElevated);
+          setChosen(null);
+          void start('backend');
+        };
         return (
           <NetworkPage
             mode={mode}
             snapshot={snapshot}
             onBack={() => setChosen(mode === 'retry' ? null : 'welcome')}
-            onContinue={() => (mode === 'retry' ? install(snapshot.includeElevated) : setChosen('features'))}
-            onInstallNow={() => install(false)}
-            onInterrupt={() => stopCountdown('network')}
+            onContinue={() => (mode === 'retry' ? retry() : setChosen('features'))}
           />
         );
       }
@@ -154,6 +158,7 @@ const SetupAssistant: React.FC<SetupAssistantProps> = ({ snapshot, send, onOpenS
             onStartBackend={() => void start('backend')}
             onOpenApp={onFinish}
             onOpenServices={() => onOpenScreen('services')}
+            onNetwork={() => setChosen('network')}
           />
         );
       default:

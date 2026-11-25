@@ -4,6 +4,8 @@
 // Shapes returned by the Electron setup IPC bridge. Kept in sync with
 // electron/services/setup-runner.cjs.
 
+import type { DownloadProgress } from './download';
+
 export type SetupStatus = 'unknown' | 'ok' | 'warn' | 'outdated' | 'missing' | 'running' | 'failed';
 
 export interface SetupAction {
@@ -43,6 +45,8 @@ export interface SetupStep {
   repairKind: 'auto' | 'elevated' | 'manual' | null;
   /** A command or link the user can use when the app cannot fix it. */
   hint: string | null;
+  /** While an action of this step runs: the model download it last reported. */
+  progress?: DownloadProgress | null;
 }
 
 /**

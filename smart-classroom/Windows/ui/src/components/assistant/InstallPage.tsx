@@ -9,10 +9,11 @@ import { useTranslation } from 'react-i18next';
 import type { SetupStep } from '../../types/setup';
 import { cancelSetup, copyText, revealSetupLogs, useSetupLogs } from '../../services/setupManager';
 import { classifyFailure, isNetworkCause, type FailureCause } from '../../services/setupFailure';
+import { runningDownload } from '../../services/downloadProgress';
 import { formatElapsed, useNow, useStartTimes } from '../../hooks/useNow';
 import SetupStepList from '../setup/SetupStepList';
 import { useFailureText } from '../setup/failureText';
-import { Banner, Button, LogViewer, PageHeader, Row, type StatusState } from '../ui';
+import { Banner, Button, DownloadBar, LogViewer, PageHeader, Row, type StatusState } from '../ui';
 import { awaitingApproval, installSteps, itemStatus, stepCounter, type ActiveSnapshot, type ItemStatus } from './assistantModel';
 
 const STATE: Record<ItemStatus, StatusState> = { pending: 'pending', running: 'running', done: 'ok', failed: 'failed' };
@@ -37,6 +38,15 @@ const InstallPage: React.FC<InstallPageProps> = ({ snapshot, steps, onApprove, o
   const installing = snapshot.phase === 'installing';
   const cancelled = snapshot.phase === 'waiting' && snapshot.held === 'cancelled';
   const failed = snapshot.phase === 'finished' && !snapshot.result?.envOk;
+
+  // Disabled once clicked, until the installation stops: an administrator
+  // task under way runs to its end first, which can take minutes.
+  const [cancelling, setCancelling] = useState(false);
+  if (cancelling && !installing) setCancelling(false);
+  const requestCancel = () => {
+    setCancelling(true);
+    cancelSetup().catch(() => setCancelling(false));
+  };
 
   const queue = useMemo(() => installSteps(snapshot.plan, steps, snapshot.includeElevated), [snapshot, steps]);
   const statusOf = (step: SetupStep) => itemStatus(step, snapshot.phase === 'finished');
@@ -113,7 +123,13 @@ const InstallPage: React.FC<InstallPageProps> = ({ snapshot, steps, onApprove, o
         meta={(step) =>
           statusOf(step) === 'running' && startedAt[step.id] ? formatElapsed(now - startedAt[step.id]) : null
         }
-        more={(step) => statusOf(step) === 'running' && lastLine && <span className="ui-row-line">{lastLine}</span>}
+        more={(step) => {
+          if (statusOf(step) !== 'running') return null;
+          // A model download shows how far it is; anything else its last line.
+          const progress = runningDownload(step.progress);
+          if (progress) return <DownloadBar progress={progress} named />;
+          return lastLine && <span className="ui-row-line">{lastLine}</span>;
+        }}
       >
         <Row state="pending" title={t('assistant.install.firstStart', 'First start: download the AI models')} />
       </SetupStepList>
@@ -123,7 +139,11 @@ const InstallPage: React.FC<InstallPageProps> = ({ snapshot, steps, onApprove, o
       )}
 
       <div className="assistant-actions">
-        {installing && <Button onClick={() => void cancelSetup().catch(() => undefined)}>{t('assistant.install.cancel', 'Cancel')}</Button>}
+        {installing && (
+          <Button disabled={cancelling} onClick={requestCancel}>
+            {cancelling ? t('assistant.install.cancelling', 'Cancelling…') : t('assistant.install.cancel', 'Cancel')}
+          </Button>
+        )}
         {(cancelled || failed) && (
           <Button variant="primary" onClick={onRetry}>
             {cancelled ? t('assistant.install.resume', 'Resume') : t('assistant.install.retry', 'Retry')}

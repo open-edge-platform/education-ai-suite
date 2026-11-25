@@ -12,6 +12,7 @@ import type { ConfigProblem } from '../../types/config';
 import { SETUP_ERROR, type AutomaticRunResult, type SetupStep } from '../../types/setup';
 import { fieldLabel } from '../../i18n/settingsText';
 import { NO_CHANGES, useConfig, useConfigProblems } from '../../services/configManager';
+import { runningDownload } from '../../services/downloadProgress';
 import { toMessage } from '../../services/ipcResult';
 import { fixable, listedSteps, ownRepair, rowState, runError, willRun, type RowState } from '../../services/problemList';
 import { useServices } from '../../services/serviceManager';
@@ -21,7 +22,7 @@ import { blockedBy, iconOf, isActing, isRunning } from '../../services/setupStat
 import { formatElapsed, useNow, useStartTimes } from '../../hooks/useNow';
 import SetupStepList from '../setup/SetupStepList';
 import { useFailureText } from '../setup/failureText';
-import { Banner, Button, LogViewer, PageHeader, Row, RowList, type StatusState } from '../ui';
+import { Banner, Button, DownloadBar, LogViewer, PageHeader, Row, RowList, type StatusState } from '../ui';
 
 const MARK: Partial<Record<RowState, StatusState>> = { waiting: 'pending', fixing: 'running', fixed: 'ok' };
 
@@ -58,6 +59,16 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onOpenScreen }) => {
   const working = !!busyId || !!queue || steps.some(isActing) || services.some((service) => service.startBlockedBy === 'setup');
   // A whole run, as opposed to one row's action.
   const autoRun = working && !busyId;
+
+  // Cancel is disabled once clicked, until the work ends: an administrator
+  // task under way cannot be stopped and runs to its end first, which can
+  // take minutes (cancel() in setup-runner.cjs).
+  const [cancelling, setCancelling] = useState(false);
+  if (cancelling && !working) setCancelling(false);
+  const requestCancel = () => {
+    setCancelling(true);
+    cancel().catch(() => setCancelling(false));
+  };
   // A check this screen did not start, such as the one at launch.
   const checkingNow = checking || (!working && steps.some(isRunning));
   const checked = steps.some((step) => step.status !== 'unknown');
@@ -120,6 +131,8 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onOpenScreen }) => {
     const ranInto = state === 'problem' ? runError(step, failed) : null;
     const cause = ranInto ? classifyFailure([ranInto, ...tail]) : null;
     const repair = state === 'problem' ? ownRepair(step) : undefined;
+    // A model download shows how far it is; anything else its last line.
+    const download = runningDownload(step.progress);
     const meta =
       state === 'fixing'
         ? startedAt[step.id] && formatElapsed(now - startedAt[step.id])
@@ -149,7 +162,8 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onOpenScreen }) => {
             {step.detail && step.detail !== ranInto && <span>{step.detail}</span>}
             {cause && <span className="ui-row-cause">{failureText(cause)}</span>}
             {ranInto && <span className="ui-mono">{ranInto}</span>}
-            {state === 'fixing' && lastLine && <span className="ui-row-line">{lastLine}</span>}
+            {state === 'fixing' &&
+              (download ? <DownloadBar progress={download} named /> : lastLine && <span className="ui-row-line">{lastLine}</span>)}
             {(state === 'problem' || state === 'waiting') && blocked[step.id] && (
               <span className="ui-row-blocked">
                 {t('setup.blockedBy', 'Needs {{items}} first.', { items: blocked[step.id].join(', ') })}
@@ -208,7 +222,9 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onOpenScreen }) => {
               {checkingNow ? t('setup.checking', 'Checking…') : t('setup.recheck', 'Re-check')}
             </Button>
             {working ? (
-              <Button onClick={() => cancel().catch(() => undefined)}>{t('setup.cancel', 'Cancel')}</Button>
+              <Button disabled={cancelling} onClick={requestCancel}>
+                {cancelling ? t('setup.cancelling', 'Cancelling…') : t('setup.cancel', 'Cancel')}
+              </Button>
             ) : (
               fixes.length > 0 && (
                 <Button variant="primary" disabled={checkingNow} onClick={() => void fix()}>
@@ -273,7 +289,10 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onOpenScreen }) => {
 
       {!working && rows.some((step) => step.repairKind === 'elevated' && rowState(step, false) === 'problem') && (
         <p className="ui-note">
-          {t('setup.adminNote', 'Windows asks an administrator to approve each item marked “needs administrator”.')}
+          {t(
+            'setup.adminNote',
+            'Windows asks an administrator to approve the items marked “needs administrator”, once for all of them. The prompt names Windows PowerShell.'
+          )}
         </p>
       )}
 

@@ -113,6 +113,28 @@ describe('failures', () => {
     expect(classifyFailure(['Stop the backend first: it has files this step replaces in use.'])).toBe('backendRunning');
     expect(classifyFailure(['PermissionError: [WinError 32] The process cannot access the file'])).toBe('filesInUse');
     expect(classifyFailure(['python.exe exited with code 1.'])).toBe('other');
+    expect(classifyFailure(['Administrator approval was declined.'])).toBe('declined');
+    // As huggingface_hub and the model hubs word them.
+    expect(classifyFailure(['Got: ConnectError: [WinError 10061] No connection could be made because the target machine actively refused it'])).toBe('network');
+    expect(classifyFailure(['Tunnel connection failed: 407 Proxy Authentication Required'])).toBe('network');
+    expect(classifyFailure(['[E3002] [403] 操作过于频繁，请稍后再试!'])).toBe('rateLimit');
+    expect(classifyFailure(['429 Client Error: Too Many Requests for url: https://huggingface.co/api/models/org/model'])).toBe('rateLimit');
+  });
+
+  it('can keep to the causes a screen can explain', () => {
+    const lines = ["PermissionError: [WinError 5] Access is denied: 'C:\\models'", 'ConnectError: [Errno 11001] getaddrinfo failed'];
+    expect(classifyFailure(lines)).toBe('filesInUse');
+    expect(classifyFailure(lines, ['network', 'disk'])).toBe('network');
+    expect(classifyFailure(['PermissionError: [WinError 5] Access is denied'], ['network'])).toBe('other');
+  });
+
+  it("reads the step's own error before the output around it", () => {
+    // The output still has an earlier step's failure: a declined prompt.
+    const output = ['=== DL Streamer failed: Administrator approval was declined. ===', 'Installing requirements.txt'];
+    expect(classifyFailure(['Download failed', ...output])).toBe('network');
+    expect(classifyFailure(['python.exe exited with code 1.', ...output, 'ProxyError: Unable to connect'])).toBe('network');
+    // And that earlier step keeps its own cause, whatever the output says since.
+    expect(classifyFailure(['Administrator approval was declined.', 'ProxyError: Unable to connect'])).toBe('declined');
   });
 
   it('sends network failures to the proxy settings', () => {
