@@ -24,8 +24,7 @@ them, tails their logs, edits the configuration files and runs first-time setup.
 On the first launch the app opens the **setup assistant**, which checks the PC
 and the network, then installs with recommended settings after a short
 countdown unless the user chooses **Customize**. When the network test fails or
-the disk is nearly full, it waits for the user instead (design:
-[first-run-wizard-design.md](../../docs/dev-guide/first-run-wizard/first-run-wizard-design.md)).
+the disk is nearly full, it waits for the user instead.
 On later launches it prepares and starts the backend by itself: when the Python
 environment is fine, the backend starts after that one check; when it is
 broken, the app runs each repair that needs no Administrator rights and no
@@ -136,8 +135,7 @@ Model downloads show real progress. The backend and the setup scripts run with
 process manager and the setup runner take those lines out of the log and keep
 the latest on the service or the setup step
 ([`electron/services/download-progress.cjs`](electron/services/download-progress.cjs)),
-and the screens draw it with `DownloadBar`. Details: Section 8.4 of the
-[first-run design](../../docs/dev-guide/first-run-wizard/first-run-wizard-design.md).
+and the screens draw it with `DownloadBar`.
 
 ## Browser UI (deprecated)
 

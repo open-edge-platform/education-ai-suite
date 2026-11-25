@@ -193,8 +193,7 @@ const App: React.FC = () => {
 
 
   // The setup assistant takes the whole window while the main process runs
-  // the first-run flow, ahead of everything else here
-  // (docs/dev-guide/first-run-wizard).
+  // the first-run flow, ahead of everything else here.
   if (wizardSnapshot) {
     return (
       <SetupAssistant

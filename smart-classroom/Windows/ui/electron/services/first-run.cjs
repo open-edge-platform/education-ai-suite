@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// The first-run wizard's flow, owned by the main process (first-run wizard
-// design, docs/dev-guide/first-run-wizard).
+// The first-run wizard's flow, owned by the main process.
 //
 // The window only shows this flow and sends the user's choices. The countdown
 // runs here, so it ends — and installation starts — whether or not the window

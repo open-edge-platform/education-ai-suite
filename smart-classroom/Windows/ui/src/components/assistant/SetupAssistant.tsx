@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// The setup assistant: the first run (docs/dev-guide/first-run-wizard). The
-// main process owns the flow and decides what happens when; this shows it,
+// The setup assistant: the first run.
+// The main process owns the flow and decides what happens when; this shows it,
 // lets the user customize, and sends their choices. It takes the whole window,
 // so it brings its own title bar. Afterwards, what is not working is on the
 // Setup screen, and the settings are under Configuration.

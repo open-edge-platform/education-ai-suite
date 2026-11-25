@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The Setup screen's list of what is not working: only the problems, one row
-// each, and what clears each one (docs/dev-guide/first-run-wizard, Section 14).
-// Pure, so tests/renderer covers it.
+// each, and what clears each one. Pure, so tests/renderer covers it.
 
 import type { AutomaticRunResult, SetupAction, SetupStep } from '../types/setup';
 import { isActing, isDone, needsWork } from './setupStatus';

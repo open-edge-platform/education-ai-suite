@@ -296,9 +296,9 @@ const preferencesFile = () => path.join(servicePaths.stateDir(), 'preferences.js
 
 const configuredHub = () => (config.readConfig()?.models?.model_hub === 'modelscope' ? 'modelscope' : 'huggingface');
 
-// The first-run wizard's flow (docs/dev-guide/first-run-wizard). It runs only
-// when launchPlan() says `wizard`; the window shows it and sends choices, and
-// its countdown runs here, so a window that never loads cannot stall it.
+// The first-run wizard's flow. It runs only when launchPlan() says `wizard`;
+// the window shows it and sends choices, and its countdown runs here, so a
+// window that never loads cannot stall it.
 const firstRun = new FirstRunController({
   recordFile: () => path.join(servicePaths.stateDir(), 'first-run.json'),
   setupRunner,

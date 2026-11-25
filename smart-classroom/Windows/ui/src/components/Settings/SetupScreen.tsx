@@ -3,9 +3,7 @@
 
 // What is not working on this PC, and one button that fixes it; when nothing
 // is, that said in the middle of the screen. Below it, closed until asked for,
-// every check with its own actions, and the setup output
-// (docs/dev-guide/first-run-wizard, Section 14). One column of readable width,
-// however wide the window.
+// every check with its own actions, and the setup output.
 
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
