@@ -6,29 +6,33 @@
 
 /* --- feature picker --- */
 
+/* One section per group, divided by a rule: a heading row whose checkbox
+   turns the whole group on or off, then its settings, always shown. */
 .feature-picker {
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
 .feature-group {
-  border: 1px solid var(--sc-border);
-  border-radius: 4px;
-  background: #fff;
+  padding: 16px 0;
+  border-top: 1px solid var(--sc-border);
 }
 
-.feature-group.on,
-.feature-group.mixed {
-  border-color: var(--color-theme);
+.feature-group:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.feature-group:last-child {
+  padding-bottom: 0;
 }
 
 .feature-group-head {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: start;
   gap: 12px;
-  padding: 12px 14px;
+  margin-bottom: 10px;
 }
 
 .feature-group-head input {
@@ -46,7 +50,7 @@
 }
 
 .feature-group-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-gray-900);
 }
@@ -62,15 +66,12 @@
   color: var(--color-theme);
 }
 
-.feature-group-head .ui-btn-link {
-  font-size: 12px;
-}
-
+/* Under the title, clear of the checkbox. */
 .feature-group-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 14px 14px 42px;
+  padding-left: 28px;
 }
 
 /* --- proxy settings --- */

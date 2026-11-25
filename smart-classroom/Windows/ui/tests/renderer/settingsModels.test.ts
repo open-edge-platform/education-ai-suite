@@ -4,7 +4,7 @@
 // The shared settings sections' pure parts: feature groups and proxy values.
 
 import { describe, expect, it } from 'vitest';
-import { featurePath, groupFields, groupOfField, groupState } from '../../src/components/setup/featureModel';
+import { featurePath, groupFields, groupState } from '../../src/components/setup/featureModel';
 import { proxyDraft, proxyPrefill, proxyValues, savedProxy } from '../../src/components/setup/proxyModel';
 import type { ConfigField, FeatureGroup } from '../../src/types/config';
 import type { FirstRunNetwork } from '../../src/types/firstRun';
@@ -12,10 +12,7 @@ import type { FirstRunNetwork } from '../../src/types/firstRun';
 const field = (file: string, path: string, value: ConfigField['value'], patch: Partial<ConfigField> = {}): ConfigField =>
   ({ file, path, value, group: 'x', subgroup: null, label: path, type: 'boolean', options: null, suggestions: null, appliesWhen: null, missing: false, onboarding: null, help: null, min: null, max: null, ...patch }) as ConfigField;
 
-const key = (entry: ConfigField) => `${entry.file}:${entry.path}`;
-
 const recording: FeatureGroup = { id: 'recording', label: 'Classroom recording', detail: '', features: ['asr', 'summary'] };
-const search: FeatureGroup = { id: 'search', label: 'Content search', detail: '', features: ['content_search'] };
 
 describe('feature groups', () => {
   const fields = [
@@ -35,12 +32,6 @@ describe('feature groups', () => {
     expect(groupState(members, () => true)).toBe('on');
     expect(groupState(members, () => false)).toBe('off');
     expect(groupState([], () => true)).toBe('off');
-  });
-
-  it('finds the group a field belongs to, by toggle or by setting', () => {
-    expect(groupOfField([recording, search], fields, key, 'config:features.content_search.enabled')?.id).toBe('search');
-    expect(groupOfField([recording, search], fields, key, 'config:models.asr.provider')?.id).toBe('recording');
-    expect(groupOfField([recording, search], fields, key, 'config:nothing')).toBeUndefined();
   });
 });
 

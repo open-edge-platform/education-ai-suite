@@ -110,7 +110,6 @@
         "detail": "Grade exam papers against a rubric. Adds a conversion environment and a layout detection model.",
         "title": "Grading"
       },
-      "hide": "Hide details",
       "recording": {
         "detail": "Transcription, summary, mind map and topic segmentation of a lesson, and the class report.",
         "title": "Classroom recording"
@@ -119,9 +118,8 @@
         "detail": "Search, and ask questions about, uploaded documents and videos.",
         "title": "Content search"
       },
-      "show": "Details",
       "video": {
-        "detail": "Analysis of the classroom video and the board. Needs DL Streamer, whose installer asks for administrator approval.",
+        "detail": "Analysis of the classroom video and the board. Needs DL Streamer.",
         "title": "Video analytics"
       }
     },
@@ -189,13 +187,14 @@
         "checking": "Checking this PC…",
         "fixing": "Fixing what is missing. This can take a while.",
         "problems": "{{count}} thing needs fixing.",
-        "problems_other": "{{count}} things need fixing.",
-        "clear": "Nothing needs fixing."
+        "problems_other": "{{count}} things need fixing."
       },
       "clear": {
-        "working": "Everything is working.",
-        "stopped": "Everything is installed. Start the backend to use Smart Classroom.",
-        "installed": "Everything is installed."
+        "installed": "Everything is installed",
+        "installedText": "The backend is not running yet. Services shows how it is doing.",
+        "stoppedText": "Start the backend to use Smart Classroom.",
+        "working": "Everything is working",
+        "workingText": "This PC has everything Smart Classroom needs, and the backend is running."
       },
       "row": {
         "waiting": "Waiting",
@@ -445,7 +444,9 @@
     },
   
   "accordion": {
+      "hidePanel": "Hide panel",
       "noData": "No data available",
+      "showPanel": "Show panel",
       "noSessionActive": "No active session. Upload file or Start Recording to begin monitoring.",
       "lastUpdated": "Last updated",
       "resourceUtilization": "Resource Utilization",

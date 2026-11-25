@@ -21,12 +21,3 @@ export function groupState(members: ConfigField[], isOn: (field: ConfigField) =>
   if (members.length && on === members.length) return 'on';
   return on === 0 ? 'off' : 'mixed';
 }
-
-/** The group a field belongs to: one of its feature toggles, or one of its settings. */
-export function groupOfField(groups: FeatureGroup[], fields: ConfigField[], key: (field: ConfigField) => string, target: string) {
-  return groups.find(
-    (group) =>
-      groupFields(group, fields).some((field) => key(field) === target) ||
-      fields.some((field) => field.onboarding === group.id && key(field) === target)
-  );
-}

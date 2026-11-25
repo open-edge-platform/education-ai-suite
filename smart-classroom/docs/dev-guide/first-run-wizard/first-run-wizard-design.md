@@ -62,7 +62,7 @@ Releases are validated with the [onboarding-validation](../../../../.github/skil
 | D6 | The recommended path never waits indefinitely for input when the checks pass. It starts after a countdown, and administrator prompts never hold up the queue. A failed network test or low disk space stops the flow instead (Sections 6.3 and 7.1): an installation without its downloads can only fail, and one that fills the disk is the hardest failure to recover from. | Keeps the zero-click first launch that the interim fix introduced, for validation (rule 3.1) and for the CI runner. Added from Section 3. |
 | D7 | The UI language defaults to the Windows display language. | Removes a question (rule 3.1). Added from Section 3. |
 | D8 | After the first run, the wizard stays as the **Setup assistant** in review mode and replaces the Get started screen (Section 13). Superseded by D11. | The first run and every later visit answer the same question with the same pages. |
-| D9 | Features are chosen by group everywhere, each group expandable into its features and settings. | One way to choose features, in the assistant and on the Configuration screen. |
+| D9 | Features are chosen by group everywhere, each group a section with its features and settings always shown. | One way to choose features, in the assistant and on the Configuration screen. |
 | D10 | The assistant and the Setup, Configuration and Services screens share one set of UI parts (Section 13). | One look, fixed in one place. |
 | D11 | After the first run, the **Setup** screen is the one place for what is not working: only the problems, one **Fix**, and every check below them. The review mode is removed, and the wizard, now first-run only, loses **This PC** (Section 14). | Developers found three pages about something not being installed, and the review mode hard to navigate. A list of problems with one button is simpler than the old Get started screen. |
 
@@ -194,6 +194,7 @@ Features are grouped by what the user does, with their ids from [feature-catalog
 | Content search | `content_search`, `qa` | Content search models and services |
 | Grading | `grading` | The grading conversion environment and the layout detection model |
 
+- Each group is a section, divided from the next by a rule. Its heading has a checkbox that turns the whole group on or off (mixed when only some of its features are on), and its features and settings are always shown below it.
 - The defaults are the shipped `config.yaml`: everything on except grading.
 - The page applies the dependency rules that `config:validate` already enforces, so it cannot save a combination the backend would undo at startup. For example, `report` depends on `video_analytics`, so turning off video analytics while keeping the report is offered as a fix rather than saved silently.
 - Settings shown come from the fields marked `wizard: true` in [config-schema.cjs](../../../Windows/ui/electron/services/config-schema.cjs), rendered with the existing `ConfigFieldControl`. Device fields are excluded (rule 3.6), and the proxy fields are on **Network**. In practice that leaves the speech recognition provider and model, and diarization with its Hugging Face token, which appears only when diarization is on (rule 3.7). When the UI is in Chinese, `funasr` with `paraformer-zh` is suggested but not forced.
@@ -359,7 +360,7 @@ This section first also kept the wizard after the first run, as a **Setup assist
 | Page header, buttons, banners, status rows, log viewer, colours | [src/components/ui](../../../Windows/ui/src/components/ui), `ui.css` | Every screen and page |
 | Setup steps as rows, grouped by section or not | `SetupStepList` | Setup's checks; Install, Administrator tasks |
 | Settings fields, rule problems and their fixes, pending edits | `SettingsFields`, `ProblemBanners`, `useSettingsDraft` | Configuration; Network, Features |
-| Feature groups, each expandable into features and settings (D9) | `FeaturePicker` | Configuration's Features group; Features |
+| Feature groups, each a section with its features and settings (D9) | `FeaturePicker` | Configuration's Features group; Features |
 | Proxy fields with **Test connection** | `ProxySettings` | Configuration's Proxy group; Network |
 | What is not working, and what **Fix** covers | [problemList.ts](../../../Windows/ui/src/services/problemList.ts) | Setup |
 | What a step's status means | [setupStatus.ts](../../../Windows/ui/src/services/setupStatus.ts) | All of the above, and the landing logic |
@@ -387,7 +388,8 @@ The review mode of Section 13 repeated the **Setup** screen. Its Overview, This 
 - **One Fix.** It is the first launch's automatic run with the administrator tasks included, through `setup:runAutomatic`: every repair that needs nobody, and every one Windows asks an administrator to approve, which the rows mark "needs administrator". While it runs, the rows show what waits, what runs, with its elapsed time and last output line, and what is fixed, and **Fix** becomes **Cancel**. The repair the app starts by itself at launch shows the same way.
 - **A row's own button** only where **Fix** cannot help: **Recreate** for an environment that can only be rebuilt, which asks before it deletes anything, and **Show setting** for a rule problem, which opens **Configuration** at the field.
 - **Failures say why.** A row whose repair failed names the likely cause with the classification the **Install** page uses, and offers **Proxy settings** for network and certificate causes, or **Open Services** when the backend holds files the repair replaces.
-- **When nothing needs fixing,** one line says so, with **Start backend** when the backend is stopped.
+- **When nothing needs fixing,** the screen says so in its middle, with a large check mark: "Everything is working" when the backend runs, otherwise "Everything is installed" with **Start backend** when it is stopped, or **Open Services** while it starts. **Show output** and **All checks** sit under it; opening either moves it to the top.
+- **One column,** at most 960 pixels wide and centred, as **Configuration** is, so rows and their text do not stretch across a wide window.
 - **Below,** closed until asked for: the setup output, then every check with its own actions and **Copy diagnostics**, as the expert view.
 
 Around it:

@@ -75,7 +75,7 @@ const FEATURE_GROUPS = [
   {
     id: 'video',
     label: 'Video analytics',
-    detail: 'Analysis of the classroom video and the board. Needs DL Streamer, whose installer asks for administrator approval.',
+    detail: 'Analysis of the classroom video and the board. Needs DL Streamer.',
     features: ['video_analytics', 'board_ocr'],
     needsAdmin: true,
   },

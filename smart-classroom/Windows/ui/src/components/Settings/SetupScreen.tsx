@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// What is not working on this PC, and one button that fixes it. Below it,
-// closed until asked for, every check with its own actions, and the setup
-// output (docs/dev-guide/first-run-wizard, Section 14).
+// What is not working on this PC, and one button that fixes it; when nothing
+// is, that said in the middle of the screen. Below it, closed until asked for,
+// every check with its own actions, and the setup output
+// (docs/dev-guide/first-run-wizard, Section 14). One column of readable width,
+// however wide the window.
 
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -118,13 +120,14 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onOpenScreen }) => {
     return [`Smart Classroom setup — ${new Date().toISOString()}`, `${navigator.userAgent}`, '', ...report].join('\n');
   };
 
+  // Nothing to fix says so itself, in the middle of the screen.
   const subtitle = !checked || (checkingNow && !rows.length)
     ? t('setup.summary.checking', 'Checking this PC…')
     : autoRun
       ? t('setup.summary.fixing', 'Fixing what is missing. This can take a while.')
       : outstanding
         ? t('setup.summary.problems', '{{count}} thing needs fixing.', { count: outstanding })
-        : t('setup.summary.clear', 'Nothing needs fixing.');
+        : undefined;
 
   const stepRow = (step: SetupStep) => {
     const state = rowState(step, autoRun && willRun(step, queue));
@@ -210,140 +213,156 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onOpenScreen }) => {
   };
 
   const backendStartable = !!backend?.runnable && (backend.status === 'stopped' || backend.status === 'failed');
+  const healthy = backend?.status === 'healthy';
+
+  const more = (
+    <div className="setup-more">
+      <Button variant="link" aria-expanded={showOutput} onClick={() => setShowOutput((open) => !open)}>
+        {showOutput ? t('setup.hideOutput', 'Hide output') : t('setup.showOutput', 'Show output')}
+      </Button>
+      <Button variant="link" aria-expanded={showChecks} onClick={() => setShowChecks((open) => !open)}>
+        {showChecks ? t('setup.hideChecks', 'Hide all checks') : t('setup.showChecks', 'All checks ({{count}})', { count: steps.length })}
+      </Button>
+    </div>
+  );
 
   return (
     <div className="setup-screen">
-      <PageHeader
-        title={t('setup.title', 'Setup')}
-        subtitle={subtitle}
-        actions={
-          <>
-            <Button disabled={working || checkingNow} onClick={check}>
-              {checkingNow ? t('setup.checking', 'Checking…') : t('setup.recheck', 'Re-check')}
-            </Button>
-            {working ? (
-              <Button disabled={cancelling} onClick={requestCancel}>
-                {cancelling ? t('setup.cancelling', 'Cancelling…') : t('setup.cancel', 'Cancel')}
+      {/* Centred in the screen while nothing below it is open. */}
+      <div className={`setup-body${clear && !showOutput && !showChecks ? ' centered' : ''}`}>
+        <PageHeader
+          title={t('setup.title', 'Setup')}
+          subtitle={subtitle}
+          actions={
+            <>
+              <Button disabled={working || checkingNow} onClick={check}>
+                {checkingNow ? t('setup.checking', 'Checking…') : t('setup.recheck', 'Re-check')}
               </Button>
-            ) : (
-              fixes.length > 0 && (
-                <Button variant="primary" disabled={checkingNow} onClick={() => void fix()}>
-                  {t('setup.runAll', 'Fix {{count}} item', { count: fixes.length })}
+              {working ? (
+                <Button disabled={cancelling} onClick={requestCancel}>
+                  {cancelling ? t('setup.cancelling', 'Cancelling…') : t('setup.cancel', 'Cancel')}
                 </Button>
-              )
-            )}
-          </>
-        }
-      />
-
-      {(error || fixError) && (
-        <Banner
-          tone="error"
-          actions={
-            errorCode === SETUP_ERROR.BACKEND_RUNNING && (
-              <Button onClick={() => onOpenScreen?.('services')}>{t('setup.openServices', 'Open Services')}</Button>
-            )
+              ) : (
+                fixes.length > 0 && (
+                  <Button variant="primary" disabled={checkingNow} onClick={() => void fix()}>
+                    {t('setup.runAll', 'Fix {{count}} item', { count: fixes.length })}
+                  </Button>
+                )
+              )}
+            </>
           }
-        >
-          {error || fixError}
-        </Banner>
-      )}
+        />
 
-      {clear ? (
-        <Banner
-          tone="success"
-          actions={
-            backendStartable ? (
-              <Button
-                variant="primary"
-                onClick={() => {
-                  // Startup is slow; Services is where its output is.
-                  void start('backend');
-                  onOpenScreen?.('services');
-                }}
-              >
-                {t('setup.startBackend', 'Start backend')}
-              </Button>
-            ) : (
-              backend &&
-              backend.status !== 'healthy' && (
+        {(error || fixError) && (
+          <Banner
+            tone="error"
+            actions={
+              errorCode === SETUP_ERROR.BACKEND_RUNNING && (
                 <Button onClick={() => onOpenScreen?.('services')}>{t('setup.openServices', 'Open Services')}</Button>
               )
-            )
-          }
-        >
-          {backend?.status === 'healthy'
-            ? t('setup.clear.working', 'Everything is working.')
-            : backendStartable
-              ? t('setup.clear.stopped', 'Everything is installed. Start the backend to use Smart Classroom.')
-              : t('setup.clear.installed', 'Everything is installed.')}
-        </Banner>
-      ) : (
-        (rows.length > 0 || settingProblems.length > 0) && (
-          <RowList label={t('setup.problems', 'What needs fixing')}>
-            {rows.map(stepRow)}
-            {settingProblems.map(settingRow)}
-          </RowList>
-        )
-      )}
+            }
+          >
+            {error || fixError}
+          </Banner>
+        )}
 
-      {!working && rows.some((step) => step.repairKind === 'elevated' && rowState(step, false) === 'problem') && (
-        <p className="ui-note">
-          {t(
-            'setup.adminNote',
-            'Windows asks an administrator to approve the items marked “needs administrator”, once for all of them. The prompt names Windows PowerShell.'
-          )}
-        </p>
-      )}
-
-      <div className="setup-more">
-        <Button variant="link" aria-expanded={showOutput} onClick={() => setShowOutput((open) => !open)}>
-          {showOutput ? t('setup.hideOutput', 'Hide output') : t('setup.showOutput', 'Show output')}
-        </Button>
-        <Button variant="link" aria-expanded={showChecks} onClick={() => setShowChecks((open) => !open)}>
-          {showChecks ? t('setup.hideChecks', 'Hide all checks') : t('setup.showChecks', 'All checks ({{count}})', { count: steps.length })}
-        </Button>
-      </div>
-
-      {/* The output first: it is short, and it is what matters while a fix runs. */}
-      {showOutput && (
-        <div className="setup-output">
-          <LogViewer
-            lines={lines}
-            title={t('setup.output', 'Output')}
-            onClear={clearLogs}
-            onReveal={() => revealSetupLogs().catch(() => undefined)}
-          />
-        </div>
-      )}
-
-      {showChecks && (
-        <section className="setup-checks" aria-label={t('setup.allChecks', 'All checks')}>
-          <div className="setup-checks-tools">
-            <Button
-              disabled={!checked}
-              onClick={async () => {
-                await copyText(diagnostics()).catch(() => undefined);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1800);
-              }}
-            >
-              {copied ? t('setup.copied', 'Copied') : t('setup.copyDiagnostics', 'Copy diagnostics')}
-            </Button>
+        {clear ? (
+          <div className="setup-ready" role="status">
+            <span className="setup-ready-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="40" height="40">
+                <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <h4 className="setup-ready-title">
+              {healthy ? t('setup.clear.working', 'Everything is working') : t('setup.clear.installed', 'Everything is installed')}
+            </h4>
+            <p className="setup-ready-text">
+              {healthy
+                ? t('setup.clear.workingText', 'This PC has everything Smart Classroom needs, and the backend is running.')
+                : backendStartable
+                  ? t('setup.clear.stoppedText', 'Start the backend to use Smart Classroom.')
+                  : t('setup.clear.installedText', 'The backend is not running yet. Services shows how it is doing.')}
+            </p>
+            {(backendStartable || (backend && !healthy)) && (
+              <div className="setup-ready-actions">
+                {backendStartable ? (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      // Startup is slow; Services is where its output is.
+                      void start('backend');
+                      onOpenScreen?.('services');
+                    }}
+                  >
+                    {t('setup.startBackend', 'Start backend')}
+                  </Button>
+                ) : (
+                  <Button onClick={() => onOpenScreen?.('services')}>{t('setup.openServices', 'Open Services')}</Button>
+                )}
+              </div>
+            )}
+            {more}
           </div>
-          <SetupStepList
-            steps={steps}
-            groupBy="section"
-            sections={sections}
-            hints="all"
-            actions={{
-              disabled: working || checkingNow,
-              hiddenFor: busyId,
-              onRun: (stepId, actionId) => void run(stepId, actionId),
-            }}
-          />
-        </section>
-      )}
+        ) : (
+          (rows.length > 0 || settingProblems.length > 0) && (
+            <RowList label={t('setup.problems', 'What needs fixing')}>
+              {rows.map(stepRow)}
+              {settingProblems.map(settingRow)}
+            </RowList>
+          )
+        )}
+
+        {!working && rows.some((step) => step.repairKind === 'elevated' && rowState(step, false) === 'problem') && (
+          <p className="ui-note">
+            {t(
+              'setup.adminNote',
+              'Windows asks an administrator to approve the items marked “needs administrator”, once for all of them. The prompt names Windows PowerShell.'
+            )}
+          </p>
+        )}
+
+        {!clear && more}
+
+        {/* The output first: it is short, and it is what matters while a fix runs. */}
+        {showOutput && (
+          <div className="setup-output">
+            <LogViewer
+              lines={lines}
+              title={t('setup.output', 'Output')}
+              onClear={clearLogs}
+              onReveal={() => revealSetupLogs().catch(() => undefined)}
+            />
+          </div>
+        )}
+
+        {showChecks && (
+          <section className="setup-checks" aria-label={t('setup.allChecks', 'All checks')}>
+            <div className="setup-checks-tools">
+              <Button
+                disabled={!checked}
+                onClick={async () => {
+                  await copyText(diagnostics()).catch(() => undefined);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1800);
+                }}
+              >
+                {copied ? t('setup.copied', 'Copied') : t('setup.copyDiagnostics', 'Copy diagnostics')}
+              </Button>
+            </div>
+            <SetupStepList
+              steps={steps}
+              groupBy="section"
+              sections={sections}
+              hints="all"
+              actions={{
+                disabled: working || checkingNow,
+                hiddenFor: busyId,
+                onRun: (stepId, actionId) => void run(stepId, actionId),
+              }}
+            />
+          </section>
+        )}
+      </div>
     </div>
   );
 };

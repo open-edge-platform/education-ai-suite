@@ -109,7 +109,6 @@
       "detail": "按评分标准批改试卷。会额外安装一个评分转换环境和一个版面检测模型。",
       "title": "评分"
     },
-    "hide": "隐藏详细信息",
     "recording": {
       "detail": "课程的转录、摘要、思维导图和主题分段，以及课堂报告。",
       "title": "课堂录制"
@@ -118,9 +117,8 @@
       "detail": "搜索上传的文档和视频，并就其内容提问。",
       "title": "内容搜索"
     },
-    "show": "详细信息",
     "video": {
-      "detail": "分析课堂视频和板书。需要 DL Streamer，其安装程序需要管理员批准。",
+      "detail": "分析课堂视频和板书。需要 DL Streamer。",
       "title": "视频分析"
     }
   },
@@ -250,13 +248,14 @@
     "summary": {
       "checking": "正在检查本机…",
       "fixing": "正在修复缺失的内容，可能需要一段时间。",
-      "problems": "{{count}} 项需要修复。",
-      "clear": "没有需要修复的内容。"
+      "problems": "{{count}} 项需要修复。"
     },
     "clear": {
-      "working": "一切正常。",
-      "stopped": "所有组件均已安装。启动后端即可使用 Smart Classroom。",
-      "installed": "所有组件均已安装。"
+      "installed": "所有组件均已安装",
+      "installedText": "后端尚未运行。可在“服务管理”中查看其状态。",
+      "stoppedText": "启动后端即可使用 Smart Classroom。",
+      "working": "一切正常",
+      "workingText": "本机已具备 Smart Classroom 所需的一切，后端正在运行。"
     },
     "row": {
       "waiting": "等待中",
@@ -1005,7 +1004,9 @@
   },
 
   "accordion": {
+    "hidePanel": "隐藏面板",
     "noData": "暂无数据",
+    "showPanel": "显示面板",
     "noSessionActive": "无活动会话。请上传文件或开始录音以开始监控。",
     "lastUpdated": "最后更新",
     "resourceUtilization": "资源利用率",

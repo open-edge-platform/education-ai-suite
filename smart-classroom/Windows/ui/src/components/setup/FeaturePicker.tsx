@@ -1,17 +1,16 @@
 // SPDX-FileCopyrightText: (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// Features chosen by group, each group expandable into its individual
-// toggles: the same in the setup assistant and on the Configuration screen.
+// Features chosen by group, one section each, with its individual toggles
+// below: the same in the setup assistant and on the Configuration screen.
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 import '../../assets/css/SettingsSections.css';
 import type { ConfigDescription, ConfigField, ConfigProblem, ConfigValue } from '../../types/config';
 import { fieldKey } from '../../services/configManager';
 import type { Draft } from '../../services/settingsDraft';
-import { Button } from '../ui';
-import { groupFields, groupOfField, groupState } from './featureModel';
+import { groupFields, groupState } from './featureModel';
 import SettingsFields from './SettingsFields';
 
 interface FeaturePickerProps {
@@ -36,14 +35,6 @@ const FeaturePicker: React.FC<FeaturePickerProps> = ({
 }) => {
   const { t } = useTranslation();
   const fields = description.fields;
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-
-  // Sent here to one field (a problem's "Show setting"): open its group.
-  useEffect(() => {
-    if (!flashedKey) return;
-    const group = groupOfField(description.featureGroups, fields, fieldKey, flashedKey);
-    if (group) setOpen((previous) => ({ ...previous, [group.id]: true }));
-  }, [flashedKey, description, fields]);
 
   const isOn = (field: ConfigField) => (draft[fieldKey(field)] ?? field.value) !== false;
 
@@ -53,10 +44,9 @@ const FeaturePicker: React.FC<FeaturePickerProps> = ({
         const members = groupFields(group, fields);
         const state = groupState(members, isOn);
         const settings = withSettings ? fields.filter((field) => field.onboarding === group.id) : [];
-        const expanded = !!open[group.id];
         const title = t(`featureGroups.${group.id}.title`, group.label);
         return (
-          <div key={group.id} className={`feature-group ${state}`}>
+          <section key={group.id} className={`feature-group ${state}`} aria-labelledby={`feature-group-title-${group.id}`}>
             <div className="feature-group-head">
               <input
                 id={`feature-group-${group.id}`}
@@ -68,7 +58,9 @@ const FeaturePicker: React.FC<FeaturePickerProps> = ({
                 onChange={(event) => members.forEach((field) => onChange(field, event.target.checked))}
               />
               <label htmlFor={`feature-group-${group.id}`} className="feature-group-text">
-                <span className="feature-group-title">{title}</span>
+                <span id={`feature-group-title-${group.id}`} className="feature-group-title">
+                  {title}
+                </span>
                 <span className="feature-group-detail">{t(`featureGroups.${group.id}.detail`, group.detail)}</span>
                 {state === 'mixed' && (
                   <span className="feature-group-count">
@@ -79,19 +71,20 @@ const FeaturePicker: React.FC<FeaturePickerProps> = ({
                   </span>
                 )}
               </label>
-              <Button
-                variant="link"
-                aria-expanded={expanded}
-                aria-controls={`feature-group-body-${group.id}`}
-                onClick={() => setOpen((previous) => ({ ...previous, [group.id]: !expanded }))}
-              >
-                {expanded ? t('featureGroups.hide', 'Hide details') : t('featureGroups.show', 'Details')}
-              </Button>
             </div>
-            {expanded && (
-              <div id={`feature-group-body-${group.id}`} className="feature-group-body">
+            <div className="feature-group-body">
+              <SettingsFields
+                fields={members}
+                allFields={fields}
+                draft={draft}
+                byField={byField}
+                onChange={onChange}
+                flashedKey={flashedKey}
+                idPrefix={idPrefix}
+              />
+              {settings.length > 0 && (
                 <SettingsFields
-                  fields={members}
+                  fields={settings}
                   allFields={fields}
                   draft={draft}
                   byField={byField}
@@ -99,20 +92,9 @@ const FeaturePicker: React.FC<FeaturePickerProps> = ({
                   flashedKey={flashedKey}
                   idPrefix={idPrefix}
                 />
-                {settings.length > 0 && (
-                  <SettingsFields
-                    fields={settings}
-                    allFields={fields}
-                    draft={draft}
-                    byField={byField}
-                    onChange={onChange}
-                    flashedKey={flashedKey}
-                    idPrefix={idPrefix}
-                  />
-                )}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </section>
         );
       })}
     </div>
