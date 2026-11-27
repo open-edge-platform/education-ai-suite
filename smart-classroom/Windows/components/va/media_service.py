@@ -11,6 +11,7 @@ import zipfile
 import atexit
 import shutil
 from utils.config_loader import config
+from utils.data_dirs import writable_path
 
 
 class MediaService:
@@ -26,7 +27,8 @@ class MediaService:
         """
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self.mediamtx_dir = Path(config.va_pipeline.mediamtx_path).resolve()
+        # Downloaded at first use; under the user data folder in an installed app.
+        self.mediamtx_dir = writable_path(config.va_pipeline.mediamtx_path).resolve()
         self.mediamtx_exe = self.mediamtx_dir / "mediamtx.exe"
         self.process: Optional[subprocess.Popen] = None
         self.log_file = None
@@ -59,7 +61,10 @@ class MediaService:
             response = requests.get(self.MEDIAMTX_DOWNLOAD_URL, stream=True)
             response.raise_for_status()
 
-            zip_path = Path("mediamtx.zip")
+            # Beside the install folder, never the working folder: in an
+            # installed app that is the program folder, which it cannot write.
+            self.mediamtx_dir.parent.mkdir(parents=True, exist_ok=True)
+            zip_path = self.mediamtx_dir.parent / "mediamtx.zip"
             with open(zip_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)

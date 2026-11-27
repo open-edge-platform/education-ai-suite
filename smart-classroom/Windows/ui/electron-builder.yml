@@ -47,3 +47,12 @@ extraResources:
       - '!**/models/**'
       - '!**/venv_convert/**'
       - '!**/.pytest_cache/**'
+      # What running from this checkout writes: sessions, the content search
+      # index of uploaded documents, grading jobs and logs. An installed app
+      # keeps these under %LOCALAPPDATA%\SmartClassroom.
+      - '!storage/**'
+      - '!content_search/data/**'
+      - '!components/grading/outputs/**'
+      # Downloaded at first use into the user data folder (utils/data_dirs.py).
+      - '!components/va/bin/mediamtx/**'
+      - '!**/*.log'

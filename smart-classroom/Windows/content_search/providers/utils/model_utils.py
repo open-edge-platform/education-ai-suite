@@ -37,7 +37,13 @@ _ROBERTA_MODEL_TYPES = {"roberta", "xlm-roberta", "camembert", "xlm-roberta-xl"}
 
 
 def is_model_ready(model_dir: Path, require_detokenizer: bool = False) -> bool:
-    """Return True only if the required converted IR files exist.
+    """Return True only if the required converted IR files exist, with their weights.
+
+    A download writes each small ``.xml`` long before its ``.bin``, so a
+    download that was interrupted leaves the IR names without the weights;
+    OpenVINO then fails to load them ("Empty weights data in bin file").
+    Every IR counted here therefore needs its ``.bin`` beside it, and a model
+    IR's ``.bin`` must not be empty.
 
     Args:
         model_dir (Path): The directory where the converted model is stored.
@@ -46,15 +52,28 @@ def is_model_ready(model_dir: Path, require_detokenizer: bool = False) -> bool:
             need ``openvino_detokenizer.xml``; encoder-only models do not.
     Returns:
         bool: True if the model IR, tokenizer IR (and detokenizer IR when
-        required) are all present.
+        required) are all present, each with its weights.
     """
     if not model_dir.exists():
         return False
-    xml_names = [p.name for p in model_dir.rglob("*.xml")]
-    has_model = any(_MODEL_IR_RE.search(name) for name in xml_names)
-    has_tokenizer = _TOKENIZER_IR_NAME in xml_names
-    has_detokenizer = (not require_detokenizer) or (_DETOKENIZER_IR_NAME in xml_names)
-    return has_model and has_tokenizer and has_detokenizer
+    xmls = list(model_dir.rglob("*.xml"))
+    models = [p for p in xmls if _MODEL_IR_RE.search(p.name)]
+    tokenizers = [p for p in xmls if p.name == _TOKENIZER_IR_NAME]
+    detokenizers = [p for p in xmls if p.name == _DETOKENIZER_IR_NAME] if require_detokenizer else []
+    if not models or not tokenizers or (require_detokenizer and not detokenizers):
+        return False
+    return all(_has_weights(p, required=True) for p in models) and all(
+        _has_weights(p, required=False) for p in tokenizers + detokenizers
+    )
+
+
+def _has_weights(xml_path: Path, required: bool) -> bool:
+    """Whether the IR's ``.bin`` exists; non-empty too when ``required``."""
+    try:
+        size = xml_path.with_suffix(".bin").stat().st_size
+    except OSError:
+        return False
+    return size > 0 or not required
 
 
 def _read_json(path: Path) -> Optional[dict]:

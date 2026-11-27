@@ -5,6 +5,7 @@ import atexit
 import platform,time
 import logging
 from utils.config_loader import config
+from utils.data_dirs import writable_path
 from utils.runtime_config_loader import RuntimeConfig
 from utils.pipeline_modes import resolve_chunking
 from dto.audiosource import AudioSource
@@ -17,7 +18,8 @@ SILENCE_DURATION = config.audio_preprocessing.silence_duration
 SEARCH_WINDOW = config.audio_preprocessing.search_window_sec
 CLEAN_UP_ON_EXIT = config.app.cleanup_on_exit
 
-CHUNKS_DIR = config.audio_preprocessing.chunk_output_path
+# Under the user data folder in an installed app (writable_path).
+CHUNKS_DIR = str(writable_path(config.audio_preprocessing.chunk_output_path))
 os.makedirs(CHUNKS_DIR, exist_ok=True)
 
 FFMPEG_PROCESSES = {}

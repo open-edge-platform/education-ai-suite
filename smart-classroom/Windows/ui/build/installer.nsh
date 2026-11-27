@@ -5,6 +5,12 @@
 
 !define SC_USER_DATA_DIR "$LOCALAPPDATA\SmartClassroom"
 
+; Sharp text on scaled displays: System-aware, as NSIS 3.04 supports;
+; switch to per-monitor when electron-builder is upgraded to v27.
+!macro customHeader
+  ManifestDPIAware true
+!macroend
+
 !macro customPageAfterChangeDir
   Function scShowFixedInstallDir
     FindWindow $0 "#32770" "" $HWNDPARENT

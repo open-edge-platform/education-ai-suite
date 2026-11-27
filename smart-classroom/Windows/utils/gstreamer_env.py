@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from utils.data_dirs import writable_path
+
 logger = logging.getLogger(__name__)
 
 # Timeout for short-lived GStreamer helper processes (gst-inspect,
@@ -79,7 +81,8 @@ def ensure_gst_registry() -> None:
     if os.environ.get("GST_REGISTRY"):
         return
 
-    registry = GST_REGISTRY_RELPATH.resolve()
+    # Under the user data folder in an installed app, as the sessions are.
+    registry = writable_path(GST_REGISTRY_RELPATH).resolve()
     registry.parent.mkdir(parents=True, exist_ok=True)
     os.environ["GST_REGISTRY"] = str(registry)
     logger.info(f"GStreamer plugin registry cache pinned to: {registry}")
