@@ -243,7 +243,11 @@ class ServiceManager extends EventEmitter {
 
     if (!child) return false;
 
-    if (state.status === STATUS.STARTING && Date.now() - state.startedAt < START_GRACE_MS) return false;
+    // Not answering yet, and never has since it started: still starting, for as
+    // long as its process lives. A first start downloads gigabytes of models,
+    // so no deadline fits; a start that dies shows as failed when the process
+    // exits. Degraded is for a service that was healthy and stopped answering.
+    if (state.status === STATUS.STARTING) return false;
 
     const strikes = state.strikes + 1;
     if (strikes < UNHEALTHY_STRIKES) return this.setStatus(service.id, state.status, { strikes });
