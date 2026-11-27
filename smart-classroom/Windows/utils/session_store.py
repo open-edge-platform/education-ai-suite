@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from threading import Lock
 
 from utils.pipeline_catalog import ALL_STAGES, SETTLED_STAGE_STATUSES
-from utils.runtime_config_loader import RuntimeConfig
+from utils.session_paths import SessionPaths
 
 _DB_FILE = "sessions.db"
 
@@ -24,8 +24,8 @@ class SessionStore:
 
     @classmethod
     def _db_path(cls) -> str:
-        proj = RuntimeConfig.get_section("Project")
-        base = os.path.join(proj.get("location"), proj.get("name"))
+        # Beside the sessions, under the user data folder in an installed app.
+        base = str(SessionPaths.base_dir())
         os.makedirs(base, exist_ok=True)
         return os.path.join(base, _DB_FILE)
 

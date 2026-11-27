@@ -18,7 +18,7 @@ from utils.rtsp_recorder import (
     start_rtsp_recording,
     stop_rtsp_recording,
 )
-from utils.runtime_config_loader import RuntimeConfig
+from utils.session_paths import SessionPaths
 from utils.system_checker import check_dlstreamer_installation, dlstreamer_supports_d3d12
 from utils.gstreamer_env import (
     GST_SUBPROCESS_TIMEOUT,
@@ -1280,13 +1280,8 @@ class VideoAnalyticsPipelineService:
             if options.record:
                 recorder_name = f"{pipeline_name}_recorder"
 
-                project_config = RuntimeConfig.get_section("Project")
-                output_video_path = os.path.join(
-                    project_config.get("location"),
-                    project_config.get("name"),
-                    self.x_session_id,
-                    f"{pipeline_name}.mp4"
-                )
+                # With the session, under the user data folder in an installed app.
+                output_video_path = str(SessionPaths.session_dir(self.x_session_id) / f"{pipeline_name}.mp4")
 
                 start_rtsp_recording(
                     name=recorder_name,

@@ -118,20 +118,19 @@ def convert_yolo_to_openvino(model_name: str, output_dir: str):
     if int8_model_pose_path.exists() and (output_path / f"{model_name}.bin").exists():
         return
 
-    pt_file = Path(f"{model_name}.pt")
-    pose_model = YOLO(f"{model_name}.pt")
+    # Downloaded into output_dir, not the working folder: in an installed app
+    # that is the program folder, which the app cannot write. ultralytics
+    # downloads a named asset to the path it is given.
+    pt_file = output_path / f"{model_name}.pt"
+    pose_model = YOLO(str(pt_file))
     label_map = pose_model.model.names
 
     pose_model_dir = output_path / f"{model_name}_openvino_model"
     pose_model_path = pose_model_dir / f"{model_name}.xml"
     if pose_model_dir.exists():
         shutil.rmtree(pose_model_dir)
-    # Export to a temporary location then move to output_dir
-    temp_export_dir = Path(f"{model_name}_openvino_model")
+    # Exported next to the .pt file, so straight into pose_model_dir.
     pose_model.export(format="openvino", dynamic=True, half=True, end2end=True)
-    # Move the exported model to output_dir
-    if temp_export_dir.exists():
-        shutil.move(str(temp_export_dir), str(pose_model_dir))
 
     if pt_file.exists():
         pt_file.unlink()

@@ -772,13 +772,10 @@ def check_recorded_videos(x_session_id: Optional[str] = Header(None, pattern=PAT
         )
     
     try:
-        project_config = RuntimeConfig.get_section("Project")
-        base_path = os.path.join(
-            project_config.get("location"),
-            project_config.get("name"),
-            x_session_id
-        )
-        
+        # Under the user data folder in an installed app; also refuses an
+        # unsafe session id.
+        base_path = str(SessionPaths.session_dir(x_session_id))
+
         if not os.path.exists(base_path):
             logger.warn(f"Session path does not exist: {base_path}")
             return JSONResponse(
@@ -857,13 +854,9 @@ def get_recorded_video(videoType: str, x_session_id: Optional[str] = Header(None
     try:
         backend_video_type = "content" if videoType == "board" else videoType
         
-        project_config = RuntimeConfig.get_section("Project")
-        video_path = os.path.join(
-            project_config.get("location"),
-            project_config.get("name"),
-            actual_session_id,
-            f"{backend_video_type}.mp4"
-        )
+        # Under the user data folder in an installed app; also refuses an
+        # unsafe session id.
+        video_path = str(SessionPaths.session_dir(actual_session_id) / f"{backend_video_type}.mp4")
         
         if not os.path.exists(video_path):
             raise HTTPException(
