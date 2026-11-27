@@ -10,9 +10,11 @@ On either system, setting up Smart Classroom takes the same four stages:
 
 1. Check that your machine meets the [System Requirements](./get-started/system-requirements.md).
 2. Get the application: on Windows, download the installer; on Linux, clone the repository.
-3. Configure features, models, and (optionally) speaker diarization in `config.yaml`.
-4. Install the prerequisites and start the services: on Windows, from the desktop app;
-   on Linux, with `setup.sh`, then open the UI at <http://localhost:5173>.
+3. Configure features, models, and (optionally) speaker diarization: on Windows, in the
+   desktop app's setup assistant; on Linux, in `config.yaml`.
+4. Install the prerequisites and start the services: on Windows, the setup assistant
+   does this on the first launch; on Linux, run `setup.sh`, then open the UI at
+   <http://localhost:5173>.
 
 ## Choose Your Operating System
 
@@ -24,7 +26,9 @@ On either system, setting up Smart Classroom takes the same four stages:
 
 Desktop app installed from `SmartClassroom-<version>-setup.exe`, available on the
 [Releases page](https://github.com/open-edge-platform/education-ai-suite/releases).
-The app installs the prerequisites, edits the configuration, and runs the services.
+On the first launch, its setup assistant installs the prerequisites, with a chance to
+choose the proxy and the features first. The app then edits the configuration and runs
+the services.
 
 - **OS**: Windows 11
 - **Run with**: the **Smart Classroom** desktop app
@@ -62,9 +66,11 @@ For the steps to apply the token, see the guide for your operating system, or th
 
 ### Network Requirements
 
-- **Proxy**: If you are behind a proxy, configure `HTTP_PROXY` and `HTTPS_PROXY`. On
-  Windows, set them on the desktop app's **Configuration** screen. On Linux, configure
-  them, and `NO_PROXY`, for your shell and for Docker.
+- **Proxy**: On Windows, the setup assistant finds the proxy from the environment
+  variables or the Windows proxy settings and tests it; when the test fails, it waits on
+  its **Network** page for you to enter the proxy. Later, change it on the
+  **Configuration** screen. On Linux, configure `HTTP_PROXY`, `HTTPS_PROXY`, and
+  `NO_PROXY` for your shell and for Docker.
 - **Model downloads**: Stable access to `huggingface.co` is required to download
   pre-trained models.
 

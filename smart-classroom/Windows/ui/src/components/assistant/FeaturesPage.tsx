@@ -48,7 +48,7 @@ const FeaturesPage: React.FC<FeaturesPageProps> = ({ onBack, onContinue, continu
         title={t('assistant.pages.features', 'Features')}
         subtitle={t(
           'assistant.features.lead',
-          'Choose what you will use. Setup only downloads what these need. Open a group for its features and settings.'
+          "Choose what you will use. Setup only downloads what these need. A group's checkbox turns all of its features on or off."
         )}
       />
 

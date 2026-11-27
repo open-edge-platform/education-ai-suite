@@ -210,8 +210,9 @@ Get-Command soffice
 
 ## Network Requirements
 
-- **Proxy**: If you are behind a proxy, set `HTTP_PROXY` and `HTTPS_PROXY` on the
-  **Configuration** screen under **Proxy**.
+- **Proxy**: The setup assistant sets the proxy on the first launch. To change it later,
+  set `HTTP_PROXY` and `HTTPS_PROXY` on the **Configuration** screen under **Proxy**, and
+  select **Test connection** to check that the download hosts answer through it.
 - **Model downloads**: Stable access to `huggingface.co` is required to download
   pre-trained models.
 - **Model hub**: `models.model_hub` (**Model hub** on the **Configuration** screen) selects
@@ -223,7 +224,8 @@ Get-Command soffice
 - **Hugging Face mirror**: set `models.hf_endpoint` (**Hugging Face mirror**) to a mirror such as
   `https://hf-mirror.com`. An `HF_ENDPOINT` environment variable takes precedence.
 - **Windows long paths**: Model downloads with deep paths can fail when long paths are
-  disabled. Select **Enable** on the **Windows long paths** row of the **Setup** screen.
+  disabled. The **Setup** screen lists them when they are; select **Fix _n_ items** and
+  approve the administrator prompt.
 
 ## Troubleshooting
 
@@ -232,16 +234,17 @@ Stop the backend before you delete it.
 
 - **Backend fails to start or stops unexpectedly:**
   Open **Services** and read the backend's live logs, or select **Open folder** to see
-  the log files. Then open **Setup** and select **Re-check**: a row marked **Missing**,
-  **Outdated**, or **Failed** names what to fix. **Copy diagnostics** copies the full
-  check list for a bug report.
+  the log files. Then open **Setup** and select **Re-check**: it lists what is missing,
+  outdated, or failed, and **Fix _n_ items** fixes it. **Copy diagnostics**, under
+  **All checks**, copies the full check list for a bug report.
 
 - **Error: `Port for tensor name cache_position was not found.`**
   This means the models were not configured correctly.
   To fix this:
 
   1. Delete the `models` folder.
-  2. Open **Setup** and select **Upgrade** on the **Python environment** row.
+  2. Open **Setup**, select **All checks**, and select **Upgrade** on the **Python
+     environment** row.
   3. Start the backend again. The models are downloaded and converted again.
 
 - **Application crash during bring-up on Intel® Core™ Ultra Series 3 and Intel® Core™ Series 3 processors without any error indication:** Sometimes OpenVINO™ GenAI models may crash on newer hardware. Try running the model on CPU by setting `device: CPU` under `models.text_gen` in `config.yaml`.

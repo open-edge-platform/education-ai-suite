@@ -7,8 +7,9 @@ This documentation provides the end-to-end flow of the application, helps you in
 > previous release:
 >
 > - The ☰ menu at the top left is the main navigation. It opens **Home**, **Content Search**, and
->   **Smart Grading**, plus the **Get started**, **Setup**, **Configuration**, and **Services**
->   tools.
+>   **Smart Grading**, plus the **Setup**, **Configuration**, and **Services** tools.
+> - On the first launch, a setup assistant installs everything the app needs. See
+>   [Get Started on Windows](./get-started/get-started-windows.md#step-3-run-the-setup-assistant).
 > - **Report** and **History** buttons sit at the right of the toolbar on the Home screen.
 > - The right panel has new **Performance Metrics**, **Resource Utilization**, and
 >   **Class Engagement** views.
